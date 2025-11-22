@@ -1,19 +1,14 @@
-import groovy.json.JsonSlurper
 
-include { BBMAP_BBSPLIT                      } from '../../../modules/nf-core/bbmap/bbsplit'
 include { CAT_FASTQ                          } from '../../../modules/nf-core/cat/fastq/main'
-include { SORTMERNA                          } from '../../../modules/nf-core/sortmerna/main'
-include { SORTMERNA as SORTMERNA_INDEX       } from '../../../modules/nf-core/sortmerna/main'
 include { FQ_LINT                            } from '../../../modules/nf-core/fq/lint/main'
 include { FQ_LINT as FQ_LINT_AFTER_TRIMMING  } from '../../../modules/nf-core/fq/lint/main'
-include { FQ_LINT as FQ_LINT_AFTER_BBSPLIT   } from '../../../modules/nf-core/fq/lint/main'
-include { FQ_LINT as FQ_LINT_AFTER_SORTMERNA } from '../../../modules/nf-core/fq/lint/main'
+include { FQ_LINT as FQ_LINT_AFTER_FILTER    } from '../../../modules/nf-core/fq/lint/main'
+include { BOWTIE_ALIGN                       } from '../../../modules/local/bowtie/align'
+include { BOWTIE2_ALIGN                      } from '../../../modules/local/bowtie2/align'
 
 include { FASTQ_SUBSAMPLE_FQ_SALMON          } from '../fastq_subsample_fq_salmon'
 include { FASTQ_FASTQC_UMITOOLS_TRIMGALORE   } from '../fastq_fastqc_umitools_trimgalore'
 include { FASTQ_FASTQC_UMITOOLS_FASTP        } from '../fastq_fastqc_umitools_fastp'
-
-def pass_trimmed_reads = [:]
 
 //
 // Function to determine library type by comparing type counts.
@@ -52,7 +47,7 @@ def calculateStrandedness(forwardFragments, reverseFragments, unstrandedFragment
 //
 def getSalmonInferredStrandedness(json_file, stranded_threshold = 0.8, unstranded_threshold = 0.1) {
     // Parse the JSON content of the file
-    def libCounts = new JsonSlurper().parseText(json_file.text)
+    def libCounts = new groovy.json.JsonSlurper().parseText(json_file.text)
 
     // Calculate the counts for forward and reverse strand fragments
     def forwardKeys = ['SF', 'ISF', 'MSF', 'OSF']
@@ -92,35 +87,32 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
     ch_fasta             // channel: /path/to/genome.fasta
     ch_transcript_fasta  // channel: /path/to/transcript.fasta
     ch_gtf               // channel: /path/to/genome.gtf
-    ch_salmon_index      // channel: /path/to/salmon/index/ (optional)
-    ch_sortmerna_index   // channel: /path/to/sortmerna/index/ (optional)
-    ch_bbsplit_index     // channel: /path/to/bbsplit/index/ (optional)
-    ch_rrna_fastas       // channel: one or more fasta files containing rrna sequences to be passed to SortMeRNA (optional)
-    skip_bbsplit         // boolean: Skip BBSplit for removal of non-reference genome reads.
-    skip_fastqc          // boolean: true/false
-    skip_trimming        // boolean: true/false
-    skip_umi_extract     // boolean: true/false
-    make_salmon_index    // boolean: Whether to create salmon index before running salmon quant
-    make_sortmerna_index // boolean: Whether to create a sortmerna index before running sortmerna
-    trimmer              // string (enum): 'fastp' or 'trimgalore'
-    min_trimmed_reads    // integer: > 0
-    save_trimmed         // boolean: true/false
-    remove_ribo_rna      // boolean: true/false: whether to run sortmerna to remove rrnas
-    with_umi             // boolean: true/false: Enable UMI-based read deduplication.
-    umi_discard_read     // integer: 0, 1 or 2
-    stranded_threshold   // float: The fraction of stranded reads that must be assigned to a strandedness for confident assignment. Must be at least 0.5
-    unstranded_threshold // float: The difference in fraction of stranded reads assigned to 'forward' and 'reverse' below which a sample is classified as 'unstranded'
-    skip_linting         // boolean: true/false
+    ch_salmon_index       // channel: /path/to/salmon/index/ (optional)
+    ch_contaminant_index  // channel: /path/to/bowtie(2)/index/ (optional)
+    skip_contaminant_filter // boolean: Skip contaminant filtering with Bowtie/Bowtie2
+    filter_aligner        // string: 'bowtie' (default) or 'bowtie2'
+    save_contaminant_reads // boolean: Save contaminant-filtered FastQ files to results
+    skip_fastqc           // boolean: true/false
+    skip_trimming         // boolean: true/false
+    skip_umi_extract      // boolean: true/false
+    make_salmon_index     // boolean: Whether to create salmon index before running salmon quant
+    trimmer               // string (enum): 'fastp' or 'trimgalore'
+    min_trimmed_reads     // integer: > 0
+    save_trimmed          // boolean: true/false
+    with_umi              // boolean: true/false: Enable UMI-based read deduplication.
+    umi_discard_read      // integer: 0, 1 or 2
+    stranded_threshold    // float: The fraction of stranded reads that must be assigned to a strandedness for confident assignment. Must be at least 0.5
+    unstranded_threshold  // float: The difference in fraction of stranded reads assigned to 'forward' and 'reverse' below which a sample is classified as 'unstranded'
+    skip_linting          // boolean: true/false
 
     main:
 
-    ch_versions        = Channel.empty()
-    ch_filtered_reads  = Channel.empty()
-    ch_trim_read_count = Channel.empty()
-    ch_multiqc_files   = Channel.empty()
-    ch_lint_log        = Channel.empty()
+    def pass_trimmed_reads = [:]
+    def ch_versions        = Channel.empty()
+    def ch_multiqc_files   = Channel.empty()
+    def ch_lint_log        = Channel.empty()
 
-    ch_reads
+    def ch_fastq = ch_reads
         .branch {
             meta, fastqs ->
                 single  : fastqs.size() == 1
@@ -128,7 +120,6 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
                 multiple: fastqs.size() > 1
                     return [ meta, fastqs.flatten() ]
         }
-        .set { ch_fastq }
 
     //
     // MODULE: Concatenate FastQ files from same sample if required
@@ -152,7 +143,7 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
         )
         ch_versions = ch_versions.mix(FQ_LINT.out.versions.first())
         ch_lint_log = ch_lint_log.mix(FQ_LINT.out.lint)
-        ch_reads = ch_reads.join(FQ_LINT.out.lint.map{it[0]})
+        ch_reads = ch_reads.join(FQ_LINT.out.lint.map{ tuple -> tuple[0] })
     }
 
     //
@@ -228,7 +219,7 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
     ch_multiqc_files = ch_multiqc_files
         .mix(
             ch_fail_trimming_multiqc.collectFile(name: 'fail_trimmed_samples_mqc.tsv')
-                .map { [[:], it] }
+                .map { file -> [[:], file] }
         )
 
     if((!skip_linting) && (!skip_trimming)) {
@@ -236,72 +227,45 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
             ch_filtered_reads
         )
         ch_lint_log = ch_lint_log.mix(FQ_LINT_AFTER_TRIMMING.out.lint)
-        ch_filtered_reads = ch_filtered_reads.join(FQ_LINT_AFTER_TRIMMING.out.lint.map{it[0]})
+        ch_filtered_reads = ch_filtered_reads.join(FQ_LINT_AFTER_TRIMMING.out.lint.map{ tuple -> tuple[0] })
     }
 
     //
-    // MODULE: Remove genome contaminant reads
-    //
-    if (!skip_bbsplit) {
-        BBMAP_BBSPLIT (
-            ch_filtered_reads,
-            ch_bbsplit_index,
-            [],
-            [ [], [] ],
-            false
-        )
-
-        BBMAP_BBSPLIT.out.primary_fastq
-            .set { ch_filtered_reads }
-
-        ch_versions = ch_versions.mix(BBMAP_BBSPLIT.out.versions.first())
-
-        if(!skip_linting) {
-            FQ_LINT_AFTER_BBSPLIT (
-                ch_filtered_reads
-            )
-            ch_lint_log = ch_lint_log.mix(FQ_LINT_AFTER_BBSPLIT.out.lint)
-            ch_filtered_reads = ch_filtered_reads.join(FQ_LINT_AFTER_BBSPLIT.out.lint.map{it[0]})
-        }
-    }
-
-    //
-    // MODULE: Remove ribosomal RNA reads
-    //
-    if (remove_ribo_rna) {
-        ch_sortmerna_fastas = ch_rrna_fastas
-            .collect()
-            .map{ ['rrna_refs', it] }
-
-        if (make_sortmerna_index) {
-            SORTMERNA_INDEX (
-                [[],[]],
-                ch_sortmerna_fastas,
-                [[],[]]
-            )
-            ch_sortmerna_index = SORTMERNA_INDEX.out.index.first()
+    // Contaminant filtering using Bowtie/Bowtie2
+    if (!skip_contaminant_filter) {
+        def contaminantAligner = (filter_aligner ?: 'bowtie').toLowerCase()
+        if (!(contaminantAligner in ['bowtie', 'bowtie2'])) {
+            exit 1, "Unsupported --filter_aligner '${filter_aligner}'. Choose 'bowtie' or 'bowtie2'."
         }
 
-        SORTMERNA (
-            ch_filtered_reads,
-            ch_sortmerna_fastas,
-            ch_sortmerna_index
-        )
+        def ch_clean_reads
+        if (contaminantAligner == 'bowtie2') {
+            BOWTIE2_ALIGN(
+                ch_filtered_reads,
+                ch_contaminant_index
+            )
+            ch_clean_reads   = BOWTIE2_ALIGN.out.clean_reads
+            ch_multiqc_files = ch_multiqc_files.mix(BOWTIE2_ALIGN.out.log)
+            ch_versions      = ch_versions.mix(BOWTIE2_ALIGN.out.versions)
+        } else {
+            BOWTIE_ALIGN(
+                ch_filtered_reads,
+                ch_contaminant_index
+            )
+            ch_clean_reads   = BOWTIE_ALIGN.out.clean_reads
+            ch_multiqc_files = ch_multiqc_files.mix(BOWTIE_ALIGN.out.log)
+            ch_versions      = ch_versions.mix(BOWTIE_ALIGN.out.versions)
+        }
 
-        SORTMERNA.out.reads
+        ch_clean_reads
             .set { ch_filtered_reads }
 
-        ch_multiqc_files = ch_multiqc_files
-            .mix(SORTMERNA.out.log)
-
-        ch_versions = ch_versions.mix(SORTMERNA.out.versions.first())
-
         if(!skip_linting) {
-            FQ_LINT_AFTER_SORTMERNA (
+            FQ_LINT_AFTER_FILTER (
                 ch_filtered_reads
             )
-            ch_lint_log = ch_lint_log.mix(FQ_LINT_AFTER_SORTMERNA.out.lint)
-            ch_filtered_reads = ch_filtered_reads.join(FQ_LINT_AFTER_SORTMERNA.out.lint.map{it[0]})
+            ch_lint_log = ch_lint_log.mix(FQ_LINT_AFTER_FILTER.out.lint)
+            ch_filtered_reads = ch_filtered_reads.join(FQ_LINT_AFTER_FILTER.out.lint.map{ tuple -> tuple[0] })
         }
     }
 
@@ -323,13 +287,13 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
 
     ch_fasta
         .combine(ch_strand_fastq.auto_strand)
-        .map { it.first() }
+        .map { list -> list.first() }
         .first()
         .set { ch_genome_fasta }
 
     FASTQ_SUBSAMPLE_FQ_SALMON (
         ch_strand_fastq.auto_strand,
-        ch_genome_fasta,
+        ch_fasta,
         ch_transcript_fasta,
         ch_gtf,
         ch_salmon_index,
@@ -343,8 +307,8 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
         .join(ch_strand_fastq.auto_strand)
         .map {
             meta, json, reads ->
-                def salmon_strand_analysis = getSalmonInferredStrandedness(json, stranded_threshold=stranded_threshold, unstranded_threshold=unstranded_threshold)
-                strandedness = salmon_strand_analysis.inferred_strandedness
+                def salmon_strand_analysis = getSalmonInferredStrandedness(json, stranded_threshold, unstranded_threshold)
+                def strandedness = salmon_strand_analysis.inferred_strandedness
                 if (strandedness == 'undetermined') {
                     strandedness = 'unstranded'
                 }
@@ -359,6 +323,6 @@ workflow FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS {
     reads           = ch_strand_inferred_fastq
     trim_read_count = ch_trim_read_count
 
-    multiqc_files   = ch_multiqc_files.transpose().map{it[1]}
+    multiqc_files   = ch_multiqc_files.transpose().map{ tuple -> tuple[1] }
     versions        = ch_versions                     // channel: [ versions.yml ]
 }

@@ -66,9 +66,7 @@ workflow RIBOSEQ {
     ch_transcript_fasta // channel: path(transcript.fasta)
     ch_star_index       // channel: path(star/index/)
     ch_salmon_index     // channel: path(salmon/index/)
-    ch_bbsplit_index    // channel: path(bbsplit/index/)
-    ch_rrna_fastas      // channel: path(fasta)
-    ch_sortmerna_index  // channel: path(sortmerna/index/)
+    ch_contaminant_index // channel: path(contaminant/index/)
 
     main:
 
@@ -77,26 +75,6 @@ workflow RIBOSEQ {
         VALIDATE INPUTS
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     */
-
-    // Check rRNA databases for sortmerna
-    if (params.remove_ribo_rna) {
-        ch_ribo_db = file(params.ribo_database_manifest)
-        if (ch_ribo_db.isEmpty()) {exit 1, "File provided with --ribo_database_manifest is empty: ${ch_ribo_db.getName()}!"}
-    } else {
-        ch_ribo_db = Channel.empty()
-    }
-
-    // Check if file with list of fastas is provided when running BBSplit
-    if (!params.skip_bbsplit && !params.bbsplit_index && params.bbsplit_fasta_list) {
-        ch_bbsplit_fasta_list = file(params.bbsplit_fasta_list)
-        if (ch_bbsplit_fasta_list.isEmpty()) {exit 1, "File provided with --bbsplit_fasta_list is empty: ${ch_bbsplit_fasta_list.getName()}!"}
-    }
-
-    // Check alignment parameters
-    def prepareToolIndices  = []
-    if (!params.skip_bbsplit) { prepareToolIndices << 'bbsplit' }
-    if (params.remove_ribo_rna) { prepareToolIndices << 'sortmerna' }
-    if (!params.skip_alignment) { prepareToolIndices << params.aligner }
 
     // Determine whether to filter the GTF or not
     def filterGtf =
@@ -149,19 +127,17 @@ workflow RIBOSEQ {
         ch_transcript_fasta,
         ch_gtf,
         ch_salmon_index,
-        ch_sortmerna_index,
-        ch_bbsplit_index,
-        ch_rrna_fastas,
-        params.skip_bbsplit,
+        ch_contaminant_index,
+        params.skip_contaminant_filter,
+        params.filter_aligner,
+        params.save_contaminant_reads,
         params.skip_fastqc || params.skip_qc,
         params.skip_trimming,
         params.skip_umi_extract,
         !salmon_index_available,
-        !params.sortmerna_index && params.remove_ribo_rna,
         params.trimmer,
         params.min_trimmed_reads,
         params.save_trimmed,
-        params.remove_ribo_rna,
         params.with_umi,
         params.umi_discard_read,
         params.stranded_threshold,
