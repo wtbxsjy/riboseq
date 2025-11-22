@@ -12,6 +12,7 @@ include { BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS as BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS
 include { FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS                                                 } from '../../subworkflows/nf-core/fastq_qc_trim_filter_setstrandedness/main'
 include { BAM_DEDUP_UMI      } from '../../subworkflows/nf-core/bam_dedup_umi'
 include { FASTQ_ALIGN_STAR   } from '../../subworkflows/nf-core/fastq_align_star'
+include { FASTQ_ALIGN_HISAT2 } from '../../subworkflows/local/fastq_align_hisat2'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -32,7 +33,7 @@ include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_ALL             } from '../../mod
 include { RIBOTRICER_PREPAREORFS                               } from '../../modules/nf-core/ribotricer/prepareorfs'
 include { RIBOTRICER_DETECTORFS                                } from '../../modules/nf-core/ribotricer/detectorfs'
 include { ANOTA2SEQ_ANOTA2SEQRUN                               } from '../../modules/nf-core/anota2seq/anota2seqrun'
-include { QUANTIFY_PSEUDO_ALIGNMENT as QUANTIFY_STAR_SALMON    } from '../../subworkflows/nf-core/quantify_pseudo_alignment'
+include { HISAT2_EXTRACTSPLICESITES                            } from '../../modules/nf-core/hisat2/extractsplicesites/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -65,6 +66,7 @@ workflow RIBOSEQ {
     ch_chrom_sizes      // channel: path(genome.sizes)
     ch_transcript_fasta // channel: path(transcript.fasta)
     ch_star_index       // channel: path(star/index/)
+    ch_hisat2_index     // channel: path(hisat2/index/)
     ch_salmon_index     // channel: path(salmon/index/)
     ch_bbsplit_index    // channel: path(bbsplit/index/)
     ch_rrna_fastas      // channel: path(fasta)
@@ -114,6 +116,7 @@ workflow RIBOSEQ {
         )
 
     ch_multiqc_files = Channel.empty()
+    ch_splicesites   = Channel.empty()
 
     //
     // Create input channel from input file provided through params.input
@@ -173,32 +176,60 @@ workflow RIBOSEQ {
     ch_versions      = ch_versions.mix(FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.versions)
 
     //
-    // SUBWORKFLOW: align with STAR, produce both genomic and transcriptomic
-    // alignments and run BAM_SORT_STATS_SAMTOOLS for each
+    // SUBWORKFLOW: align with STAR or HISAT2
     //
 
-    FASTQ_ALIGN_STAR(
-        FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
-        ch_star_index.map { [ [:], it ] },
-        ch_gtf.map { [ [:], it ] },
-        params.star_ignore_sjdbgtf,
-        '',
-        params.seq_center ?: '',
-        ch_fasta.map { [ [:], it ] },
-        ch_transcript_fasta.map { [ [:], it ] }
-    )
+    ch_genome_bam        = Channel.empty()
+    ch_genome_bam_index  = Channel.empty()
+    ch_transcriptome_bam = Channel.empty()
+    ch_transcriptome_bai = Channel.empty()
 
-    ch_genome_bam              = FASTQ_ALIGN_STAR.out.bam
-    ch_genome_bam_index        = FASTQ_ALIGN_STAR.out.bai
-    ch_transcriptome_bam       = FASTQ_ALIGN_STAR.out.orig_bam_transcript
-    ch_transcriptome_bai       = FASTQ_ALIGN_STAR.out.bai_transcript
-    ch_versions                = ch_versions.mix(FASTQ_ALIGN_STAR.out.versions)
+    if (params.aligner == 'star') {
+        FASTQ_ALIGN_STAR(
+            FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
+            ch_star_index.map { [ [:], it ] },
+            ch_gtf.map { [ [:], it ] },
+            params.star_ignore_sjdbgtf,
+            '',
+            params.seq_center ?: '',
+            ch_fasta.map { [ [:], it ] },
+            ch_transcript_fasta.map { [ [:], it ] }
+        )
 
-    ch_multiqc_files = ch_multiqc_files
-        .mix(FASTQ_ALIGN_STAR.out.stats.collect{it[1]})
-        .mix(FASTQ_ALIGN_STAR.out.flagstat.collect{it[1]})
-        .mix(FASTQ_ALIGN_STAR.out.idxstats.collect{it[1]})
-        .mix(FASTQ_ALIGN_STAR.out.log_final.collect{it[1]})
+        ch_genome_bam              = FASTQ_ALIGN_STAR.out.bam
+        ch_genome_bam_index        = FASTQ_ALIGN_STAR.out.bai
+        ch_transcriptome_bam       = FASTQ_ALIGN_STAR.out.orig_bam_transcript
+        ch_transcriptome_bai       = FASTQ_ALIGN_STAR.out.bai_transcript
+        ch_versions                = ch_versions.mix(FASTQ_ALIGN_STAR.out.versions)
+
+        ch_multiqc_files = ch_multiqc_files
+            .mix(FASTQ_ALIGN_STAR.out.stats.collect{it[1]})
+            .mix(FASTQ_ALIGN_STAR.out.flagstat.collect{it[1]})
+            .mix(FASTQ_ALIGN_STAR.out.idxstats.collect{it[1]})
+            .mix(FASTQ_ALIGN_STAR.out.log_final.collect{it[1]})
+    } else if (params.aligner == 'hisat2') {
+
+        // Extract splice sites for HISAT2
+        HISAT2_EXTRACTSPLICESITES ( ch_gtf.map { [ [:], it ] } )
+        ch_splicesites = HISAT2_EXTRACTSPLICESITES.out.txt
+        ch_versions = ch_versions.mix(HISAT2_EXTRACTSPLICESITES.out.versions)
+
+        FASTQ_ALIGN_HISAT2(
+            FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
+            ch_hisat2_index.map { [ [:], it ] },
+            ch_splicesites,
+            ch_fasta.map { [ [:], it ] }
+        )
+
+        ch_genome_bam       = FASTQ_ALIGN_HISAT2.out.bam
+        ch_genome_bam_index = FASTQ_ALIGN_HISAT2.out.bai
+        ch_versions         = ch_versions.mix(FASTQ_ALIGN_HISAT2.out.versions)
+
+        ch_multiqc_files = ch_multiqc_files
+            .mix(FASTQ_ALIGN_HISAT2.out.stats.collect{it[1]})
+            .mix(FASTQ_ALIGN_HISAT2.out.flagstat.collect{it[1]})
+            .mix(FASTQ_ALIGN_HISAT2.out.idxstats.collect{it[1]})
+    }
 
     //
     // SUBWORKFLOW: Remove duplicate reads from BAM file based on UMIs
@@ -291,48 +322,6 @@ workflow RIBOSEQ {
             RIBOTRICER_PREPAREORFS.out.candidate_orfs
         )
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS.out.versions)
-    }
-
-    //
-    // SUBWORKFLOW: Count reads from BAM alignments using Salmon
-    //
-
-    QUANTIFY_STAR_SALMON (
-        ch_samplesheet.map { [ [:], it ] },
-        ch_transcriptome_bam,
-        [],
-        ch_transcript_fasta,
-        ch_gtf,
-        params.gtf_group_features,
-        params.gtf_extra_attributes,
-        'salmon',
-        true,
-        params.salmon_quant_libtype ?: '',
-        null,
-        null
-    )
-    ch_versions = ch_versions.mix(QUANTIFY_STAR_SALMON.out.versions)
-
-    //
-    // Do a translational efficiency analysis where contrasts are supplied
-    //
-
-    if (ch_contrasts_file){
-
-        ch_contrasts = ch_contrasts_file
-            .splitCsv ( header:true, sep:',' )
-            .map{[it, it.variable, it.reference, it.target]}
-
-        ch_samplesheet_matrix = QUANTIFY_STAR_SALMON.out.counts_gene_length_scaled
-            .combine(ch_samplesheet)
-            .map{[it[0], it[2], it[1]]}
-            .first()
-
-        ANOTA2SEQ_ANOTA2SEQRUN(
-            ch_contrasts,
-            ch_samplesheet_matrix
-        )
-        ch_versions = ch_versions.mix(ANOTA2SEQ_ANOTA2SEQRUN.out.versions)
     }
 
     //

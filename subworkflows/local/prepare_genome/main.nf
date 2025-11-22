@@ -13,6 +13,7 @@ include { UNTAR as UNTAR_BBSPLIT_INDEX      } from '../../../modules/nf-core/unt
 include { UNTAR as UNTAR_SORTMERNA_INDEX    } from '../../../modules/nf-core/untar'
 include { UNTAR as UNTAR_STAR_INDEX         } from '../../../modules/nf-core/untar'
 include { UNTAR as UNTAR_SALMON_INDEX       } from '../../../modules/nf-core/untar'
+include { UNTAR as UNTAR_HISAT2_INDEX       } from '../../../modules/nf-core/untar'
 
 include { CUSTOM_CATADDITIONALFASTA         } from '../../../modules/nf-core/custom/catadditionalfasta'
 include { CUSTOM_GETCHROMSIZES              } from '../../../modules/nf-core/custom/getchromsizes'
@@ -21,6 +22,8 @@ include { BBMAP_BBSPLIT                     } from '../../../modules/nf-core/bbm
 include { SORTMERNA as SORTMERNA_INDEX      } from '../../../modules/nf-core/sortmerna'
 include { STAR_GENOMEGENERATE               } from '../../../modules/nf-core/star/genomegenerate'
 include { SALMON_INDEX                      } from '../../../modules/nf-core/salmon/index'
+include { HISAT2_BUILD                      } from '../../../modules/nf-core/hisat2/build'
+include { HISAT2_EXTRACTSPLICESITES         } from '../../../modules/nf-core/hisat2/extractsplicesites'
 include { RSEM_PREPAREREFERENCE as RSEM_PREPAREREFERENCE_GENOME } from '../../../modules/nf-core/rsem/preparereference'
 include { RSEM_PREPAREREFERENCE as MAKE_TRANSCRIPTS_FASTA       } from '../../../modules/nf-core/rsem/preparereference'
 
@@ -40,6 +43,7 @@ workflow PREPARE_GENOME {
     sortmerna_fasta_list     //      file: /path/to/sortmerna_fasta_list.txt
     star_index               // directory: /path/to/star/index/
     salmon_index             // directory: /path/to/salmon/index/
+    hisat2_index             // directory: /path/to/hisat2/index/
     bbsplit_index            // directory: /path/to/rsem/index/
     sortmerna_index          // directory: /path/to/sortmerna/index/
     gencode                  //   boolean: whether the genome is from GENCODE
@@ -193,9 +197,6 @@ workflow PREPARE_GENOME {
     //
     // Uncompress sortmerna index or generate from scratch if required
     //
-    //
-    // Uncompress sortmerna index or generate from scratch if required
-    //
     ch_sortmerna_index = Channel.empty()
     ch_rrna_fastas = Channel.empty()
 
@@ -254,6 +255,29 @@ workflow PREPARE_GENOME {
     }
 
     //
+    // Uncompress HISAT2 index or generate from scratch if required
+    //
+    ch_hisat2_index = Channel.empty()
+    if ('hisat2' in prepare_tool_indices) {
+        if (hisat2_index) {
+            if (hisat2_index.endsWith('.tar.gz')) {
+                ch_hisat2_index = UNTAR_HISAT2_INDEX ( [ [:], hisat2_index ] ).untar.map { it[1] }
+                ch_versions     = ch_versions.mix(UNTAR_HISAT2_INDEX.out.versions)
+            } else {
+                ch_hisat2_index = Channel.value(file(hisat2_index))
+            }
+        } else {
+            HISAT2_EXTRACTSPLICESITES ( ch_gtf.map { [ [:], it ] } )
+            ch_splicesites  = HISAT2_EXTRACTSPLICESITES.out.txt.map { it[1] }
+            ch_versions     = ch_versions.mix(HISAT2_EXTRACTSPLICESITES.out.versions)
+
+            HISAT2_BUILD ( ch_fasta.map { [ [:], it ] }, ch_gtf.map { [ [:], it ] }, ch_splicesites.map { [ [:], it ] } )
+            ch_hisat2_index = HISAT2_BUILD.out.index.map { it[1] }
+            ch_versions     = ch_versions.mix(HISAT2_BUILD.out.versions)
+        }
+    }
+
+    //
     // Uncompress Salmon index or generate from scratch if required
     //
     ch_salmon_index = Channel.empty()
@@ -281,6 +305,7 @@ workflow PREPARE_GENOME {
     rrna_fastas      = ch_rrna_fastas            // channel: path(sortmerna_fasta_list)
     sortmerna_index  = ch_sortmerna_index        // channel: path(sortmerna/index/)
     star_index       = ch_star_index             // channel: path(star/index/)
+    hisat2_index     = ch_hisat2_index           // channel: path(hisat2/index/)
     salmon_index     = ch_salmon_index           // channel: path(salmon/index/)
     versions         = ch_versions.ifEmpty(null) // channel: [ versions.yml ]
 }

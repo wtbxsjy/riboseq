@@ -35,6 +35,7 @@ params.gtf              = getGenomeAttribute('gtf')
 params.gff              = getGenomeAttribute('gff')
 params.bbsplit_index    = getGenomeAttribute('bbsplit')
 params.star_index       = getGenomeAttribute('star')
+params.hisat2_index     = getGenomeAttribute('hisat2')
 params.salmon_index     = getGenomeAttribute('salmon')
 params.sortmerna_index  = getGenomeAttribute('sortmerna')
 
@@ -66,6 +67,7 @@ workflow NFCORE_RIBOSEQ {
         params.ribo_database_manifest,
         params.star_index,
         params.salmon_index,
+        params.hisat2_index,
         params.bbsplit_index,
         params.sortmerna_index,
         params.gencode,
@@ -105,6 +107,7 @@ workflow NFCORE_RIBOSEQ {
         PREPARE_GENOME.out.chrom_sizes,
         PREPARE_GENOME.out.transcript_fasta,
         PREPARE_GENOME.out.star_index,
+        PREPARE_GENOME.out.hisat2_index,
         PREPARE_GENOME.out.salmon_index,
         PREPARE_GENOME.out.bbsplit_index,
         PREPARE_GENOME.out.rrna_fastas,

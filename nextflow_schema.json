@@ -321,9 +321,9 @@
                 "aligner": {
                     "type": "string",
                     "default": "star",
-                    "description": "Specifies the alignment algorithm to use - available options are currently 'star'.",
+                    "description": "Specifies the alignment algorithm to use - available options are currently 'star' and 'hisat2'.",
                     "fa_icon": "fas fa-map-signs",
-                    "enum": ["star"]
+                    "enum": ["star", "hisat2"]
                 },
                 "pseudo_aligner_kmer_size": {
                     "type": "integer",
