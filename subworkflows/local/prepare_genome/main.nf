@@ -2,24 +2,25 @@
 // Uncompress and prepare reference genome files
 //
 
-include { GUNZIP as GUNZIP_FASTA            } from '../../../modules/nf-core/gunzip'
-include { GUNZIP as GUNZIP_GTF              } from '../../../modules/nf-core/gunzip'
-include { GUNZIP as GUNZIP_GFF              } from '../../../modules/nf-core/gunzip'
-include { GUNZIP as GUNZIP_GENE_BED         } from '../../../modules/nf-core/gunzip'
-include { GUNZIP as GUNZIP_TRANSCRIPT_FASTA } from '../../../modules/nf-core/gunzip'
-include { GUNZIP as GUNZIP_ADDITIONAL_FASTA } from '../../../modules/nf-core/gunzip'
+include { GUNZIP as GUNZIP_FASTA              } from '../../../modules/nf-core/gunzip'
+include { GUNZIP as GUNZIP_GTF                } from '../../../modules/nf-core/gunzip'
+include { GUNZIP as GUNZIP_GFF                } from '../../../modules/nf-core/gunzip'
+include { GUNZIP as GUNZIP_GENE_BED           } from '../../../modules/nf-core/gunzip'
+include { GUNZIP as GUNZIP_TRANSCRIPT_FASTA   } from '../../../modules/nf-core/gunzip'
+include { GUNZIP as GUNZIP_ADDITIONAL_FASTA   } from '../../../modules/nf-core/gunzip'
+include { GUNZIP as GUNZIP_CONTAM_FASTA       } from '../../../modules/nf-core/gunzip'
 
-include { UNTAR as UNTAR_BBSPLIT_INDEX      } from '../../../modules/nf-core/untar'
-include { UNTAR as UNTAR_SORTMERNA_INDEX    } from '../../../modules/nf-core/untar'
-include { UNTAR as UNTAR_STAR_INDEX         } from '../../../modules/nf-core/untar'
-include { UNTAR as UNTAR_SALMON_INDEX       } from '../../../modules/nf-core/untar'
-include { UNTAR as UNTAR_HISAT2_INDEX       } from '../../../modules/nf-core/untar'
+include { UNTAR as UNTAR_BOWTIE_INDEX        } from '../../../modules/nf-core/untar'
+include { UNTAR as UNTAR_BOWTIE2_INDEX       } from '../../../modules/nf-core/untar'
+include { UNTAR as UNTAR_STAR_INDEX          } from '../../../modules/nf-core/untar'
+include { UNTAR as UNTAR_SALMON_INDEX        } from '../../../modules/nf-core/untar'
+include { UNTAR as UNTAR_HISAT2_INDEX        } from '../../../modules/nf-core/untar'
 
 include { CUSTOM_CATADDITIONALFASTA         } from '../../../modules/nf-core/custom/catadditionalfasta'
 include { CUSTOM_GETCHROMSIZES              } from '../../../modules/nf-core/custom/getchromsizes'
 include { GFFREAD                           } from '../../../modules/nf-core/gffread'
-include { BBMAP_BBSPLIT                     } from '../../../modules/nf-core/bbmap/bbsplit'
-include { SORTMERNA as SORTMERNA_INDEX      } from '../../../modules/nf-core/sortmerna'
+include { BOWTIE_BUILD                      } from '../../../modules/local/bowtie/build'
+include { BOWTIE2_BUILD                     } from '../../../modules/local/bowtie2/build'
 include { STAR_GENOMEGENERATE               } from '../../../modules/nf-core/star/genomegenerate'
 include { SALMON_INDEX                      } from '../../../modules/nf-core/salmon/index'
 include { HISAT2_BUILD                      } from '../../../modules/nf-core/hisat2/build'
@@ -39,18 +40,17 @@ workflow PREPARE_GENOME {
     gff                      //      file: /path/to/genome.gff
     additional_fasta         //      file: /path/to/additional.fasta
     transcript_fasta         //      file: /path/to/transcript.fasta
-    bbsplit_fasta_list       //      file: /path/to/bbsplit_fasta_list.txt
-    sortmerna_fasta_list     //      file: /path/to/sortmerna_fasta_list.txt
+    contaminant_fasta        //      file: /path/to/contaminants.fasta
     star_index               // directory: /path/to/star/index/
     salmon_index             // directory: /path/to/salmon/index/
     hisat2_index             // directory: /path/to/hisat2/index/
-    bbsplit_index            // directory: /path/to/rsem/index/
-    sortmerna_index          // directory: /path/to/sortmerna/index/
+    bowtie_index             // directory: /path/to/bowtie/index/
+    bowtie2_index            // directory: /path/to/bowtie2/index/
     gencode                  //   boolean: whether the genome is from GENCODE
     aligner                  //    string: Specifies the alignment algorithm to use - available options are 'star'
     skip_gtf_filter          //   boolean: Skip filtering of GTF for valid scaffolds and/ or transcript IDs
-    skip_bbsplit             //   boolean: Skip BBSplit for removal of non-reference genome reads
-    skip_sortmerna           //   boolean: Skip sortmerna for removal of non-reference genome reads
+    skip_contaminant_filter  //   boolean: Skip Bowtie/Bowtie2-based contaminant filtering
+    filter_aligner           //    string: Specifies contaminant aligner - available options are 'bowtie' or 'bowtie2'
     skip_alignment           //   boolean: Skip all of the alignment-based processes within the pipeline
 
     main:
@@ -163,64 +163,63 @@ workflow PREPARE_GENOME {
     // Get list of indices that need to be created
     //
     def prepare_tool_indices = []
-    if (!skip_bbsplit) { prepare_tool_indices << 'bbsplit' }
-    if (!skip_sortmerna) { prepare_tool_indices << 'sortmerna' }
-    if (!skip_alignment) { prepare_tool_indices << aligner }
+    if (!skip_alignment && aligner) { prepare_tool_indices << aligner }
 
     //
-    // Uncompress BBSplit index or generate from scratch if required
+    // Prepare contaminant index for Bowtie/Bowtie2 filtering if required
     //
-    ch_bbsplit_index = Channel.empty()
-    if ('bbsplit' in prepare_tool_indices) {
-        if (bbsplit_index) {
-            if (bbsplit_index.endsWith('.tar.gz')) {
-                ch_bbsplit_index = UNTAR_BBSPLIT_INDEX ( [ [:], bbsplit_index ] ).untar.map { it[1] }
-                ch_versions      = ch_versions.mix(UNTAR_BBSPLIT_INDEX.out.versions)
-            } else {
-                ch_bbsplit_index = Channel.value(file(bbsplit_index))
-            }
-        } else {
-            Channel
-                .from(file(bbsplit_fasta_list))
-                .splitCsv() // Read in 2 column csv file: short_name,path_to_fasta
-                .flatMap { id, fasta -> [ [ 'id', id ], [ 'fasta', file(fasta, checkIfExists: true) ] ] } // Flatten entries to be able to groupTuple by a common key
-                .groupTuple()
-                .map { it -> it[1] } // Get rid of keys and keep grouped values
-                .collect { [ it ] } // Collect entries as a list to pass as "tuple val(short_names), path(path_to_fasta)" to module
-                .set { ch_bbsplit_fasta_list }
-
-            ch_bbsplit_index = BBMAP_BBSPLIT ( [ [:], [] ], [], ch_fasta, ch_bbsplit_fasta_list, true ).index
-            ch_versions      = ch_versions.mix(BBMAP_BBSPLIT.out.versions)
+    ch_contaminant_index = Channel.empty()
+    if (!skip_contaminant_filter) {
+        def contaminantAligner = (filter_aligner ?: 'bowtie').toLowerCase()
+        if (!(contaminantAligner in ['bowtie', 'bowtie2'])) {
+            exit 1, "Unsupported --filter_aligner '${filter_aligner}'. Choose 'bowtie' or 'bowtie2'."
         }
-    }
 
-    //
-    // Uncompress sortmerna index or generate from scratch if required
-    //
-    ch_sortmerna_index = Channel.empty()
-    ch_rrna_fastas = Channel.empty()
+        def provided_index = contaminantAligner == 'bowtie2' ? bowtie2_index : bowtie_index
+        def provided_index_path = provided_index ? provided_index.toString() : null
+        if (!provided_index_path && !contaminant_fasta) {
+            exit 1, 'Contaminant filtering requested but neither --contaminant_fasta nor a pre-built index was provided.'
+        }
 
-    if ('sortmerna' in prepare_tool_indices) {
-        ribo_db = file(sortmerna_fasta_list)
-
-        if (sortmerna_index) {
-            if (sortmerna_index.endsWith('.tar.gz')) {
-                ch_sortmerna_index = UNTAR_SORTMERNA_INDEX ( [ [:], sortmerna_index ] ).untar.map { it[1] }
-                ch_versions = ch_versions.mix(UNTAR_SORTMERNA_INDEX.out.versions)
+        if (provided_index_path) {
+            if (provided_index_path.endsWith('.tar.gz')) {
+                if (contaminantAligner == 'bowtie2') {
+                    ch_contaminant_index = UNTAR_BOWTIE2_INDEX ( [ [:], provided_index_path ] ).untar.map { it[1] }
+                    ch_versions          = ch_versions.mix(UNTAR_BOWTIE2_INDEX.out.versions)
+                } else {
+                    ch_contaminant_index = UNTAR_BOWTIE_INDEX ( [ [:], provided_index_path ] ).untar.map { it[1] }
+                    ch_versions          = ch_versions.mix(UNTAR_BOWTIE_INDEX.out.versions)
+                }
             } else {
-                ch_sortmerna_index = Channel.value(file(sortmerna_index))
+                ch_contaminant_index = Channel.value(file(provided_index_path, checkIfExists: true))
             }
         } else {
-            ch_rrna_fastas = Channel.from(ribo_db.readLines())
-                .map { row -> file(row, checkIfExists: true) }
+            if (!contaminant_fasta) {
+                exit 1, 'Contaminant FASTA is required to build Bowtie/Bowtie2 index.'
+            }
+            def contaminant_file = file(contaminant_fasta, checkIfExists: true)
+            def contaminant_channel
+            if (contaminant_fasta.endsWith('.gz')) {
+                contaminant_channel = GUNZIP_CONTAM_FASTA ( [ [:], contaminant_file ] ).gunzip.map { it[1] }
+                ch_versions         = ch_versions.mix(GUNZIP_CONTAM_FASTA.out.versions)
+            } else {
+                contaminant_channel = Channel.value(contaminant_file)
+            }
 
-            SORTMERNA_INDEX (
-                Channel.of([ [],[] ]),
-                ch_rrna_fastas.collect().map { [ 'rrna_refs', it ] },
-                Channel.of([ [],[] ])
-            )
-            ch_sortmerna_index = SORTMERNA_INDEX.out.index.first()
-            ch_versions = ch_versions.mix(SORTMERNA_INDEX.out.versions)
+            def meta = [ id: 'contaminants' ]
+            if (contaminantAligner == 'bowtie2') {
+                BOWTIE2_BUILD (
+                    contaminant_channel.map { [ meta, it ] }
+                )
+                ch_contaminant_index = BOWTIE2_BUILD.out.index.map { it[1] }
+                ch_versions          = ch_versions.mix(BOWTIE2_BUILD.out.versions)
+            } else {
+                BOWTIE_BUILD (
+                    contaminant_channel.map { [ meta, it ] }
+                )
+                ch_contaminant_index = BOWTIE_BUILD.out.index
+                ch_versions          = ch_versions.mix(BOWTIE_BUILD.out.versions)
+            }
         }
     }
 
@@ -301,9 +300,7 @@ workflow PREPARE_GENOME {
     fai              = ch_fai                    // channel: path(genome.fai)
     transcript_fasta = ch_transcript_fasta       // channel: path(transcript.fasta)
     chrom_sizes      = ch_chrom_sizes            // channel: path(genome.sizes)
-    bbsplit_index    = ch_bbsplit_index          // channel: path(bbsplit/index/)
-    rrna_fastas      = ch_rrna_fastas            // channel: path(sortmerna_fasta_list)
-    sortmerna_index  = ch_sortmerna_index        // channel: path(sortmerna/index/)
+    contaminant_index = ch_contaminant_index.first() // channel: path(contaminant/index/)
     star_index       = ch_star_index             // channel: path(star/index/)
     hisat2_index     = ch_hisat2_index           // channel: path(hisat2/index/)
     salmon_index     = ch_salmon_index           // channel: path(salmon/index/)

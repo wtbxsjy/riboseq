@@ -28,16 +28,17 @@ include { checkMaxContigSize      } from './subworkflows/local/utils_nfcore_ribo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-params.fasta            = getGenomeAttribute('fasta')
-params.transcript_fasta = getGenomeAttribute('transcript_fasta')
-params.additional_fasta = getGenomeAttribute('additional_fasta')
-params.gtf              = getGenomeAttribute('gtf')
-params.gff              = getGenomeAttribute('gff')
-params.bbsplit_index    = getGenomeAttribute('bbsplit')
-params.star_index       = getGenomeAttribute('star')
-params.hisat2_index     = getGenomeAttribute('hisat2')
-params.salmon_index     = getGenomeAttribute('salmon')
-params.sortmerna_index  = getGenomeAttribute('sortmerna')
+params.fasta             = getGenomeAttribute('fasta')
+params.transcript_fasta  = getGenomeAttribute('transcript_fasta')
+params.additional_fasta  = getGenomeAttribute('additional_fasta')
+params.gtf               = getGenomeAttribute('gtf')
+params.gff               = getGenomeAttribute('gff')
+params.contaminant_fasta = getGenomeAttribute('contaminant_fasta')
+params.bowtie_index      = getGenomeAttribute('bowtie')
+params.bowtie2_index     = getGenomeAttribute('bowtie2')
+params.star_index        = getGenomeAttribute('star')
+params.hisat2_index      = getGenomeAttribute('hisat2')
+params.salmon_index      = getGenomeAttribute('salmon')
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -54,6 +55,11 @@ workflow NFCORE_RIBOSEQ {
 
     ch_versions = Channel.empty()
 
+    // Validate contaminant filtering parameters
+    if (!params.skip_contaminant_filter && !params.contaminant_fasta) {
+        error "Contaminant filtering is enabled but no contaminant FASTA file provided. Please specify --contaminant_fasta or --skip_contaminant_filter."
+    }
+
     //
     // SUBWORKFLOW: Prepare reference genome files
     //
@@ -63,18 +69,17 @@ workflow NFCORE_RIBOSEQ {
         params.gff,
         params.additional_fasta,
         params.transcript_fasta,
-        params.bbsplit_fasta_list,
-        params.ribo_database_manifest,
+        params.contaminant_fasta,
         params.star_index,
         params.salmon_index,
         params.hisat2_index,
-        params.bbsplit_index,
-        params.sortmerna_index,
+        params.bowtie_index,
+        params.bowtie2_index,
         params.gencode,
         params.aligner,
         params.skip_gtf_filter,
-        params.skip_bbsplit,
-        ! params.remove_ribo_rna,
+        params.skip_contaminant_filter,
+        params.filter_aligner,
         params.skip_alignment
     )
     ch_versions = ch_versions.mix(PREPARE_GENOME.out.versions)
@@ -109,9 +114,7 @@ workflow NFCORE_RIBOSEQ {
         PREPARE_GENOME.out.star_index,
         PREPARE_GENOME.out.hisat2_index,
         PREPARE_GENOME.out.salmon_index,
-        PREPARE_GENOME.out.bbsplit_index,
-        PREPARE_GENOME.out.rrna_fastas,
-        PREPARE_GENOME.out.sortmerna_index,
+        PREPARE_GENOME.out.contaminant_index
     )
     ch_versions = ch_versions.mix(RIBOSEQ.out.versions)
 
