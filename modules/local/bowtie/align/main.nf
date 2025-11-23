@@ -4,8 +4,8 @@ process BOWTIE_ALIGN {
 
     conda "bioconda::bowtie=1.3.1"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/bowtie:1.3.1--py38h1b792b2_3' :
-        'quay.io/biocontainers/bowtie:1.3.1--py38h1b792b2_3' }"
+        'https://depot.galaxyproject.org/singularity/bowtie:1.3.1--py38h828cd81_9' :
+        'quay.io/biocontainers/bowtie:1.3.1--py38h828cd81_9' }"
 
     input:
     tuple val(meta), path(reads)
@@ -31,7 +31,7 @@ process BOWTIE_ALIGN {
         read_args = "-1 \"${reads[0]}\" -2 \"${reads[1]}\""
     }
 
-    def unaligned_flag = meta.single_end ? "--un ${prefix}.clean.fastq" : "--un-conc ${prefix}.clean.fastq"
+    def unaligned_flag = "--un ${prefix}_unmapped"
 
     """
     INDEX=`find -L ${index} -name "*.1.ebwt" | sed 's/.1.ebwt//'`
@@ -47,15 +47,15 @@ process BOWTIE_ALIGN {
         > /dev/null \\
         2> ${prefix}.bowtie.log
 
-    if [ -f ${prefix}.clean.fastq ]; then
-        gzip -c ${prefix}.clean.fastq > ${prefix}.clean.fastq.gz
-        rm ${prefix}.clean.fastq
+    if [ -f ${prefix}_unmapped ]; then
+        gzip -c ${prefix}_unmapped > ${prefix}.clean.fastq.gz
+        rm ${prefix}_unmapped
     fi
 
-    if [ -f ${prefix}.clean.fastq.1 ]; then
-        gzip -c ${prefix}.clean.fastq.1 > ${prefix}.clean_1.fastq.gz
-        gzip -c ${prefix}.clean.fastq.2 > ${prefix}.clean_2.fastq.gz
-        rm ${prefix}.clean.fastq.1 ${prefix}.clean.fastq.2
+    if [ -f ${prefix}_unmapped_1 ]; then
+        gzip -c ${prefix}_unmapped_1 > ${prefix}.clean_1.fastq.gz
+        gzip -c ${prefix}_unmapped_2 > ${prefix}.clean_2.fastq.gz
+        rm ${prefix}_unmapped_1 ${prefix}_unmapped_2
     fi
 
     cat <<-END_VERSIONS > versions.yml

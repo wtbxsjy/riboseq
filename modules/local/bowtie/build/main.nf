@@ -4,8 +4,8 @@ process BOWTIE_BUILD {
 
     conda "bioconda::bowtie=1.3.1"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/bowtie:1.3.1--py38h1b792b2_3' :
-        'quay.io/biocontainers/bowtie:1.3.1--py38h1b792b2_3' }"
+        'https://depot.galaxyproject.org/singularity/bowtie:1.3.1--py38h828cd81_9' :
+        'quay.io/biocontainers/bowtie:1.3.1--py38h828cd81_9' }"
 
     input:
     tuple val(meta), path(fasta)
@@ -21,7 +21,7 @@ process BOWTIE_BUILD {
     def args = task.ext.args ?: ''
     """
     mkdir bowtie
-    bowtie-build $args -p $task.cpus $fasta bowtie/${fasta.baseName}
+    bowtie-build $args --threads $task.cpus $fasta bowtie/${fasta.baseName}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
