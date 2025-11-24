@@ -13,6 +13,7 @@ include { FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS                                  
 include { BAM_DEDUP_UMI      } from '../../subworkflows/nf-core/bam_dedup_umi'
 include { FASTQ_ALIGN_STAR   } from '../../subworkflows/nf-core/fastq_align_star'
 include { FASTQ_ALIGN_HISAT2 } from '../../subworkflows/local/fastq_align_hisat2'
+include { RPBP               } from '../../subworkflows/local/rpbp'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -298,6 +299,21 @@ workflow RIBOSEQ {
             RIBOTRICER_PREPAREORFS.out.candidate_orfs
         )
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS.out.versions)
+    }
+
+    if (!params.skip_rpbp){
+        def ribosomal_fasta = params.contaminant_fasta ? file(params.contaminant_fasta) : []
+        if (!ribosomal_fasta) {
+             error "RPBP requires a contaminant FASTA file. Please specify --contaminant_fasta."
+        }
+
+        RPBP(
+            ch_bams_for_analysis,
+            ch_fasta,
+            ch_gtf,
+            ribosomal_fasta
+        )
+        ch_versions = ch_versions.mix(RPBP.out.versions)
     }
 
     //
