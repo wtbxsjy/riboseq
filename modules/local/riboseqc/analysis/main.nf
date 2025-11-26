@@ -2,7 +2,7 @@ process RIBOSEQC_ANALYSIS {
     tag "$meta.id"
     label 'process_medium'
 
-    conda "bioconda::riboseqc=1.1"
+    conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1' :
         'quay.io/biocontainers/riboseqc:1.1--r36_1' }"

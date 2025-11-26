@@ -2,7 +2,7 @@ process BOWTIE2_ALIGN {
     tag "$meta.id"
     label 'process_high'
 
-    conda "bioconda::bowtie2=2.4.4"
+    conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/bowtie2:2.4.4--py39hbb4e92a_0' :
         'quay.io/biocontainers/bowtie2:2.4.4--py39hbb4e92a_0' }"

@@ -5,7 +5,7 @@ process RIBOCODE_DETECT {
     // Allow process to complete even if RiboCode fails due to low periodicity
     errorStrategy 'ignore'
 
-    conda "bioconda::ribocode=1.2.11"
+    conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/ribocode:1.2.11--pyh145b6a8_1' :
         'quay.io/biocontainers/ribocode:1.2.11--pyh145b6a8_1' }"
