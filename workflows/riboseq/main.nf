@@ -15,6 +15,7 @@ include { FASTQ_ALIGN_STAR   } from '../../subworkflows/nf-core/fastq_align_star
 include { FASTQ_ALIGN_HISAT2 } from '../../subworkflows/local/fastq_align_hisat2'
 include { RPBP               } from '../../subworkflows/local/rpbp'
 include { RIBOCODE           } from '../../subworkflows/local/ribocode'
+include { RIBOSEQC           } from '../../subworkflows/local/riboseqc'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -337,6 +338,18 @@ workflow RIBOSEQ {
              )
              ch_versions = ch_versions.mix(RIBOCODE.out.versions)
         }
+    }
+
+    //
+    // RiboseQC: Comprehensive quality control for Ribo-seq data
+    //
+    if (!params.skip_riboseqc) {
+        RIBOSEQC(
+            ch_bams_for_analysis,
+            ch_gtf,
+            ch_fasta
+        )
+        ch_versions = ch_versions.mix(RIBOSEQC.out.versions)
     }
 
     //

@@ -556,6 +556,16 @@
                     "type": "boolean",
                     "description": "Skip Riboricer.",
                     "fa_icon": "fas fa-fast-forward"
+                },
+                "skip_riboseqc": {
+                    "type": "boolean",
+                    "description": "Skip RiboseQC quality control analysis.",
+                    "fa_icon": "fas fa-fast-forward"
+                },
+                "extra_riboseqc_args": {
+                    "type": "string",
+                    "description": "Extra arguments to pass to RiboseQC analysis.",
+                    "fa_icon": "fas fa-plus"
                 }
             }
         },
