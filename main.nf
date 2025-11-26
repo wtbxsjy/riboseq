@@ -113,6 +113,7 @@ workflow NFCORE_RIBOSEQ {
         PREPARE_GENOME.out.transcript_fasta,
         PREPARE_GENOME.out.star_index,
         PREPARE_GENOME.out.hisat2_index,
+        PREPARE_GENOME.out.hisat2_transcriptome_index,
         PREPARE_GENOME.out.salmon_index,
         PREPARE_GENOME.out.contaminant_index
     )

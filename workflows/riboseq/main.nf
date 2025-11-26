@@ -14,6 +14,7 @@ include { BAM_DEDUP_UMI      } from '../../subworkflows/nf-core/bam_dedup_umi'
 include { FASTQ_ALIGN_STAR   } from '../../subworkflows/nf-core/fastq_align_star'
 include { FASTQ_ALIGN_HISAT2 } from '../../subworkflows/local/fastq_align_hisat2'
 include { RPBP               } from '../../subworkflows/local/rpbp'
+include { RIBOCODE           } from '../../subworkflows/local/ribocode'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -68,6 +69,7 @@ workflow RIBOSEQ {
     ch_transcript_fasta // channel: path(transcript.fasta)
     ch_star_index       // channel: path(star/index/)
     ch_hisat2_index     // channel: path(hisat2/index/)
+    ch_hisat2_transcriptome_index // channel: path(hisat2/transcriptome_index/)
     ch_salmon_index     // channel: path(salmon/index/)
     ch_contaminant_index // channel: path(contaminant/index/)
 
@@ -194,13 +196,16 @@ workflow RIBOSEQ {
         FASTQ_ALIGN_HISAT2(
             FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
             ch_hisat2_index.map { [ [:], it ] },
+            ch_hisat2_transcriptome_index.map { [ [:], it ] },
             ch_splicesites,
             ch_fasta.map { [ [:], it ] }
         )
 
-        ch_genome_bam       = FASTQ_ALIGN_HISAT2.out.bam
-        ch_genome_bam_index = FASTQ_ALIGN_HISAT2.out.bai
-        ch_versions         = ch_versions.mix(FASTQ_ALIGN_HISAT2.out.versions)
+        ch_genome_bam        = FASTQ_ALIGN_HISAT2.out.bam
+        ch_transcriptome_bam = FASTQ_ALIGN_HISAT2.out.transcriptome_bam
+        ch_transcriptome_bai = FASTQ_ALIGN_HISAT2.out.transcriptome_bai
+        ch_genome_bam_index  = FASTQ_ALIGN_HISAT2.out.bai
+        ch_versions          = ch_versions.mix(FASTQ_ALIGN_HISAT2.out.versions)
 
         ch_multiqc_files = ch_multiqc_files
             .mix(FASTQ_ALIGN_HISAT2.out.stats.collect{it[1]})
@@ -314,6 +319,24 @@ workflow RIBOSEQ {
             ribosomal_fasta
         )
         ch_versions = ch_versions.mix(RPBP.out.versions)
+    }
+
+    if (!params.skip_ribocode) {
+        if (params.aligner != 'star' && params.aligner != 'hisat2') {
+            log.warn "RiboCode requires STAR or HISAT2 alignment to generate transcriptome BAMs. Skipping RiboCode."
+        } else {
+             ch_transcriptome_bam
+                .join(ch_transcriptome_bai)
+                .filter { meta, bam, bai -> meta.sample_type == 'riboseq' }
+                .set { ch_riboseq_transcriptome_bam }
+
+             RIBOCODE(
+                 ch_riboseq_transcriptome_bam,
+                 ch_gtf,
+                 ch_fasta
+             )
+             ch_versions = ch_versions.mix(RIBOCODE.out.versions)
+        }
     }
 
     //

@@ -24,6 +24,7 @@ include { BOWTIE2_BUILD                     } from '../../../modules/local/bowti
 include { STAR_GENOMEGENERATE               } from '../../../modules/nf-core/star/genomegenerate'
 include { SALMON_INDEX                      } from '../../../modules/nf-core/salmon/index'
 include { HISAT2_BUILD                      } from '../../../modules/nf-core/hisat2/build'
+include { HISAT2_BUILD as HISAT2_BUILD_TRANSCRIPTOME } from '../../../modules/nf-core/hisat2/build'
 include { HISAT2_EXTRACTSPLICESITES         } from '../../../modules/nf-core/hisat2/extractsplicesites'
 include { RSEM_PREPAREREFERENCE as RSEM_PREPAREREFERENCE_GENOME } from '../../../modules/nf-core/rsem/preparereference'
 include { RSEM_PREPAREREFERENCE as MAKE_TRANSCRIPTS_FASTA       } from '../../../modules/nf-core/rsem/preparereference'
@@ -257,6 +258,7 @@ workflow PREPARE_GENOME {
     // Uncompress HISAT2 index or generate from scratch if required
     //
     ch_hisat2_index = Channel.empty()
+    ch_hisat2_transcriptome_index = Channel.empty()
     if ('hisat2' in prepare_tool_indices) {
         if (hisat2_index) {
             if (hisat2_index.endsWith('.tar.gz')) {
@@ -273,6 +275,11 @@ workflow PREPARE_GENOME {
             HISAT2_BUILD ( ch_fasta.map { [ [:], it ] }, ch_gtf.map { [ [:], it ] }, ch_splicesites.map { [ [:], it ] } )
             ch_hisat2_index = HISAT2_BUILD.out.index.map { it[1] }
             ch_versions     = ch_versions.mix(HISAT2_BUILD.out.versions)
+
+            // Build transcriptome index for HISAT2
+            HISAT2_BUILD_TRANSCRIPTOME ( ch_transcript_fasta.map { [ [:], it ] }, ch_gtf.map { [ [:], it ] }, Channel.value([[:], []]) )
+            ch_hisat2_transcriptome_index = HISAT2_BUILD_TRANSCRIPTOME.out.index.map { it[1] }
+            ch_versions     = ch_versions.mix(HISAT2_BUILD_TRANSCRIPTOME.out.versions)
         }
     }
 
@@ -303,6 +310,7 @@ workflow PREPARE_GENOME {
     contaminant_index = ch_contaminant_index.first() // channel: path(contaminant/index/)
     star_index       = ch_star_index             // channel: path(star/index/)
     hisat2_index     = ch_hisat2_index           // channel: path(hisat2/index/)
+    hisat2_transcriptome_index = ch_hisat2_transcriptome_index // channel: path(hisat2/transcriptome_index/)
     salmon_index     = ch_salmon_index           // channel: path(salmon/index/)
     versions         = ch_versions.ifEmpty(null) // channel: [ versions.yml ]
 }

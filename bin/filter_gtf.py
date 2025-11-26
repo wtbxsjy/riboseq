@@ -41,11 +41,14 @@ def filter_gtf(fasta: str, gtf_in: str, filtered_gtf_out: str, skip_transcript_i
         with open(gtf_in) as gtf, open(filtered_gtf_out, "w") as out:
             line_count = 0
             for line in gtf:
-                seq_name = line.split("\t")[0]
+                parts = line.split("\t")
+                seq_name = parts[0]
                 seq_names_in_gtf.add(seq_name)  # Add sequence name to the set
 
                 if seq_name in seq_names_in_genome:
-                    if skip_transcript_id_check or re.search(r'transcript_id "([^"]+)"', line):
+                    # Keep line if skip check is on, OR if it has transcript_id, OR if it is a gene feature
+                    is_gene = len(parts) > 2 and parts[2] == 'gene'
+                    if skip_transcript_id_check or is_gene or re.search(r'transcript_id "([^"]+)"', line):
                         out.write(line)
                         line_count += 1
 

@@ -1,21 +1,36 @@
 #!/bin/bash
+#===============================================================================
+# Google Colab Pro 测试脚本
+#===============================================================================
+# 运行环境: Google Colab Pro
+# 硬件配置: 8 CPU, 50GB RAM
+# 
+# 特点:
+#   - 使用 STAR 比对器 (Ribo-seq 黄金标准)
+#   - RPBP 双链 MCMC 并行运行，更快更稳健
+#   - 完整 ORF 预测流程 (Ribotish + RPBP + RiboCode)
+#
+# 注意: 测试数据较小，RiboCode 可能因周期性检测失败而报错，这是数据质量问题
+#===============================================================================
 
-# 运行环境: Google Colab Pro / 高配机器
-# 硬件配置: ~8 CPU, ~50GB RAM
-# 运行策略:
-#   1. 使用 STAR 比对器 (Riboseq 黄金标准)，利用大内存优势
-#   2. RPBP 设置 --chains 2 (默认) 并行运行，提高稳健性和速度
-#   3. 充分利用 8 核 CPU 和 40GB 内存
+set -euo pipefail
 
-echo "Starting test run for Colab Pro environment (High Memory)..."
+echo "=============================================="
+echo "  Google Colab Pro Test Run"
+echo "  Hardware: 8 CPU, 50GB RAM"
+echo "  Aligner: STAR (gold standard)"
+echo "=============================================="
+
+# 清理旧的工作目录（可选，取消注释以启用）
+# rm -rf work/ results_colab/
 
 nextflow run . \
-    -profile test,singularity \
-    --aligner star \
-    --extra_rpbp_args "--chains 2" \
-    --max_memory '40.GB' \
-    --max_cpus 8 \
-    --outdir results_test_colab \
+    -profile test_colab,singularity \
+    --outdir results_colab \
     -resume
 
-echo "Run completed. Check results in results_test_colab/"
+echo ""
+echo "=============================================="
+echo "  Run completed!"
+echo "  Results: results_colab/"
+echo "=============================================="
