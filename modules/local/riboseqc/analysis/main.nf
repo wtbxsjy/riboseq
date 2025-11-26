@@ -32,17 +32,13 @@ process RIBOSEQC_ANALYSIS {
     library(RiboseQC)
     library(Rsamtools)
 
-    # Load the annotation
-    load_annotation("${annotation}")
-
-    # Create FaFile object for genome sequence
-    genome_fa <- Rsamtools::FaFile("${fasta}")
-
     # Run RiboseQC analysis
+    # Note: genome_seq should be a file path string, not an FaFile object
+    # The function will internally create FaFile and FaFile_Circ objects
     RiboseQC_analysis(
         annotation_file = "${annotation}",
         bam_files = "${bam}",
-        genome_seq = genome_fa,
+        genome_seq = "${fasta}",
         dest_names = "${prefix}",
         sample_names = "${prefix}",
         report_file = "${prefix}_RiboseQC_report.html",
