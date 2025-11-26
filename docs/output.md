@@ -186,6 +186,10 @@ When `--remove_ribo_rna` is specified, the pipeline uses [SortMeRNA](https://git
 
 ![MultiQC - SortMeRNA hit count plot](images/mqc_sortmerna.png)
 
+### Strandedness inference with Salmon
+
+> **Important**: Salmon is used in this pipeline **only for strandedness inference**, not for quantification. When sample strandedness is set to `auto` in the samplesheet, the pipeline uses Salmon to automatically detect the library strandedness by aligning a subsample of reads to the transcriptome. This information is then used to configure downstream alignment and analysis tools correctly. The Salmon quantification outputs from this step are not published as they are based on subsampled reads and should not be used for downstream analysis.
+
 ## Alignment
 
 ### STAR
@@ -259,6 +263,35 @@ Read distribution metrics around annotated protein coding regions or based on al
   - `*_qual.pdf`: PDF-format representation of read distribution around annotated protein coding regions on user provided transcripts
   - `*.para.py`: P-site offsets for different reads lengths in python code dict format
   </details>
+
+### RiboseQC
+
+[RiboseQC](https://github.com/ohlerlab/RiboseQC) is a comprehensive quality control tool for Ribo-seq data that provides detailed analysis of ribosome profiling experiments. It generates P-site offset calculations, coverage profiles, and various QC metrics.
+
+<details markdown="1">
+<summary>Output files</summary>
+
+- `riboseq_qc/annotation/`
+  - `*_Rannot`: RiboseQC annotation file generated from GTF and genome FASTA, used for all samples.
+
+- `riboseq_qc/riboseqc/`
+  - `*_results_RiboseQC`: Core QC results containing summary statistics and P-site offset information.
+  - `*_results_RiboseQC_all`: Complete results file with detailed analysis data.
+  - `*_for_ORFquant`: ORFquant-compatible output file for downstream ORF quantification.
+  - `*_coverage_plus.bedgraph`: Read coverage on plus strand.
+  - `*_coverage_minus.bedgraph`: Read coverage on minus strand.
+  - `*_coverage_uniq_plus.bedgraph`: Uniquely mapped read coverage on plus strand.
+  - `*_coverage_uniq_minus.bedgraph`: Uniquely mapped read coverage on minus strand.
+  - `*_P_sites_plus.bedgraph`: P-site positions on plus strand.
+  - `*_P_sites_minus.bedgraph`: P-site positions on minus strand.
+  - `*_P_sites_uniq_plus.bedgraph`: Uniquely mapped P-site positions on plus strand.
+  - `*_P_sites_uniq_minus.bedgraph`: Uniquely mapped P-site positions on minus strand.
+  - `*_P_sites_calcs`: P-site offset calculations for different read lengths.
+  - `*_junctions`: Splice junction information from ribosome footprints.
+
+</details>
+
+> **Note**: HTML report generation is currently disabled due to compatibility issues with the containerized RiboseQC environment. The core QC results in `*_results_RiboseQC` files contain all essential quality metrics.
 
 ### Ribotricer detect-orfs QC outputs
 
