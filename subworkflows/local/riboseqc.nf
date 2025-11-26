@@ -34,8 +34,12 @@ workflow RIBOSEQC {
     ch_versions = ch_versions.mix(RIBOSEQC_ANALYSIS.out.versions)
 
     emit:
-    results  = RIBOSEQC_ANALYSIS.out.results   // channel: [ val(meta), path(results) ]
-    html     = RIBOSEQC_ANALYSIS.out.html      // channel: [ val(meta), path(html) ]
-    orfquant = RIBOSEQC_ANALYSIS.out.orfquant  // channel: [ val(meta), path(orfquant) ]
-    versions = ch_versions                      // channel: [ path(versions.yml) ]
+    results         = RIBOSEQC_ANALYSIS.out.results          // channel: [ val(meta), path(results) ]
+    results_all     = RIBOSEQC_ANALYSIS.out.results_all      // channel: [ val(meta), path(results_all) ]
+    orfquant        = RIBOSEQC_ANALYSIS.out.orfquant         // channel: [ val(meta), path(orfquant) ]
+    coverage        = RIBOSEQC_ANALYSIS.out.coverage         // channel: [ val(meta), path(bedgraph) ]
+    psites_bedgraph = RIBOSEQC_ANALYSIS.out.psites_bedgraph  // channel: [ val(meta), path(bedgraph) ]
+    psites_calcs    = RIBOSEQC_ANALYSIS.out.psites_calcs     // channel: [ val(meta), path(psites_calcs) ]
+    junctions       = RIBOSEQC_ANALYSIS.out.junctions        // channel: [ val(meta), path(junctions) ]
+    versions        = ch_versions                             // channel: [ path(versions.yml) ]
 }

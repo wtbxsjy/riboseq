@@ -1,0 +1,332 @@
+N E X T F L O W  ~  version 25.10.0
+Launching `./main.nf` [loquacious_sammet] DSL2 - revision: bd0ecdc7a9
+
+-[2m----------------------------------------------------[0m-
+                                        [0;32m,--.[0;30m/[0;32m,-.[0m
+[0;34m        ___     __   __   __   ___     [0;32m/,-._.--~'[0m
+[0;34m  |\ | |__  __ /  ` /  \ |__) |__         [0;33m}  {[0m
+[0;34m  | \| |       \__, \__/ |  \ |___     [0;32m\`-._,-`-,[0m
+                                        [0;32m`._,._,'[0m
+[0;35m  nf-core/riboseq 1.1.0[0m
+-[2m----------------------------------------------------[0m-
+[1mInput/output options[0m
+  [0;34minput                     : [0;32mhttps://raw.githubusercontent.com/nf-core/test-datasets/riboseq/samplesheet/samplesheet.csv[0m
+  [0;34mcontrasts                 : [0;32mhttps://raw.githubusercontent.com/nf-core/test-datasets/riboseq/contrasts.csv[0m
+  [0;34moutdir                    : [0;32mresults_test_riboseqc[0m
+
+[1mReference genome options[0m
+  [0;34mfasta                     : [0;32mhttps://raw.githubusercontent.com/nf-core/test-datasets/modules/data/genomics/homo_sapiens/riboseq_expression/Homo_sapiens.GRCh38.dna.chromosome.20.fa.gz[0m
+  [0;34mgtf                       : [0;32mhttps://raw.githubusercontent.com/nf-core/test-datasets/modules/data/genomics/homo_sapiens/riboseq_expression/Homo_sapiens.GRCh38.111_chr20.gtf[0m
+
+[1mRead trimming options[0m
+  [0;34mmin_trimmed_reads         : [0;32m1000[0m
+
+[1mRead filtering options[0m
+  [0;34mextra_fqlint_args         : [0;32m--disable-validator P001 --disable-validator S007[0m
+  [0;34mskip_contaminant_filter   : [0;32mtrue[0m
+  [0;34mcontaminant_fasta         : [0;32mhttps://raw.githubusercontent.com/nf-core/test-datasets/modules/data/genomics/homo_sapiens/riboseq_expression/Homo_sapiens.GRCh38.dna.chromosome.20.fa.gz[0m
+
+[1mAlignment options[0m
+  [0;34maligner                   : [0;32mhisat2[0m
+  [0;34mmin_mapped_reads          : [0;32m5[0m
+
+[1mProcess skipping options[0m
+  [0;34mskip_contaminant_filter   : [0;32mtrue[0m
+  [0;34mskip_ribotricer           : [0;32mtrue[0m
+
+[1mInstitutional config options[0m
+  [0;34mconfig_profile_name       : [0;32mCodespace Test Profile[0m
+  [0;34mconfig_profile_description: [0;32mTest profile for GitHub Codespace (2 CPU, 8GB RAM)[0m
+
+[1mGeneric options[0m
+  [0;34mtrace_report_suffix       : [0;32m2025-11-26_08-56-01[0m
+
+[1mCore Nextflow options[0m
+  [0;34mrunName                   : [0;32mloquacious_sammet[0m
+  [0;34mcontainerEngine           : [0;32msingularity[0m
+  [0;34mlaunchDir                 : [0;32m/workspaces/riboseq[0m
+  [0;34mworkDir                   : [0;32m/workspaces/riboseq/work[0m
+  [0;34mprojectDir                : [0;32m/workspaces/riboseq[0m
+  [0;34muserName                  : [0;32mgitpod[0m
+  [0;34mprofile                   : [0;32mtest_codespace,singularity[0m
+  [0;34mconfigFiles               : [0;32m/workspaces/riboseq/nextflow.config[0m
+
+!! Only displaying parameters that differ from the pipeline defaults !!
+-[2m----------------------------------------------------[0m-
+* The pipeline
+    https://doi.org/10.5281/zenodo.10966364
+
+* The nf-core framework
+    https://doi.org/10.1038/s41587-020-0439-x
+
+* Software dependencies
+    https://github.com/nf-core/riboseq/blob/master/CITATIONS.md
+
+WARN: The following invalid input values have been detected:
+
+* --hisat2_index: null
+* --hisat2_build_memory: 200.GB
+* --sortmerna_index: null
+* --skip_pseudo_alignment: true
+* --pseudo_aligner: null
+* --skip_rpbp: false
+* --extra_rpbp_args: --chains 1
+* --skip_ribocode: false
+* --extra_ribocode_args: -f0_percent 0.0
+
+
+WARN: Found the following unidentified headers in /nf-core/test-datasets/riboseq/samplesheet/samplesheet.csv:
+	- sample_description
+	- pair
+	- treatment
+
+WARN: Found the following unidentified headers in /nf-core/test-datasets/riboseq/samplesheet/samplesheet.csv:
+	- sample_description
+	- pair
+	- treatment
+
+WARN: The operator `first` is useless when applied to a value channel which returns a single value by definition
+WARN: Singularity cache directory has not been defined -- Remote image will be stored in the path: /workspaces/riboseq/work/singularity -- Use the environment variable NXF_SINGULARITY_CACHEDIR to specify a different location
+Pulling Singularity image https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/52/52ccce28d2ab928ab862e25aae26314d69c8e38bd41ca9431c67ef05221348aa/data [cache /workspaces/riboseq/work/singularity/community-cr-prod.seqera.io-docker-registry-v2-blobs-sha256-52-52ccce28d2ab928ab862e25aae26314d69c8e38bd41ca9431c67ef05221348aa-data.img]
+Pulling Singularity image https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/9b/9becad054093ad4083a961d12733f2a742e11728fe9aa815d678b882b3ede520/data [cache /workspaces/riboseq/work/singularity/community-cr-prod.seqera.io-docker-registry-v2-blobs-sha256-9b-9becad054093ad4083a961d12733f2a742e11728fe9aa815d678b882b3ede520-data.img]
+Pulling Singularity image https://depot.galaxyproject.org/singularity/fq:0.12.0--h9ee0642_0 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-fq-0.12.0--h9ee0642_0.img]
+Pulling Singularity image https://depot.galaxyproject.org/singularity/fastqc:0.12.1--hdfd78af_0 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-fastqc-0.12.1--hdfd78af_0.img]
+[67/f62b32] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780879)
+[a0/8dff45] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780880)
+[bf/e1c78f] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780882)
+[7f/02c531] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780881)
+[b6/ec286a] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780883)
+[20/1578d7] Submitted process > NFCORE_RIBOSEQ:PREPARE_GENOME:GUNZIP_FASTA (Homo_sapiens.GRCh38.dna.chromosome.20.fa.gz)
+Pulling Singularity image https://depot.galaxyproject.org/singularity/samtools:1.21--h50ea8bc_0 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-samtools-1.21--h50ea8bc_0.img]
+[d2/5e82a1] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780884)
+Pulling Singularity image https://depot.galaxyproject.org/singularity/python:3.9--1 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-python-3.9--1.img]
+[b6/18adb7] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780885)
+[ca/e8a1d7] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780886)
+[96/31ca1c] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780887)
+[fd/f68a10] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780888)
+[d7/08fe6f] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780889)
+[29/e77b6a] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT (SRX11780890)
+[01/204e77] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780880)
+[3e/dd0c29] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780879)
+[a9/18454f] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780881)
+[58/6fcffc] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780882)
+[d5/b60670] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780883)
+[26/7fa8d0] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780884)
+[b5/76bee0] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780885)
+[03/7a2f65] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780886)
+[f2/c2ccae] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780887)
+[5b/5adbee] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780888)
+[27/28295c] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780889)
+[bf/fe2409] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC (SRX11780890)
+[eb/1a5915] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780880)
+[b0/d5f4e4] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780879)
+[5c/9e03b1] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780881)
+[cb/a77614] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780882)
+[70/f6c3fd] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780883)
+[1c/9b6cc5] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780884)
+[9d/5de605] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780886)
+[c0/5b7746] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780885)
+[d9/226971] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780888)
+[9b/08b123] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780887)
+[8f/d1d6d5] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780889)
+[7b/52a6d1] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_FASTQC_UMITOOLS_TRIMGALORE:TRIMGALORE (SRX11780890)
+[53/4f520b] Submitted process > NFCORE_RIBOSEQ:PREPARE_GENOME:CUSTOM_GETCHROMSIZES (Homo_sapiens.GRCh38.dna.chromosome.20.fa)
+[65/6eeb69] Submitted process > NFCORE_RIBOSEQ:PREPARE_GENOME:GTF_FILTER (Homo_sapiens.GRCh38.dna.chromosome.20.fa)
+[be/51244a] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780880)
+WARN: Singularity cache directory has not been defined -- Remote image will be stored in the path: /workspaces/riboseq/work/singularity -- Use the environment variable NXF_SINGULARITY_CACHEDIR to specify a different location
+Pulling Singularity image https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-riboseqc-1.1--r36_1.img]
+Pulling Singularity image https://depot.galaxyproject.org/singularity/mulled-v2-cf0123ef83b3c38c13e3b0696a3f285d3f20f15b:64aad4a4e144878400649e71f42105311be7ed87-0 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-mulled-v2-cf0123ef83b3c38c13e3b0696a3f285d3f20f15b-64aad4a4e144878400649e71f42105311be7ed87-0.img]
+Pulling Singularity image https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/d2/d2ec9b73c6b92e99334c6500b1b622edaac316315ac1708f0b425df3131d0a83/data [cache /workspaces/riboseq/work/singularity/community-cr-prod.seqera.io-docker-registry-v2-blobs-sha256-d2-d2ec9b73c6b92e99334c6500b1b622edaac316315ac1708f0b425df3131d0a83-data.img]
+Pulling Singularity image https://depot.galaxyproject.org/singularity/rpbp:4.0.1--py312hf731ba3_0 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-rpbp-4.0.1--py312hf731ba3_0.img]
+[86/71c844] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780879)
+[b5/6b8809] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780881)
+[53/38dc24] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780882)
+[85/731bf2] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780883)
+[52/c72b37] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780884)
+[d5/437d54] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780886)
+[14/235907] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780885)
+[f1/a61740] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780888)
+[8e/3a88e2] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780887)
+[ce/62c5a1] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780889)
+[d8/fd8f7f] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FQ_LINT_AFTER_TRIMMING (SRX11780890)
+[37/1474c1] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780880)
+[31/284087] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780879)
+[46/4236e9] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780881)
+[11/219489] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780882)
+[ea/df1b1b] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780883)
+[7a/e33d05] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780884)
+[52/f27db7] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780886)
+[81/fd7ba8] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780885)
+[be/3c516d] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780888)
+[c2/a9db5e] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780887)
+[ec/72ee8c] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780889)
+[26/852cdc] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS:FASTQ_SUBSAMPLE_FQ_SALMON:FQ_SUBSAMPLE (SRX11780890)
+[6b/44fee6] Submitted process > NFCORE_RIBOSEQ:PREPARE_GENOME:HISAT2_EXTRACTSPLICESITES (Homo_sapiens.GRCh38.dna.chromosome.20.filtered.gtf)
+[b8/db4e55] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:HISAT2_EXTRACTSPLICESITES (Homo_sapiens.GRCh38.dna.chromosome.20.filtered.gtf)
+[HISAT2 index build] Available memory: 6 GB
+[HISAT2 index build] Less than 200 GB available, so NOT using splice sites and exons to build HISAT2 index.
+[HISAT2 index build] Use --hisat2_build_memory [small number] to skip this check.
+[b5/fe419a] Submitted process > NFCORE_RIBOSEQ:PREPARE_GENOME:MAKE_TRANSCRIPTS_FASTA (rsem/Homo_sapiens.GRCh38.dna.chromosome.20.fa)
+[c2/d11b2c] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:RIBOSEQC:RIBOSEQC_PREPAREANNOTATION (Homo_sapiens.GRCh38.dna.chromosome.20.filtered)
+[HISAT2 index build] Available memory: 6 GB
+[HISAT2 index build] Less than 200 GB available, so NOT using splice sites and exons to build HISAT2 index.
+[HISAT2 index build] Use --hisat2_build_memory [small number] to skip this check.
+WARN: Singularity cache directory has not been defined -- Remote image will be stored in the path: /workspaces/riboseq/work/singularity -- Use the environment variable NXF_SINGULARITY_CACHEDIR to specify a different location
+Pulling Singularity image https://depot.galaxyproject.org/singularity/salmon:1.10.3--h6dccd9a_2 [cache /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-salmon-1.10.3--h6dccd9a_2.img]
+[70/cd20c9] Submitted process > NFCORE_RIBOSEQ:RIBOSEQ:RPBP:RPBP_PREPARE_GENOME (Homo_sapiens.GRCh38.dna.chromosome.20.fa)
+[1d/7b4029] Submitted process > NFCORE_RIBOSEQ:PREPARE_GENOME:HISAT2_BUILD (Homo_sapiens.GRCh38.dna.chromosome.20.fa)
+ERROR ~ Error executing process > 'NFCORE_RIBOSEQ:RIBOSEQ:RPBP:RPBP_PREPARE_GENOME (Homo_sapiens.GRCh38.dna.chromosome.20.fa)'
+
+Caused by:
+  Process `NFCORE_RIBOSEQ:RIBOSEQ:RPBP:RPBP_PREPARE_GENOME (Homo_sapiens.GRCh38.dna.chromosome.20.fa)` terminated with an error exit status (1)
+
+
+Command executed:
+
+  mkdir -p ribosomal_index star_index
+  
+  # Create a config file for rp-bp
+  cat <<EOF > config.yaml
+  genome_base_path: .
+  genome_name: genome
+  gtf: Homo_sapiens.GRCh38.dna.chromosome.20.filtered.gtf
+  fasta: Homo_sapiens.GRCh38.dna.chromosome.20.fa
+  ribosomal_fasta: Homo_sapiens.GRCh38.dna.chromosome.20.fa.gz
+  ribosomal_index: ./ribosomal_index/rRNA
+  star_index: ./star_index
+  EOF
+  
+  # Run prepare-rpbp-genome
+  # We use --num-cpus to speed up if it does parallel processing
+  prepare-rpbp-genome \
+      config.yaml \
+      --num-cpus 2 \
+      --overwrite \
+  
+  
+  cat <<-END_VERSIONS > versions.yml
+  "NFCORE_RIBOSEQ:RIBOSEQ:RPBP:RPBP_PREPARE_GENOME":
+      rpbp: $(python3 -c "import rpbp; print(rpbp.__version__)")
+  END_VERSIONS
+
+Command exit status:
+  1
+
+Command output:
+    (Using difference cover)
+    Sorting block time: 00:00:00
+  Returning block of 845044 for bucket 8
+  Exited Ebwt loop
+  fchr[A]: 0
+  fchr[C]: 17867246
+  fchr[G]: 31783379
+  fchr[T]: 45877851
+  fchr[$]: 63944257
+  Exiting Ebwt::buildToDisk()
+  Returning from initFromVector
+  Wrote 25510393 bytes to primary EBWT file: ./ribosomal_index/rRNA.rev.1.bt2.tmp
+  Wrote 15986072 bytes to secondary EBWT file: ./ribosomal_index/rRNA.rev.2.bt2.tmp
+  Re-opening _in1 and _in2 as input streams
+  Returning from Ebwt constructor
+  Headers:
+      len: 63944257
+      bwtLen: 63944258
+      sz: 15986065
+      bwtSz: 15986065
+      lineRate: 6
+      offRate: 4
+      offMask: 0xfffffff0
+      ftabChars: 10
+      eftabLen: 20
+      eftabSz: 80
+      ftabLen: 1048577
+      ftabSz: 4194308
+      offsLen: 3996517
+      offsSz: 15986068
+      lineSz: 64
+      sideSz: 64
+      sideBwtSz: 48
+      sideBwtLen: 192
+      numSides: 333044
+      numLines: 333044
+      ebwtTotLen: 21314816
+      ebwtTotSz: 21314816
+      color: 0
+      reverse: 1
+  Total time for backward call to driver() for mirror index: 00:00:28
+  	/usr/local/bin/STAR-avx2 --runMode genomeGenerate --genomeDir ./star_index --genomeFastaFiles Homo_sapiens.GRCh38.dna.chromosome.20.fa --runThreadN 2 --limitGenomeGenerateRAM 2147483648
+  	STAR version: 2.7.11b   compiled: 2025-11-14T12:06:42+0000 :/opt/conda/conda-bld/star_1763121846936/work/source
+  Nov 26 09:09:16 ..... started STAR run
+  Nov 26 09:09:16 ... starting to generate Genome files
+  Nov 26 09:09:17 ... starting to sort Suffix Array. This may take a long time...
+  Nov 26 09:09:17 ... sorting Suffix Array chunks and saving them to disk...
+  Nov 26 09:10:02 ... loading chunks from disk, packing SA...
+  Nov 26 09:10:13 ... finished generating suffix array
+  Nov 26 09:10:13 ... generating Suffix Array index
+
+Command error:
+      ftabChars: 10
+      eftabLen: 20
+      eftabSz: 80
+      ftabLen: 1048577
+      ftabSz: 4194308
+      offsLen: 3996517
+      offsSz: 15986068
+      lineSz: 64
+      sideSz: 64
+      sideBwtSz: 48
+      sideBwtLen: 192
+      numSides: 333044
+      numLines: 333044
+      ebwtTotLen: 21314816
+      ebwtTotSz: 21314816
+      color: 0
+      reverse: 1
+  Renaming ./ribosomal_index/rRNA.3.bt2.tmp to ./ribosomal_index/rRNA.3.bt2
+  Total time for backward call to driver() for mirror index: 00:00:28
+  Renaming ./ribosomal_index/rRNA.4.bt2.tmp to ./ribosomal_index/rRNA.4.bt2
+  Renaming ./ribosomal_index/rRNA.1.bt2.tmp to ./ribosomal_index/rRNA.1.bt2
+  Renaming ./ribosomal_index/rRNA.2.bt2.tmp to ./ribosomal_index/rRNA.2.bt2
+  Renaming ./ribosomal_index/rRNA.rev.1.bt2.tmp to ./ribosomal_index/rRNA.rev.1.bt2
+  Renaming ./ribosomal_index/rRNA.rev.2.bt2.tmp to ./ribosomal_index/rRNA.rev.2.bt2
+  	/usr/local/bin/STAR-avx2 --runMode genomeGenerate --genomeDir ./star_index --genomeFastaFiles Homo_sapiens.GRCh38.dna.chromosome.20.fa --runThreadN 2 --limitGenomeGenerateRAM 2147483648
+  	STAR version: 2.7.11b   compiled: 2025-11-14T12:06:42+0000 :/opt/conda/conda-bld/star_1763121846936/work/source
+  Nov 26 09:09:16 ..... started STAR run
+  Nov 26 09:09:16 ... starting to generate Genome files
+  !!!!! WARNING: --genomeSAindexNbases 14 is too large for the genome size=64444167, which may cause seg-fault at the mapping step. Re-run genome generation with recommended --genomeSAindexNbases 11
+  Nov 26 09:09:17 ... starting to sort Suffix Array. This may take a long time...
+  Nov 26 09:09:17 ... sorting Suffix Array chunks and saving them to disk...
+  Nov 26 09:10:02 ... loading chunks from disk, packing SA...
+  Nov 26 09:10:13 ... finished generating suffix array
+  Nov 26 09:10:13 ... generating Suffix Array index
+  Terminated
+  Traceback (most recent call last):
+    File "/usr/local/bin/prepare-rpbp-genome", line 11, in <module>
+      sys.exit(main())
+               ^^^^^^
+    File "/usr/local/lib/python3.12/site-packages/rpbp/reference_preprocessing/prepare_rpbp_genome.py", line 275, in main
+      shell_utils.call_if_not_exists(
+    File "/usr/local/lib/python3.12/site-packages/pbiotools/misc/shell_utils.py", line 366, in call_if_not_exists
+      ret_code = check_call(cmd, call=call, raise_on_error=raise_on_error)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/usr/local/lib/python3.12/site-packages/pbiotools/misc/shell_utils.py", line 202, in check_call
+      return check_call_step(cmd, call=call, raise_on_error=raise_on_error)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/usr/local/lib/python3.12/site-packages/pbiotools/misc/shell_utils.py", line 184, in check_call_step
+      raise subprocess.CalledProcessError(ret_code, cmd)
+  subprocess.CalledProcessError: Command 'STAR --runMode genomeGenerate --genomeDir ./star_index --genomeFastaFiles Homo_sapiens.GRCh38.dna.chromosome.20.fa --runThreadN 2 --limitGenomeGenerateRAM 2147483648 ' returned non-zero exit status 143.
+
+Work dir:
+  /workspaces/riboseq/work/70/cd20c9a25ef81b23fb97c5bb2698d6
+
+Container:
+  /workspaces/riboseq/work/singularity/depot.galaxyproject.org-singularity-rpbp-4.0.1--py312hf731ba3_0.img
+
+Tip: view the complete command output by changing to the process work dir and entering the command `cat .command.out`
+
+ -- Check '.nextflow.log' file for details
+Execution cancelled -- Finishing pending tasks before exit
+ERROR ~ Pipeline failed. Please refer to troubleshooting docs: https://nf-co.re/docs/usage/troubleshooting
+
+ -- Check '.nextflow.log' file for details
+-[0;35m[nf-core/riboseq][0;31m Pipeline completed with errors[0m-
