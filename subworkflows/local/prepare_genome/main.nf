@@ -260,6 +260,7 @@ workflow PREPARE_GENOME {
     ch_hisat2_index = Channel.empty()
     ch_hisat2_transcriptome_index = Channel.empty()
     if ('hisat2' in prepare_tool_indices) {
+        // Handle genome index: use provided or build from scratch
         if (hisat2_index) {
             if (hisat2_index.endsWith('.tar.gz')) {
                 ch_hisat2_index = UNTAR_HISAT2_INDEX ( [ [:], hisat2_index ] ).untar.map { it[1] }
@@ -275,12 +276,13 @@ workflow PREPARE_GENOME {
             HISAT2_BUILD ( ch_fasta.map { [ [:], it ] }, ch_gtf.map { [ [:], it ] }, ch_splicesites.map { [ [:], it ] } )
             ch_hisat2_index = HISAT2_BUILD.out.index.map { it[1] }
             ch_versions     = ch_versions.mix(HISAT2_BUILD.out.versions)
-
-            // Build transcriptome index for HISAT2
-            HISAT2_BUILD_TRANSCRIPTOME ( ch_transcript_fasta.map { [ [:], it ] }, ch_gtf.map { [ [:], it ] }, Channel.value([[:], []]) )
-            ch_hisat2_transcriptome_index = HISAT2_BUILD_TRANSCRIPTOME.out.index.map { it[1] }
-            ch_versions     = ch_versions.mix(HISAT2_BUILD_TRANSCRIPTOME.out.versions)
         }
+
+        // Always build transcriptome index for HISAT2 (regardless of whether genome index was provided)
+        // Users rarely provide transcriptome index from command line, so we always build it
+        HISAT2_BUILD_TRANSCRIPTOME ( ch_transcript_fasta.map { [ [:], it ] }, ch_gtf.map { [ [:], it ] }, Channel.value([[:], []]) )
+        ch_hisat2_transcriptome_index = HISAT2_BUILD_TRANSCRIPTOME.out.index.map { it[1] }
+        ch_versions     = ch_versions.mix(HISAT2_BUILD_TRANSCRIPTOME.out.versions)
     }
 
     //
