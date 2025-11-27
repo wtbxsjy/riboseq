@@ -4,5 +4,5 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  - bioconda::r-orfquant=1.02
+  - bioconda::orfquant=1.1.0
   - conda-forge::r-base>=4.0

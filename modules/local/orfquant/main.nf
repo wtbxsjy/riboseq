@@ -4,8 +4,8 @@ process ORFQUANT_RUN {
 
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/r-orfquant:1.02--r43hdfd78af_0' :
-        'quay.io/biocontainers/r-orfquant:1.02--r43hdfd78af_0' }"
+        'https://depot.galaxyproject.org/singularity/orfquant:1.1.0--r43h9ee0642_5' :
+        'quay.io/biocontainers/orfquant:1.1.0--r43h9ee0642_5' }"
 
     input:
     tuple val(meta), path(for_orfquant)   // *_for_ORFquant file from RiboseQC
