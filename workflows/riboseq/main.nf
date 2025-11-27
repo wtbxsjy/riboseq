@@ -16,6 +16,7 @@ include { FASTQ_ALIGN_HISAT2 } from '../../subworkflows/local/fastq_align_hisat2
 include { RPBP               } from '../../subworkflows/local/rpbp'
 include { RIBOCODE           } from '../../subworkflows/local/ribocode'
 include { RIBOSEQC           } from '../../subworkflows/local/riboseqc'
+include { ORFQUANT           } from '../../subworkflows/local/orfquant'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -343,6 +344,9 @@ workflow RIBOSEQ {
     //
     // RiboseQC: Comprehensive quality control for Ribo-seq data
     //
+    ch_riboseqc_annotation = Channel.empty()
+    ch_riboseqc_orfquant   = Channel.empty()
+
     if (!params.skip_riboseqc) {
         RIBOSEQC(
             ch_bams_for_analysis,
@@ -350,6 +354,24 @@ workflow RIBOSEQ {
             ch_fasta
         )
         ch_versions = ch_versions.mix(RIBOSEQC.out.versions)
+
+        // Store RiboseQC outputs for ORFquant
+        ch_riboseqc_annotation = RIBOSEQC.out.annotation
+        ch_riboseqc_orfquant   = RIBOSEQC.out.orfquant
+    }
+
+    //
+    // ORFquant: ORF detection and quantification using RiboseQC output
+    // Requires RiboseQC to generate the *_for_ORFquant input files
+    //
+    if (!params.skip_orfquant && !params.skip_riboseqc) {
+        ORFQUANT(
+            ch_riboseqc_orfquant,
+            ch_riboseqc_annotation
+        )
+        ch_versions = ch_versions.mix(ORFQUANT.out.versions)
+    } else if (!params.skip_orfquant && params.skip_riboseqc) {
+        log.warn "ORFquant requires RiboseQC output. Skipping ORFquant because RiboseQC is skipped."
     }
 
     //

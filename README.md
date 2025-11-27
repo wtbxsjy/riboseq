@@ -49,7 +49,7 @@ flowchart TB
     end
 
     subgraph QC["📊 Quality Control"]
-        O[RiboseQC<br/>Comprehensive QC]
+        O[RiboseQC<br/>Comprehensive QC +<br/>P-site Analysis]
         P[Ribo-TISH Quality<br/>P-site Offset]
     end
 
@@ -58,6 +58,7 @@ flowchart TB
         R[Ribotricer]
         S[RiboCode]
         T[rp-bp]
+        OQ[ORFquant<br/>Splice-aware<br/>Quantification]
     end
 
     subgraph Analysis["📈 Downstream Analysis"]
@@ -88,12 +89,14 @@ flowchart TB
     N --> T
     N --> U
 
+    O --> OQ
     O --> X
     P --> X
     Q --> W
     R --> W
     S --> W
     T --> W
+    OQ --> W
     U --> V
     X --> V
 ```
@@ -121,6 +124,7 @@ flowchart TB
 2. **Ribotricer** (default): Derive candidate ORFs from reference data and detect translated ORFs ([`Ribotricer`](https://github.com/smithlabcode/ribotricer))
 3. **RiboCode** (optional): Detect actively translating ORFs using transcriptome-aligned reads ([`RiboCode`](https://github.com/xztcwang/RiboCode))
 4. **rp-bp** (optional): Ribosome profiling with Bayesian predictions for translated ORFs ([`rp-bp`](https://github.com/dieterich-lab/rp-bp))
+5. **ORFquant** (default, requires RiboseQC): Splice-aware ORF detection and quantification at the single-ORF level ([`ORFquant`](https://github.com/lcalviell/ORFquant))
 
 ### Translational Efficiency Analysis
 
@@ -173,7 +177,7 @@ Both aligners produce genome and transcriptome alignments. Pre-built indexes can
 
 ### Selecting ORF Prediction Tools
 
-By default, the pipeline runs Ribo-TISH and Ribotricer. Additional tools can be enabled:
+By default, the pipeline runs Ribo-TISH, Ribotricer, RiboseQC, and ORFquant. Additional tools can be enabled:
 
 ```bash
 # Enable RiboCode (requires STAR or HISAT2 transcriptome alignments)
@@ -189,7 +193,11 @@ To skip specific tools:
 --skip_ribotish
 --skip_ribotricer
 --skip_riboseqc
+--skip_orfquant    # Note: ORFquant requires RiboseQC, skipping RiboseQC will also skip ORFquant
 ```
+
+> [!NOTE]
+> **ORFquant** uses the P-site analysis output from **RiboseQC** (`*_for_ORFquant` files). If you skip RiboseQC, ORFquant will also be automatically skipped.
 
 ### Including a translational efficiency analysis
 

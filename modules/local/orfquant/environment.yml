@@ -1,0 +1,8 @@
+name: orfquant
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - bioconda::r-orfquant=1.02
+  - conda-forge::r-base>=4.0
