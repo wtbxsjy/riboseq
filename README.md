@@ -19,27 +19,112 @@
 
 ## Introduction
 
-**nf-core/riboseq** is a bioinformatics pipeline for analysis of Ribo-seq data. It borrows heavily from nf-core/rnaseq in the preprocessing stages:
+**nf-core/riboseq** is a bioinformatics pipeline for analysis of Ribo-seq data. It borrows heavily from nf-core/rnaseq in the preprocessing stages.
 
-![nf-core/riboseq metro map](docs/images/nf-core-riboseq_metro_map.png)
+### Pipeline Overview
+
+```mermaid
+flowchart TB
+    subgraph Input
+        A[📁 FASTQ Files]
+        B[📋 Sample Sheet]
+    end
+
+    subgraph Preprocessing["🔧 Preprocessing"]
+        C[Merge FastQ<br/>cat]
+        D[Read QC<br/>FastQC]
+        E[UMI Extraction<br/>UMI-tools]
+        F[Trimming<br/>Trim Galore! / fastp]
+        G[Contaminant Removal<br/>Bowtie / Bowtie2]
+        H[Strandedness Inference<br/>fq + Salmon]
+    end
+
+    subgraph Alignment["🧬 Alignment"]
+        I{Aligner}
+        J[STAR]
+        K[HISAT2]
+        L[Genome BAM +<br/>Transcriptome BAM]
+        M[Sort & Index<br/>SAMtools]
+        N[UMI Deduplication<br/>UMI-tools]
+    end
+
+    subgraph QC["📊 Quality Control"]
+        O[RiboseQC<br/>Comprehensive QC]
+        P[Ribo-TISH Quality<br/>P-site Offset]
+    end
+
+    subgraph ORF["🔬 ORF Prediction"]
+        Q[Ribo-TISH Predict]
+        R[Ribotricer]
+        S[RiboCode]
+        T[rp-bp]
+    end
+
+    subgraph Analysis["📈 Downstream Analysis"]
+        U[anota2seq<br/>Translational Efficiency]
+    end
+
+    subgraph Output["📤 Output"]
+        V[MultiQC Report]
+        W[ORF Predictions]
+        X[QC Reports]
+    end
+
+    A --> C
+    B --> C
+    C --> D --> E --> F --> G --> H
+    H --> I
+    I -->|--aligner star| J
+    I -->|--aligner hisat2| K
+    J --> L
+    K --> L
+    L --> M --> N
+
+    N --> O
+    N --> P
+    N --> Q
+    N --> R
+    N --> S
+    N --> T
+    N --> U
+
+    O --> X
+    P --> X
+    Q --> W
+    R --> W
+    S --> W
+    T --> W
+    U --> V
+    X --> V
+```
+
+### Preprocessing Steps
 
 1. Merge re-sequenced FastQ files ([`cat`](http://www.linfo.org/cat.html))
 2. Sub-sample FastQ files and auto-infer strandedness ([`fq`](https://github.com/stjude-rust-labs/fq), [`Salmon`](https://combine-lab.github.io/salmon/))
 3. Read QC ([`FastQC`](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/))
 4. UMI extraction ([`UMI-tools`](https://github.com/CGATOxford/UMI-tools))
-5. Adapter and quality trimming ([`Trim Galore!`](https://github.com/FelixKrueger/TrimGalore))
-6. Removal of genome contaminants ([`BBSplit`](http://seqanswers.com/forums/showthread.php?t=41288))
-7. Removal of ribosomal RNA ([`SortMeRNA`](https://github.com/biocore/sortmerna))
-8. Genome alignment of reads, outputting both genome and transcriptome alignments with [`STAR`](https://github.com/alexdobin/STAR)
-9. Sort and index alignments ([`SAMtools`](https://sourceforge.net/projects/samtools/files/samtools/))
-10. UMI-based deduplication ([`UMI-tools`](https://github.com/CGATOxford/UMI-tools))
+5. Adapter and quality trimming ([`Trim Galore!`](https://github.com/FelixKrueger/TrimGalore) or [`fastp`](https://github.com/OpenGene/fastp))
+6. Removal of ribosomal/contaminant reads ([`Bowtie`](http://bowtie-bio.sourceforge.net/index.shtml) or [`Bowtie2`](http://bowtie-bio.sourceforge.net/bowtie2/index.shtml))
+7. Genome alignment with [`STAR`](https://github.com/alexdobin/STAR) or [`HISAT2`](http://daehwankimlab.github.io/hisat2/), outputting both genome and transcriptome alignments
+8. Sort and index alignments ([`SAMtools`](https://sourceforge.net/projects/samtools/files/samtools/))
+9. UMI-based deduplication ([`UMI-tools`](https://github.com/CGATOxford/UMI-tools))
 
-Differences occur in the downstream analysis steps. Currently these specialist steps are:
+### Ribo-seq Quality Control
 
-1. Check reads distribution around annotated protein coding regions on user provided transcripts, show frame bias and estimate P-site offset for different group of reads ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
-2. (default, optional) Predict translated open reading frames and/ or translation initiation sites _de novo_ from alignment data ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
-3. (default, optional) Derive candidate ORFs from reference data and detect translated ORFs from that list ([`Ribotricer`](https://github.com/smithlabcode/ribotricer))
-4. (optional) Use a translational efficiency approach to study the dynamics of transcription and translation, with [anota2seq](https://bioconductor.org/packages/release/bioc/html/anota2seq.html). **requires matched RNA-seq and Ribo-seq data**
+1. **RiboseQC**: Comprehensive quality control including read length distribution, P-site analysis, metagene profiles, codon periodicity, and frame bias ([`RiboseQC`](https://github.com/ohlerlab/RiboseQC))
+2. **Ribo-TISH Quality**: Check reads distribution around annotated protein coding regions, show frame bias and estimate P-site offset ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
+
+### ORF Prediction Tools
+
+1. **Ribo-TISH** (default): Predict translated ORFs and translation initiation sites _de novo_ from alignment data ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
+2. **Ribotricer** (default): Derive candidate ORFs from reference data and detect translated ORFs ([`Ribotricer`](https://github.com/smithlabcode/ribotricer))
+3. **RiboCode** (optional): Detect actively translating ORFs using transcriptome-aligned reads ([`RiboCode`](https://github.com/xztcwang/RiboCode))
+4. **rp-bp** (optional): Ribosome profiling with Bayesian predictions for translated ORFs ([`rp-bp`](https://github.com/dieterich-lab/rp-bp))
+
+### Translational Efficiency Analysis
+
+- **anota2seq** (optional): Study the dynamics of transcription and translation using matched RNA-seq and Ribo-seq data ([`anota2seq`](https://bioconductor.org/packages/release/bioc/html/anota2seq.html))
 
 ## Usage
 
@@ -64,6 +149,46 @@ nextflow run nf-core/riboseq \
    -profile <docker/singularity/.../institute> \
    --input samplesheet.csv \
    --outdir <OUTDIR>
+```
+
+### Choosing an Aligner
+
+The pipeline supports two aligners:
+
+- **STAR** (default): `--aligner star`
+- **HISAT2**: `--aligner hisat2`
+
+Both aligners produce genome and transcriptome alignments. Pre-built indexes can be provided using:
+
+```bash
+# For STAR
+--star_index /path/to/star/index
+
+# For HISAT2
+--hisat2_index /path/to/hisat2/genome/index
+```
+
+> [!NOTE]
+> The HISAT2 transcriptome index is always auto-built from your GTF/FASTA to ensure compatibility.
+
+### Selecting ORF Prediction Tools
+
+By default, the pipeline runs Ribo-TISH and Ribotricer. Additional tools can be enabled:
+
+```bash
+# Enable RiboCode (requires STAR or HISAT2 transcriptome alignments)
+--run_ribocode
+
+# Enable rp-bp (requires contaminant FASTA)
+--run_rpbp --contaminant_fasta /path/to/contaminants.fa
+```
+
+To skip specific tools:
+
+```bash
+--skip_ribotish
+--skip_ribotricer
+--skip_riboseqc
 ```
 
 ### Including a translational efficiency analysis
