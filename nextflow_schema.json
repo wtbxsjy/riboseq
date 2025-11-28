@@ -566,6 +566,16 @@
                     "type": "string",
                     "description": "Extra arguments to pass to RiboseQC analysis.",
                     "fa_icon": "fas fa-plus"
+                },
+                "skip_orfquant": {
+                    "type": "boolean",
+                    "description": "Skip ORFquant ORF detection and quantification. Note: ORFquant requires RiboseQC to be enabled.",
+                    "fa_icon": "fas fa-fast-forward"
+                },
+                "extra_orfquant_args": {
+                    "type": "string",
+                    "description": "Extra arguments to pass to ORFquant (e.g., 'plot_results=TRUE' to generate plots).",
+                    "fa_icon": "fas fa-plus"
                 }
             }
         },

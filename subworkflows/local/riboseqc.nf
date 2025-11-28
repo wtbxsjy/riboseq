@@ -34,6 +34,7 @@ workflow RIBOSEQC {
     ch_versions = ch_versions.mix(RIBOSEQC_ANALYSIS.out.versions)
 
     emit:
+    annotation      = RIBOSEQC_PREPAREANNOTATION.out.annotation  // channel: path(annotation) - *_Rannot file
     results         = RIBOSEQC_ANALYSIS.out.results          // channel: [ val(meta), path(results) ]
     results_all     = RIBOSEQC_ANALYSIS.out.results_all      // channel: [ val(meta), path(results_all) ]
     orfquant        = RIBOSEQC_ANALYSIS.out.orfquant         // channel: [ val(meta), path(orfquant) ]
