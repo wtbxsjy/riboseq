@@ -3,9 +3,11 @@ process ORFQUANT_RUN {
     label 'process_high'
 
     conda "${moduleDir}/environment.yml"
+    // Use RiboseQC container since ORFquant needs RiboseQC to load annotation files
+    // ORFquant will be installed at runtime from GitHub
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/orfquant:1.1.0--r43h9ee0642_5' :
-        'quay.io/biocontainers/orfquant:1.1.0--r43h9ee0642_5' }"
+        'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1' :
+        'quay.io/biocontainers/riboseqc:1.1--r36_1' }"
 
     input:
     tuple val(meta), path(for_orfquant)   // *_for_ORFquant file from RiboseQC
@@ -34,6 +36,15 @@ process ORFQUANT_RUN {
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
     """
     #!/usr/bin/env Rscript
+
+    # Install ORFquant from GitHub if not available (needed for container mode)
+    if (!requireNamespace("ORFquant", quietly = TRUE)) {
+        message("Installing ORFquant from GitHub...")
+        if (!requireNamespace("devtools", quietly = TRUE)) {
+            install.packages("devtools", repos = "https://cloud.r-project.org", quiet = TRUE)
+        }
+        devtools::install_github("ohlerlab/ORFquant", quiet = TRUE, upgrade = "never")
+    }
 
     library(ORFquant)
 
