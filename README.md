@@ -199,17 +199,6 @@ To skip specific tools:
 > [!NOTE]
 > **ORFquant** uses the P-site analysis output from **RiboseQC** (`*_for_ORFquant` files). If you skip RiboseQC, ORFquant will also be automatically skipped.
 
-### Including a translational efficiency analysis
-
-![anota2seq - fold change plot](docs/images/fc.png)
-
-In the translational efficiency analysis provided by [anota2seq](https://bioconductor.org/packages/release/bioc/html/anota2seq.html), we use matched pairs of Ribo-seq and RNA-seq data to study the relationship between transcription and translation as they differ between two treatment groups. For example the test data for this workflow has a contrasts file like:
-
-```csv
-id,variable,reference,target,batch,pair
-treated_vs_control,treatment,control,treated,,pair
-```
-
 This describes how to compare groups of samples between treament groups, and between RNA-seq and Ribo-seq. In order the columns are:
 
 - `id`: a unique identifier to use for the contrast
