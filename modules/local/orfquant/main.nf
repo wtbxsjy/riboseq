@@ -12,6 +12,7 @@ process ORFQUANT_RUN {
     input:
     tuple val(meta), path(for_orfquant)   // *_for_ORFquant file from RiboseQC
     path annotation                        // *_Rannot file from RiboseQC/ORFquant annotation
+    path fasta                             // Genome fasta file
 
     output:
     tuple val(meta), path("*_final_ORFquant_results")  , emit: results
@@ -35,15 +36,21 @@ process ORFQUANT_RUN {
     def write_tmp = args.contains('write_temp_files=FALSE') ? 'FALSE' : 'TRUE'
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
     """
-    #!/usr/bin/env Rscript
+    # Ensure fasta file is available with the expected name (if it was gzipped)
+    # The annotation might refer to the uncompressed name
+    if [[ "${fasta}" == *.gz ]]; then
+        gunzip -c ${fasta} > \$(basename ${fasta} .gz)
+    fi
 
+    # Write R script to file
+    cat <<'EOF' > run_orfquant.R
     # Install ORFquant from GitHub if not available (needed for container mode)
     if (!requireNamespace("ORFquant", quietly = TRUE)) {
         message("Installing ORFquant from GitHub...")
-        if (!requireNamespace("devtools", quietly = TRUE)) {
-            install.packages("devtools", repos = "https://cloud.r-project.org", quiet = TRUE)
+        if (!requireNamespace("remotes", quietly = TRUE)) {
+            install.packages("remotes", repos = "https://cloud.r-project.org", quiet = TRUE)
         }
-        devtools::install_github("ohlerlab/ORFquant", quiet = TRUE, upgrade = "never")
+        remotes::install_github("ohlerlab/ORFquant@v1.1", quiet = FALSE, upgrade = "never")
     }
 
     library(ORFquant)
@@ -84,6 +91,10 @@ process ORFQUANT_RUN {
         ),
         "versions.yml"
     )
+    EOF
+
+    # Run using the explicit Rscript path from Conda
+    \$CONDA_PREFIX/bin/Rscript run_orfquant.R
     """
 
     stub:

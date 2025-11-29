@@ -30,8 +30,9 @@ process RIBOSEQC_ANALYSIS {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def fast_mode = args.contains('fast_mode=FALSE') ? 'fast_mode = FALSE,' : 'fast_mode = TRUE,'
     """
-    #!/usr/bin/env Rscript
+    #!/bin/bash
 
+    cat <<EOF > script.R
     library(RiboseQC)
     library(Rsamtools)
 
@@ -59,6 +60,14 @@ process RIBOSEQC_ANALYSIS {
         ),
         "versions.yml"
     )
+    EOF
+
+    # Use Rscript from the Conda environment if available
+    if [[ -n "\$CONDA_PREFIX" ]]; then
+        "\$CONDA_PREFIX/bin/Rscript" script.R
+    else
+        Rscript script.R
+    fi
     """
 
     stub:

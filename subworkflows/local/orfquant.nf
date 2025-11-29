@@ -9,6 +9,7 @@ workflow ORFQUANT {
     take:
     ch_for_orfquant   // channel: [ val(meta), path(for_orfquant) ] - from RiboseQC
     ch_annotation     // channel: path(annotation) - *_Rannot file from RiboseQC
+    ch_fasta          // channel: path(fasta) - Genome fasta file
 
     main:
     ch_versions = Channel.empty()
@@ -18,7 +19,8 @@ workflow ORFQUANT {
     //
     ORFQUANT_RUN (
         ch_for_orfquant,
-        ch_annotation
+        ch_annotation,
+        ch_fasta
     )
     ch_versions = ch_versions.mix(ORFQUANT_RUN.out.versions)
 

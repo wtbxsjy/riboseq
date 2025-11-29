@@ -367,7 +367,8 @@ workflow RIBOSEQ {
     if (!params.skip_orfquant && !params.skip_riboseqc) {
         ORFQUANT(
             ch_riboseqc_orfquant,
-            ch_riboseqc_annotation
+            ch_riboseqc_annotation,
+            ch_fasta
         )
         ch_versions = ch_versions.mix(ORFQUANT.out.versions)
     } else if (!params.skip_orfquant && params.skip_riboseqc) {

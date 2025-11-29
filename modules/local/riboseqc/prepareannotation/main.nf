@@ -22,8 +22,9 @@ process RIBOSEQC_PREPAREANNOTATION {
     def args = task.ext.args ?: ''
     def prefix = gtf.baseName
     """
-    #!/usr/bin/env Rscript
+    #!/bin/bash
 
+    cat <<EOF > script.R
     library(RiboseQC)
 
     # Prepare annotation files
@@ -47,6 +48,14 @@ process RIBOSEQC_PREPAREANNOTATION {
         ),
         "versions.yml"
     )
+    EOF
+
+    # Use Rscript from the Conda environment if available
+    if [[ -n "\$CONDA_PREFIX" ]]; then
+        "\$CONDA_PREFIX/bin/Rscript" script.R
+    else
+        Rscript script.R
+    fi
     """
 
     stub:

@@ -34,7 +34,7 @@ process BOWTIE_ALIGN {
     def unaligned_flag = "--un ${prefix}_unmapped"
 
     """
-    INDEX=`find -L ${index} -name "*.1.ebwt" | sed 's/.1.ebwt//'`
+    INDEX=`find -L ${index} -name "*.1.ebwt" ! -name "*.rev.1.ebwt" | sed 's/.1.ebwt//'`
 
     bowtie \\
         $args \\

@@ -27,7 +27,7 @@ process CUSTOM_GETCHROMSIZES {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        getchromsizes: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
+        getchromsizes: \$(samtools --version 2>&1 | head -n1 | sed 's/^.*samtools //')
     END_VERSIONS
     """
 
@@ -41,7 +41,7 @@ process CUSTOM_GETCHROMSIZES {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        getchromsizes: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
+        getchromsizes: \$(samtools --version 2>&1 | head -n1 | sed 's/^.*samtools //')
     END_VERSIONS
     """
 }
