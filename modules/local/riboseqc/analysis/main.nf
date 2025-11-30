@@ -20,6 +20,7 @@ process RIBOSEQC_ANALYSIS {
     tuple val(meta), path("*_P_sites_*.bedgraph")     , emit: psites_bedgraph, optional: true
     tuple val(meta), path("*_P_sites_calcs")          , emit: psites_calcs, optional: true
     tuple val(meta), path("*_junctions")              , emit: junctions, optional: true
+    tuple val(meta), path("*_ggribo.tsv")             , emit: ggribo, optional: true
     path "versions.yml"                               , emit: versions
 
     when:
@@ -68,6 +69,19 @@ process RIBOSEQC_ANALYSIS {
     else
         Rscript script.R
     fi
+
+    # Convert P-sites bedgraphs to ggRibo input format
+    # ggRibo format: Count \t Chromosome \t Position \t Strand
+    # BedGraph format: Chr \t Start \t End \t Count
+    # Note: BedGraph is 0-based start, 1-based end. ggRibo expects 1-based position.
+    # Since P-sites are single nucleotides, Start+1 = End. We use End (col 3) as Position.
+
+    if [ -f "${prefix}_P_sites_plus.bedgraph" ]; then
+        awk -v OFS='\\t' '{print \$4, \$1, \$3, "+"}' "${prefix}_P_sites_plus.bedgraph" > "${prefix}_ggribo.tsv"
+    fi
+    if [ -f "${prefix}_P_sites_minus.bedgraph" ]; then
+        awk -v OFS='\\t' '{print \$4, \$1, \$3, "-"}' "${prefix}_P_sites_minus.bedgraph" >> "${prefix}_ggribo.tsv"
+    fi
     """
 
     stub:
@@ -82,6 +96,7 @@ process RIBOSEQC_ANALYSIS {
     touch ${prefix}_P_sites_minus.bedgraph
     touch ${prefix}_P_sites_calcs
     touch ${prefix}_junctions
+    touch ${prefix}_ggribo.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

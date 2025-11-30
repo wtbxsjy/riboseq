@@ -62,7 +62,7 @@ flowchart TB
     end
 
     subgraph Analysis["📈 Downstream Analysis"]
-        U[anota2seq<br/>Translational Efficiency]
+        U[ggRibo<br/>Output Support]
     end
 
     subgraph Output["📤 Output"]
@@ -97,7 +97,7 @@ flowchart TB
     S --> W
     T --> W
     OQ --> W
-    U --> V
+    U --> X
     X --> V
 ```
 
@@ -117,6 +117,7 @@ flowchart TB
 
 1. **RiboseQC**: Comprehensive quality control including read length distribution, P-site analysis, metagene profiles, codon periodicity, and frame bias ([`RiboseQC`](https://github.com/ohlerlab/RiboseQC))
 2. **Ribo-TISH Quality**: Check reads distribution around annotated protein coding regions, show frame bias and estimate P-site offset ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
+3. **ggRibo Output**: Generates compatible output files for visualization with the [`ggRibo`](https://github.com/hsinyenwu/ggRibo) R package.
 
 ### ORF Prediction Tools
 
@@ -125,10 +126,6 @@ flowchart TB
 3. **RiboCode** (optional): Detect actively translating ORFs using transcriptome-aligned reads ([`RiboCode`](https://github.com/xztcwang/RiboCode))
 4. **rp-bp** (optional): Ribosome profiling with Bayesian predictions for translated ORFs ([`rp-bp`](https://github.com/dieterich-lab/rp-bp))
 5. **ORFquant** (default, requires RiboseQC): Splice-aware ORF detection and quantification at the single-ORF level ([`ORFquant`](https://github.com/lcalviell/ORFquant))
-
-### Translational Efficiency Analysis
-
-- **anota2seq** (optional): Study the dynamics of transcription and translation using matched RNA-seq and Ribo-seq data ([`anota2seq`](https://bioconductor.org/packages/release/bioc/html/anota2seq.html))
 
 ## Usage
 
@@ -198,15 +195,6 @@ To skip specific tools:
 
 > [!NOTE]
 > **ORFquant** uses the P-site analysis output from **RiboseQC** (`*_for_ORFquant` files). If you skip RiboseQC, ORFquant will also be automatically skipped.
-
-This describes how to compare groups of samples between treament groups, and between RNA-seq and Ribo-seq. In order the columns are:
-
-- `id`: a unique identifier to use for the contrast
-- 'variable`: which vaiable (column) of the sample sheet should be used to separate the treatment groups?
-- `reference`: which value of the variable column should be used to select samples to be used as the reference/ base group?
-- `target`: which value of the variable column should be used to select samples to be used as the target/treated group?
-- `batch`: (optional) specify a variable in the sample sheet that defines sample batches
-- `pair`: (optional) specify a variable in the sample shet that defines sample pairing between RNA-seq and Ribo-seq samples. If not specified, it is assumed that the two types of sample are ordered the same.
 
 > [!WARNING]
 > Please provide pipeline parameters via the CLI or Nextflow `-params-file` option. Custom config files including those provided by the `-c` Nextflow option can be used to provide any configuration _**except for parameters**_; see [docs](https://nf-co.re/docs/usage/getting_started/configuration#custom-configuration-files).
