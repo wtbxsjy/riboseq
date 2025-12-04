@@ -143,6 +143,26 @@ CONTROL_REP1,AEG588A1_S1_L002_R1_001.fastq.gz,AEG588A1_S1_L002_R2_001.fastq.gz,f
 
 Each row represents a fastq file (single-end) or a pair of fastq files (paired end). Each row should have a 'type' value of `riboseq`, `tiseq` or `rnaseq`. Future iterations of the workflow will conduct paired analysis of matched riboseq and rnaseq samples to accomplish analysis types such as 'translational efficiency, but in the current version you should set this to `riboseq` or `tiseq` for reglar Ribo-seq or TI-seq data respectively.
 
+### Starting from BAM Files
+
+If you already have aligned BAM files (genome-aligned), you can skip preprocessing and alignment by providing BAM input:
+
+`samplesheet_bam.csv`:
+
+```csv
+sample,bam,bam_index,strandedness,type
+CONTROL_REP1,/path/to/sample1.bam,/path/to/sample1.bam.bai,forward,riboseq
+CONTROL_REP2,/path/to/sample2.bam,,forward,riboseq
+```
+
+> [!NOTE]
+> **BAM Input Mode:**
+> - Provide genome-aligned BAM files (not transcriptome BAM)
+> - The `bam_index` column is optional - if not provided, the pipeline will generate the index automatically
+> - `strandedness` must be explicitly specified (`forward`, `reverse`, or `unstranded`) - `auto` is not supported
+> - UMI deduplication and RiboCode are automatically skipped in BAM input mode
+> - All samples in a samplesheet must be the same type (all FASTQ or all BAM)
+
 Now, you can run the pipeline using:
 
 ```bash

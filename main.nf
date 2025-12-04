@@ -51,9 +51,13 @@ params.salmon_index      = getGenomeAttribute('salmon')
 //
 workflow NFCORE_RIBOSEQ {
 
+    take:
+    ch_samplesheet  // channel: [ meta, bam, bai ] for BAM input OR [ meta, [ fastqs ] ] for FASTQ input
+    is_bam_input    // boolean: true if input is BAM files
+
     main:
 
-    ch_versions = Channel.empty()
+    ch_versions = channel.empty()
 
     // Validate contaminant filtering parameters
     if (!params.skip_contaminant_filter && !params.contaminant_fasta) {
@@ -98,10 +102,10 @@ workflow NFCORE_RIBOSEQ {
     //
     // WORKFLOW: Run nf-core/riboseq workflow
     //
-    ch_samplesheet = Channel.value(file(params.input, checkIfExists: true))
 
     RIBOSEQ (
         ch_samplesheet,
+        is_bam_input,
         ch_versions,
         PREPARE_GENOME.out.fasta,
         PREPARE_GENOME.out.gtf,
@@ -146,7 +150,10 @@ workflow {
     //
     // WORKFLOW: Run main workflow
     //
-    NFCORE_RIBOSEQ ()
+    NFCORE_RIBOSEQ (
+        PIPELINE_INITIALISATION.out.samplesheet,
+        PIPELINE_INITIALISATION.out.is_bam_input
+    )
 
     //
     // SUBWORKFLOW: Run completion tasks

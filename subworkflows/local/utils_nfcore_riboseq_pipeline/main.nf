@@ -71,30 +71,68 @@ workflow PIPELINE_INITIALISATION {
     //
     // Create channel from input file provided through params.input
     //
+    // Detect input mode: FASTQ or BAM based on first row
+    //
 
-    Channel
-        .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
-        .map {
-            meta, fastq_1, fastq_2 ->
-                if (!fastq_2) {
-                    return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
-                } else {
-                    return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
-                }
+    def samplesheet_list = samplesheetToList(params.input, "${projectDir}/assets/schema_input.json")
+    def first_row = samplesheet_list[0]
+    def is_bam_input = first_row.bam ? true : false
+
+    // Validate that all rows have consistent input type (all FASTQ or all BAM)
+    samplesheet_list.each { row ->
+        def row_has_bam = row.bam ? true : false
+        if (row_has_bam != is_bam_input) {
+            error("Mixed input types detected in samplesheet. All samples must be either FASTQ or BAM input, not a mixture of both.")
         }
-        .groupTuple()
-        .map { samplesheet ->
-            validateInputSamplesheet(samplesheet)
+        // For BAM input, validate strandedness is not 'auto'
+        if (row_has_bam && row.strandedness == 'auto') {
+            error("BAM input mode does not support 'auto' strandedness. Please specify 'forward', 'reverse', or 'unstranded' for sample: ${row.sample}")
         }
-        .map {
-            meta, fastqs ->
-                return [ meta, fastqs.flatten() ]
-        }
-        .set { ch_samplesheet }
+    }
+
+    if (is_bam_input) {
+        log.info "BAM input mode detected. Skipping preprocessing, alignment, UMI deduplication, and RiboCode."
+
+        channel
+            .fromList(samplesheet_list)
+            .map { row ->
+                def meta = [
+                    id: row.sample,
+                    strandedness: row.strandedness,
+                    sample_type: row.type,
+                    single_end: true  // Default to single-end for Ribo-seq BAM input
+                ]
+                def bam = file(row.bam, checkIfExists: true)
+                def bai = row.bam_index ? file(row.bam_index, checkIfExists: true) : null
+                return [ meta, bam, bai ]
+            }
+            .set { ch_samplesheet }
+    } else {
+        channel
+            .fromList(samplesheet_list)
+            .map {
+                meta, fastq_1, fastq_2, _bam, _bam_index ->
+                    if (!fastq_2) {
+                        return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
+                    } else {
+                        return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
+                    }
+            }
+            .groupTuple()
+            .map { samplesheet ->
+                validateInputSamplesheet(samplesheet)
+            }
+            .map {
+                meta, fastqs ->
+                    return [ meta, fastqs.flatten() ]
+            }
+            .set { ch_samplesheet }
+    }
 
     emit:
-    samplesheet = ch_samplesheet
-    versions    = ch_versions
+    samplesheet   = ch_samplesheet
+    is_bam_input  = is_bam_input
+    versions      = ch_versions
 }
 
 /*

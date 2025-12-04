@@ -27,6 +27,7 @@ include { ORFQUANT           } from '../../subworkflows/local/orfquant'
 //
 // MODULE: Installed directly from nf-core/modules
 //
+include { SAMTOOLS_INDEX                                       } from '../../modules/nf-core/samtools/index'
 include { MULTIQC                                              } from '../../modules/nf-core/multiqc/main'
 include { SAMTOOLS_SORT                                        } from '../../modules/nf-core/samtools/sort'
 include { UMITOOLS_PREPAREFORRSEM as UMITOOLS_PREPAREFORSALMON } from '../../modules/nf-core/umitools/prepareforrsem'
@@ -60,7 +61,8 @@ include { validateInputSamplesheet } from '../../subworkflows/local/utils_nfcore
 workflow RIBOSEQ {
 
     take:
-    ch_samplesheet      // channel: path(sample_sheet.csv)
+    ch_samplesheet      // channel: path(sample_sheet.csv) OR [ meta, bam, bai ] for BAM input
+    is_bam_input        // boolean: true if input is BAM files
     ch_versions         // channel: [ path(versions.yml) ]
     ch_fasta            // channel: path(genome.fasta)
     ch_gtf              // channel: path(genome.gtf)
@@ -99,144 +101,187 @@ workflow RIBOSEQ {
     ch_multiqc_files = Channel.empty()
     ch_splicesites   = Channel.empty()
 
-    //
-    // Create input channel from input file provided through params.input
-    //
-    Channel
-        .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
-        .map {
-            meta, fastq_1, fastq_2 ->
-                if (!fastq_2) {
-                    return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
-                } else {
-                    return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
-                }
-        }
-        .groupTuple()
-        .map {
-            validateInputSamplesheet(it)
-        }
-        .set { ch_fastq }
-
-    //
-    // SUBWORKFLOW: preprocess reads for RNA-seq. Includes trimming,
-    // contaminant removal, strandedness inference
-    //
-
-    // The subworkflow only has to do Salmon indexing if it discovers 'auto'
-    // samples, and if we haven't already made one elsewhere
-    salmon_index_available = params.salmon_index || (!params.skip_pseudo_alignment && params.pseudo_aligner == 'salmon')
-
-    FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS (
-        ch_fastq,
-        ch_fasta,
-        ch_transcript_fasta,
-        ch_gtf,
-        ch_salmon_index,
-        ch_contaminant_index,
-        params.skip_contaminant_filter,
-        params.filter_aligner,
-        params.save_contaminant_reads,
-        params.skip_fastqc || params.skip_qc,
-        params.skip_trimming,
-        params.skip_umi_extract,
-        !salmon_index_available,
-        params.trimmer,
-        params.min_trimmed_reads,
-        params.save_trimmed,
-        params.with_umi,
-        params.umi_discard_read,
-        params.stranded_threshold,
-        params.unstranded_threshold,
-        params.skip_linting
-    )
-
-    ch_multiqc_files = ch_multiqc_files.mix(FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.multiqc_files)
-    ch_versions      = ch_versions.mix(FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.versions)
-
-    //
-    // SUBWORKFLOW: align with STAR or HISAT2
-    //
-
+    // Initialize BAM channels
     ch_genome_bam        = Channel.empty()
     ch_genome_bam_index  = Channel.empty()
     ch_transcriptome_bam = Channel.empty()
     ch_transcriptome_bai = Channel.empty()
-
-    if (params.aligner == 'star') {
-        FASTQ_ALIGN_STAR(
-            FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
-            ch_star_index.map { [ [:], it ] },
-            ch_gtf.map { [ [:], it ] },
-            params.star_ignore_sjdbgtf,
-            '',
-            params.seq_center ?: '',
-            ch_fasta.map { [ [:], it ] },
-            ch_transcript_fasta.map { [ [:], it ] }
-        )
-
-        ch_genome_bam              = FASTQ_ALIGN_STAR.out.bam
-        ch_genome_bam_index        = FASTQ_ALIGN_STAR.out.bai
-        ch_transcriptome_bam       = FASTQ_ALIGN_STAR.out.orig_bam_transcript
-        ch_transcriptome_bai       = FASTQ_ALIGN_STAR.out.bai_transcript
-        ch_versions                = ch_versions.mix(FASTQ_ALIGN_STAR.out.versions)
-
-        ch_multiqc_files = ch_multiqc_files
-            .mix(FASTQ_ALIGN_STAR.out.stats.collect{it[1]})
-            .mix(FASTQ_ALIGN_STAR.out.flagstat.collect{it[1]})
-            .mix(FASTQ_ALIGN_STAR.out.idxstats.collect{it[1]})
-            .mix(FASTQ_ALIGN_STAR.out.log_final.collect{it[1]})
-    } else if (params.aligner == 'hisat2') {
-
-        // Extract splice sites for HISAT2
-        HISAT2_EXTRACTSPLICESITES ( ch_gtf.map { [ [:], it ] } )
-        ch_splicesites = HISAT2_EXTRACTSPLICESITES.out.txt
-        ch_versions = ch_versions.mix(HISAT2_EXTRACTSPLICESITES.out.versions)
-
-        FASTQ_ALIGN_HISAT2(
-            FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
-            ch_hisat2_index.map { [ [:], it ] },
-            ch_hisat2_transcriptome_index.map { [ [:], it ] },
-            ch_splicesites,
-            ch_fasta.map { [ [:], it ] }
-        )
-
-        ch_genome_bam        = FASTQ_ALIGN_HISAT2.out.bam
-        ch_transcriptome_bam = FASTQ_ALIGN_HISAT2.out.transcriptome_bam
-        ch_transcriptome_bai = FASTQ_ALIGN_HISAT2.out.transcriptome_bai
-        ch_genome_bam_index  = FASTQ_ALIGN_HISAT2.out.bai
-        ch_versions          = ch_versions.mix(FASTQ_ALIGN_HISAT2.out.versions)
-
-        ch_multiqc_files = ch_multiqc_files
-            .mix(FASTQ_ALIGN_HISAT2.out.stats.collect{it[1]})
-            .mix(FASTQ_ALIGN_HISAT2.out.flagstat.collect{it[1]})
-            .mix(FASTQ_ALIGN_HISAT2.out.idxstats.collect{it[1]})
-    }
+    ch_fastq             = Channel.empty()
 
     //
-    // SUBWORKFLOW: Remove duplicate reads from BAM file based on UMIs
+    // BAM INPUT MODE: Skip preprocessing and alignment
     //
+    if (is_bam_input) {
+        log.info "=".multiply(60)
+        log.info "BAM INPUT MODE ACTIVATED"
+        log.info "Skipping: preprocessing, alignment, UMI deduplication, RiboCode"
+        log.info "=".multiply(60)
 
-    if (params.with_umi) {
+        // ch_samplesheet contains [ meta, bam, bai ] tuples
+        // Split into BAM and BAI channels, generate index if not provided
+        ch_samplesheet
+            .branch { meta, bam, bai ->
+                with_index: bai != null
+                    return [ meta, bam, bai ]
+                without_index: bai == null
+                    return [ meta, bam ]
+            }
+            .set { ch_bam_input }
 
-        BAM_DEDUP_UMI(
-            ch_genome_bam.join(ch_genome_bam_index, by: [0]),
-            ch_fasta.map { [ [:], it ] },
-            params.umi_dedup_tool,
-            params.umitools_dedup_stats,
-            params.bam_csi_index,
-            ch_transcriptome_bam,
-            ch_transcript_fasta.map { [ [:], it ] }
+        // Generate index for BAMs without index
+        SAMTOOLS_INDEX ( ch_bam_input.without_index )
+        ch_versions = ch_versions.mix(SAMTOOLS_INDEX.out.versions.first())
+
+        // Combine indexed and already-indexed BAMs
+        ch_bam_with_index = ch_bam_input.with_index
+            .mix(
+                ch_bam_input.without_index
+                    .join(SAMTOOLS_INDEX.out.bai)
+            )
+
+        // Set genome BAM channels
+        ch_genome_bam = ch_bam_with_index.map { meta, bam, bai -> [ meta, bam ] }
+        ch_genome_bam_index = ch_bam_with_index.map { meta, bam, bai -> [ meta, bai ] }
+
+    } else {
+        //
+        // FASTQ INPUT MODE: Standard preprocessing and alignment
+        //
+
+        //
+        // Create input channel from input file provided through params.input
+        //
+        Channel
+            .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
+            .map {
+                meta, fastq_1, fastq_2, _bam, _bam_index ->
+                    if (!fastq_2) {
+                        return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
+                    } else {
+                        return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
+                    }
+            }
+            .groupTuple()
+            .map {
+                validateInputSamplesheet(it)
+            }
+            .set { ch_fastq }
+
+        //
+        // SUBWORKFLOW: preprocess reads for RNA-seq. Includes trimming,
+        // contaminant removal, strandedness inference
+        //
+
+        // The subworkflow only has to do Salmon indexing if it discovers 'auto'
+        // samples, and if we haven't already made one elsewhere
+        salmon_index_available = params.salmon_index || (!params.skip_pseudo_alignment && params.pseudo_aligner == 'salmon')
+
+        FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS (
+            ch_fastq,
+            ch_fasta,
+            ch_transcript_fasta,
+            ch_gtf,
+            ch_salmon_index,
+            ch_contaminant_index,
+            params.skip_contaminant_filter,
+            params.filter_aligner,
+            params.save_contaminant_reads,
+            params.skip_fastqc || params.skip_qc,
+            params.skip_trimming,
+            params.skip_umi_extract,
+            !salmon_index_available,
+            params.trimmer,
+            params.min_trimmed_reads,
+            params.save_trimmed,
+            params.with_umi,
+            params.umi_discard_read,
+            params.stranded_threshold,
+            params.unstranded_threshold,
+            params.skip_linting
         )
 
-        ch_genome_bam        = BAM_DEDUP_UMI.out.bam
-        ch_transcriptome_bam = BAM_DEDUP_UMI.out.transcriptome_bam
-        ch_genome_bam_index  = BAM_DEDUP_UMI.out.bai
-        ch_versions          = ch_versions.mix(BAM_DEDUP_UMI.out.versions)
+        ch_multiqc_files = ch_multiqc_files.mix(FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.multiqc_files)
+        ch_versions      = ch_versions.mix(FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.versions)
 
-        ch_multiqc_files = ch_multiqc_files
-            .mix(BAM_DEDUP_UMI.out.multiqc_files)
-    }
+        //
+        // SUBWORKFLOW: align with STAR or HISAT2
+        //
+
+        if (params.aligner == 'star') {
+            FASTQ_ALIGN_STAR(
+                FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
+                ch_star_index.map { [ [:], it ] },
+                ch_gtf.map { [ [:], it ] },
+                params.star_ignore_sjdbgtf,
+                '',
+                params.seq_center ?: '',
+                ch_fasta.map { [ [:], it ] },
+                ch_transcript_fasta.map { [ [:], it ] }
+            )
+
+            ch_genome_bam              = FASTQ_ALIGN_STAR.out.bam
+            ch_genome_bam_index        = FASTQ_ALIGN_STAR.out.bai
+            ch_transcriptome_bam       = FASTQ_ALIGN_STAR.out.orig_bam_transcript
+            ch_transcriptome_bai       = FASTQ_ALIGN_STAR.out.bai_transcript
+            ch_versions                = ch_versions.mix(FASTQ_ALIGN_STAR.out.versions)
+
+            ch_multiqc_files = ch_multiqc_files
+                .mix(FASTQ_ALIGN_STAR.out.stats.collect{it[1]})
+                .mix(FASTQ_ALIGN_STAR.out.flagstat.collect{it[1]})
+                .mix(FASTQ_ALIGN_STAR.out.idxstats.collect{it[1]})
+                .mix(FASTQ_ALIGN_STAR.out.log_final.collect{it[1]})
+        } else if (params.aligner == 'hisat2') {
+
+            // Extract splice sites for HISAT2
+            HISAT2_EXTRACTSPLICESITES ( ch_gtf.map { [ [:], it ] } )
+            ch_splicesites = HISAT2_EXTRACTSPLICESITES.out.txt
+            ch_versions = ch_versions.mix(HISAT2_EXTRACTSPLICESITES.out.versions)
+
+            FASTQ_ALIGN_HISAT2(
+                FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS.out.reads,
+                ch_hisat2_index.map { [ [:], it ] },
+                ch_hisat2_transcriptome_index.map { [ [:], it ] },
+                ch_splicesites,
+                ch_fasta.map { [ [:], it ] }
+            )
+
+            ch_genome_bam        = FASTQ_ALIGN_HISAT2.out.bam
+            ch_transcriptome_bam = FASTQ_ALIGN_HISAT2.out.transcriptome_bam
+            ch_transcriptome_bai = FASTQ_ALIGN_HISAT2.out.transcriptome_bai
+            ch_genome_bam_index  = FASTQ_ALIGN_HISAT2.out.bai
+            ch_versions          = ch_versions.mix(FASTQ_ALIGN_HISAT2.out.versions)
+
+            ch_multiqc_files = ch_multiqc_files
+                .mix(FASTQ_ALIGN_HISAT2.out.stats.collect{it[1]})
+                .mix(FASTQ_ALIGN_HISAT2.out.flagstat.collect{it[1]})
+                .mix(FASTQ_ALIGN_HISAT2.out.idxstats.collect{it[1]})
+        }
+
+        //
+        // SUBWORKFLOW: Remove duplicate reads from BAM file based on UMIs
+        //
+
+        if (params.with_umi) {
+
+            BAM_DEDUP_UMI(
+                ch_genome_bam.join(ch_genome_bam_index, by: [0]),
+                ch_fasta.map { [ [:], it ] },
+                params.umi_dedup_tool,
+                params.umitools_dedup_stats,
+                params.bam_csi_index,
+                ch_transcriptome_bam,
+                ch_transcript_fasta.map { [ [:], it ] }
+            )
+
+            ch_genome_bam        = BAM_DEDUP_UMI.out.bam
+            ch_transcriptome_bam = BAM_DEDUP_UMI.out.transcriptome_bam
+            ch_genome_bam_index  = BAM_DEDUP_UMI.out.bai
+            ch_versions          = ch_versions.mix(BAM_DEDUP_UMI.out.versions)
+
+            ch_multiqc_files = ch_multiqc_files
+                .mix(BAM_DEDUP_UMI.out.multiqc_files)
+        }
+    }  // End of FASTQ input mode
 
     //
     // Take the riboseq samples and route to ribotish
@@ -321,7 +366,7 @@ workflow RIBOSEQ {
         ch_versions = ch_versions.mix(RPBP.out.versions)
     }
 
-    if (!params.skip_ribocode) {
+    if (!params.skip_ribocode && !is_bam_input) {
         if (params.aligner != 'star' && params.aligner != 'hisat2') {
             log.warn "RiboCode requires STAR or HISAT2 alignment to generate transcriptome BAMs. Skipping RiboCode."
         } else {
@@ -337,6 +382,8 @@ workflow RIBOSEQ {
              )
              ch_versions = ch_versions.mix(RIBOCODE.out.versions)
         }
+    } else if (!params.skip_ribocode && is_bam_input) {
+        log.warn "RiboCode requires transcriptome BAM which is not available in BAM input mode. Skipping RiboCode."
     }
 
     //

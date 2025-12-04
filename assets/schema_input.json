@@ -18,7 +18,7 @@
                 "format": "file-path",
                 "exists": true,
                 "pattern": "^\\S+\\.f(ast)?q\\.gz$",
-                "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+                "errorMessage": "FastQ file for reads 1 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
             },
             "fastq_2": {
                 "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
@@ -34,6 +34,20 @@
                     }
                 ]
             },
+            "bam": {
+                "type": "string",
+                "format": "file-path",
+                "exists": true,
+                "pattern": "^\\S+\\.bam$",
+                "errorMessage": "BAM file path cannot contain spaces and must have extension '.bam'"
+            },
+            "bam_index": {
+                "type": "string",
+                "format": "file-path",
+                "exists": true,
+                "pattern": "^\\S+\\.(bai|csi)$",
+                "errorMessage": "BAM index file path cannot contain spaces and must have extension '.bai' or '.csi'"
+            },
             "strandedness": {
                 "type": "string",
                 "errorMessage": "Strandedness must be provided and be one of 'auto', 'forward', 'reverse' or 'unstranded'",
@@ -47,6 +61,25 @@
                 "meta": ["sample_type"]
             }
         },
-        "required": ["sample", "fastq_1", "strandedness", "type"]
+        "required": ["sample", "strandedness", "type"],
+        "oneOf": [
+            {
+                "required": ["fastq_1"],
+                "properties": {
+                    "bam": { "maxLength": 0 }
+                }
+            },
+            {
+                "required": ["bam"],
+                "properties": {
+                    "fastq_1": { "maxLength": 0 },
+                    "fastq_2": { "maxLength": 0 },
+                    "strandedness": {
+                        "enum": ["forward", "reverse", "unstranded"],
+                        "errorMessage": "When using BAM input, strandedness must be 'forward', 'reverse' or 'unstranded' (not 'auto')"
+                    }
+                }
+            }
+        ]
     }
 }
