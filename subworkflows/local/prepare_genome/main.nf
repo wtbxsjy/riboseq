@@ -199,26 +199,25 @@ workflow PREPARE_GENOME {
                 exit 1, 'Contaminant FASTA is required to build Bowtie/Bowtie2 index.'
             }
 
-            // Work directly with the provided path to avoid any name collisions
-            def contaminant_file = file(contaminant_fasta_path, checkIfExists: true)
-            def contaminant_channel
+            // Build contaminant index from FASTA
+            // Handle gzipped vs plain FASTA
             if (contaminant_fasta_path.endsWith('.gz')) {
-                contaminant_channel = GUNZIP_CONTAM_FASTA ( [ [:], contaminant_file ] ).gunzip.map { it[1] }
-                ch_versions         = ch_versions.mix(GUNZIP_CONTAM_FASTA.out.versions)
+                GUNZIP_CONTAM_FASTA ( [ [:], file(contaminant_fasta_path, checkIfExists: true) ] )
+                ch_contam_fasta = GUNZIP_CONTAM_FASTA.out.gunzip.map { it[1] }
+                ch_versions     = ch_versions.mix(GUNZIP_CONTAM_FASTA.out.versions)
             } else {
-                contaminant_channel = Channel.value(contaminant_file)
+                ch_contam_fasta = Channel.value(file(contaminant_fasta_path, checkIfExists: true))
             }
 
-            def meta = [ id: 'contaminants' ]
             if (contaminantAligner == 'bowtie2') {
                 BOWTIE2_BUILD (
-                    contaminant_channel.map { [ meta, it ] }
+                    ch_contam_fasta.map { [ [id: 'contaminants'], it ] }
                 )
                 ch_contaminant_index = BOWTIE2_BUILD.out.index.map { it[1] }
                 ch_versions          = ch_versions.mix(BOWTIE2_BUILD.out.versions)
             } else {
                 BOWTIE_BUILD (
-                    contaminant_channel.map { [ meta, it ] }
+                    ch_contam_fasta.map { [ [id: 'contaminants'], it ] }
                 )
                 ch_contaminant_index = BOWTIE_BUILD.out.index
                 ch_versions          = ch_versions.mix(BOWTIE_BUILD.out.versions)
