@@ -140,9 +140,12 @@ workflow PIPELINE_INITIALISATION {
             .set { ch_samplesheet }
     }
 
+    // Convert boolean to channel for emit
+    ch_is_bam_input = Channel.value(is_bam_input)
+
     emit:
     samplesheet   = ch_samplesheet
-    is_bam_input  = is_bam_input
+    is_bam_input  = ch_is_bam_input
     versions      = ch_versions
 }
 
