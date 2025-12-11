@@ -310,7 +310,7 @@ workflow PREPARE_GENOME {
     fai              = ch_fai                    // channel: path(genome.fai)
     transcript_fasta = ch_transcript_fasta       // channel: path(transcript.fasta)
     chrom_sizes      = ch_chrom_sizes            // channel: path(genome.sizes)
-    contaminant_index = ch_contaminant_index.first() // channel: path(contaminant/index/)
+    contaminant_index = ch_contaminant_index     // channel: path(contaminant/index/)
     star_index       = ch_star_index             // channel: path(star/index/)
     hisat2_index     = ch_hisat2_index           // channel: path(hisat2/index/)
     hisat2_transcriptome_index = ch_hisat2_transcriptome_index // channel: path(hisat2/transcriptome_index/)
