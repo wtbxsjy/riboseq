@@ -41,7 +41,7 @@ workflow PREPARE_GENOME {
     gff                      //      file: /path/to/genome.gff
     additional_fasta         //      file: /path/to/additional.fasta
     transcript_fasta         //      file: /path/to/transcript.fasta
-    contaminant_fasta        //      file: /path/to/contaminants.fasta
+    contaminant_fasta_in     //      file: /path/to/contaminants.fasta
     star_index               // directory: /path/to/star/index/
     salmon_index             // directory: /path/to/salmon/index/
     hisat2_index             // directory: /path/to/hisat2/index/
@@ -178,7 +178,7 @@ workflow PREPARE_GENOME {
 
         def provided_index = contaminantAligner == 'bowtie2' ? bowtie2_index : bowtie_index
         def provided_index_path = provided_index ? provided_index.toString() : null
-        if (!provided_index_path && !contaminant_fasta) {
+        if (!provided_index_path && !contaminant_fasta_in) {
             exit 1, 'Contaminant filtering requested but neither --contaminant_fasta nor a pre-built index was provided.'
         }
 
@@ -195,12 +195,12 @@ workflow PREPARE_GENOME {
                 ch_contaminant_index = Channel.value(file(provided_index_path, checkIfExists: true))
             }
         } else {
-            if (!contaminant_fasta) {
+            if (!contaminant_fasta_in) {
                 exit 1, 'Contaminant FASTA is required to build Bowtie/Bowtie2 index.'
             }
 
-            // Copy the path into a local variable name that does not collide with the workflow input
-            def contaminant_path_local = contaminant_fasta
+            // Copy the path into a local variable name to avoid any scoping quirks
+            def contaminant_path_local = contaminant_fasta_in
             def contaminant_file = file(contaminant_path_local, checkIfExists: true)
             def contaminant_channel
             if (contaminant_path_local.endsWith('.gz')) {
