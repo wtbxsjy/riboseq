@@ -41,7 +41,7 @@ workflow PREPARE_GENOME {
     gff                      //      file: /path/to/genome.gff
     additional_fasta         //      file: /path/to/additional.fasta
     transcript_fasta         //      file: /path/to/transcript.fasta
-    contaminant_fasta_in     //      file: /path/to/contaminants.fasta
+    contaminant_fasta_path   //      file: /path/to/contaminants.fasta
     star_index               // directory: /path/to/star/index/
     salmon_index             // directory: /path/to/salmon/index/
     hisat2_index             // directory: /path/to/hisat2/index/
@@ -178,7 +178,7 @@ workflow PREPARE_GENOME {
 
         def provided_index = contaminantAligner == 'bowtie2' ? bowtie2_index : bowtie_index
         def provided_index_path = provided_index ? provided_index.toString() : null
-        if (!provided_index_path && !contaminant_fasta_in) {
+        if (!provided_index_path && !contaminant_fasta_path) {
             exit 1, 'Contaminant filtering requested but neither --contaminant_fasta nor a pre-built index was provided.'
         }
 
@@ -195,14 +195,14 @@ workflow PREPARE_GENOME {
                 ch_contaminant_index = Channel.value(file(provided_index_path, checkIfExists: true))
             }
         } else {
-            if (!contaminant_fasta_in) {
+            if (!contaminant_fasta_path) {
                 exit 1, 'Contaminant FASTA is required to build Bowtie/Bowtie2 index.'
             }
 
             // Work directly with the provided path to avoid any name collisions
-            def contaminant_file = file(contaminant_fasta_in, checkIfExists: true)
+            def contaminant_file = file(contaminant_fasta_path, checkIfExists: true)
             def contaminant_channel
-            if (contaminant_fasta_in.endsWith('.gz')) {
+            if (contaminant_fasta_path.endsWith('.gz')) {
                 contaminant_channel = GUNZIP_CONTAM_FASTA ( [ [:], contaminant_file ] ).gunzip.map { it[1] }
                 ch_versions         = ch_versions.mix(GUNZIP_CONTAM_FASTA.out.versions)
             } else {
