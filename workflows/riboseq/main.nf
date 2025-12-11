@@ -62,7 +62,6 @@ workflow RIBOSEQ {
 
     take:
     ch_samplesheet      // channel: path(sample_sheet.csv) OR [ meta, bam, bai ] for BAM input
-    is_bam_input        // boolean: true if input is BAM files
     ch_versions         // channel: [ path(versions.yml) ]
     ch_fasta            // channel: path(genome.fasta)
     ch_gtf              // channel: path(genome.gtf)
@@ -76,6 +75,9 @@ workflow RIBOSEQ {
     ch_contaminant_index // channel: path(contaminant/index/)
 
     main:
+
+    // Get BAM input mode from global params (set by PIPELINE_INITIALISATION)
+    def is_bam_input = params.is_bam_input ?: false
 
     /*
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
