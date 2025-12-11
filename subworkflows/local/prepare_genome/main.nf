@@ -199,11 +199,10 @@ workflow PREPARE_GENOME {
                 exit 1, 'Contaminant FASTA is required to build Bowtie/Bowtie2 index.'
             }
 
-            // Copy the path into a local variable name to avoid any scoping quirks
-            def contaminant_path_local = contaminant_fasta_in
-            def contaminant_file = file(contaminant_path_local, checkIfExists: true)
+            // Work directly with the provided path to avoid any name collisions
+            def contaminant_file = file(contaminant_fasta_in, checkIfExists: true)
             def contaminant_channel
-            if (contaminant_path_local.endsWith('.gz')) {
+            if (contaminant_fasta_in.endsWith('.gz')) {
                 contaminant_channel = GUNZIP_CONTAM_FASTA ( [ [:], contaminant_file ] ).gunzip.map { it[1] }
                 ch_versions         = ch_versions.mix(GUNZIP_CONTAM_FASTA.out.versions)
             } else {
