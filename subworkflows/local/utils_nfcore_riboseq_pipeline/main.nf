@@ -75,18 +75,25 @@ workflow PIPELINE_INITIALISATION {
     //
 
     def samplesheet_list = samplesheetToList(params.input, "${projectDir}/assets/schema_input.json")
+    // samplesheetToList returns: [ meta, fastq_1, fastq_2, bam, bam_index ]
+    // where meta contains: id, strandedness, sample_type
     def first_row = samplesheet_list[0]
-    def is_bam_input = first_row.bam ? true : false
+    // first_row is a list: [meta, fastq_1, fastq_2, bam, bam_index]
+    // Check if bam (index 3) is provided
+    def first_bam = first_row[3]
+    def is_bam_input = first_bam ? true : false
 
     // Validate that all rows have consistent input type (all FASTQ or all BAM)
     samplesheet_list.each { row ->
-        def row_has_bam = row.bam ? true : false
+        def row_bam = row[3]
+        def row_has_bam = row_bam ? true : false
         if (row_has_bam != is_bam_input) {
             error("Mixed input types detected in samplesheet. All samples must be either FASTQ or BAM input, not a mixture of both.")
         }
         // For BAM input, validate strandedness is not 'auto'
-        if (row_has_bam && row.strandedness == 'auto') {
-            error("BAM input mode does not support 'auto' strandedness. Please specify 'forward', 'reverse', or 'unstranded' for sample: ${row.sample}")
+        def row_meta = row[0]
+        if (row_has_bam && row_meta.strandedness == 'auto') {
+            error("BAM input mode does not support 'auto' strandedness. Please specify 'forward', 'reverse', or 'unstranded' for sample: ${row_meta.id}")
         }
     }
 
@@ -96,14 +103,18 @@ workflow PIPELINE_INITIALISATION {
         channel
             .fromList(samplesheet_list)
             .map { row ->
+                // row is: [meta, fastq_1, fastq_2, bam, bam_index]
+                def row_meta = row[0]
+                def row_bam = row[3]
+                def row_bai = row[4]
                 def meta = [
-                    id: row.sample,
-                    strandedness: row.strandedness,
-                    sample_type: row.type,
+                    id: row_meta.id,
+                    strandedness: row_meta.strandedness,
+                    sample_type: row_meta.sample_type,
                     single_end: true  // Default to single-end for Ribo-seq BAM input
                 ]
-                def bam = file(row.bam, checkIfExists: true)
-                def bai = row.bam_index ? file(row.bam_index, checkIfExists: true) : null
+                def bam = file(row_bam, checkIfExists: true)
+                def bai = row_bai ? file(row_bai, checkIfExists: true) : null
                 return [ meta, bam, bai ]
             }
             .set { ch_samplesheet }
