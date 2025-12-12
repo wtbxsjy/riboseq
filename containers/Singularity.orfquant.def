@@ -5,10 +5,29 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
     Author nf-core/riboseq
     Description RiboseQC container with ORFquant pre-installed
 
+%setup
+    # Apptainer/Singularity may try to mount a resolv.conf into the container.
+    # Some minimal base images don't ship /etc/resolv.conf, which makes the mount fail.
+    ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
+    mkdir -p "${ROOTFS}/etc"
+    # riboseqc base image links /etc/resolv.conf -> /tmp/resolv.conf, but /tmp is
+    # typically overmounted at runtime; replace the symlink with a real file so
+    # the resolv.conf bind-mount has a stable destination.
+    rm -f "${ROOTFS}/etc/resolv.conf"
+    : > "${ROOTFS}/etc/resolv.conf"
+
 %post
-    # Install ORFquant from GitHub
+    # Install ORFquant
+    # Prefer an offline tarball if one is provided at build time via bind-mount:
+    #   apptainer build -B /path/ORFquant.tar.gz:/tmp/ORFquant.tar.gz image.sif Singularity.orfquant.def
+    # Fallback to GitHub if the tarball is not available.
     R -e "if (!requireNamespace('remotes', quietly = TRUE)) install.packages('remotes', repos = 'https://cloud.r-project.org')"
-    R -e "remotes::install_github('ohlerlab/ORFquant@v1.1', quiet = FALSE, upgrade = 'never')"
+
+    if [ -s /tmp/ORFquant.tar.gz ]; then
+        R -e "remotes::install_local('/tmp/ORFquant.tar.gz', quiet = FALSE, upgrade = 'never')"
+    else
+        R -e "remotes::install_github('ohlerlab/ORFquant', ref='v1.1', quiet = FALSE, upgrade = 'never')"
+    fi
 
 %runscript
     exec "$@"
