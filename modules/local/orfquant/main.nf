@@ -37,23 +37,22 @@ process ORFQUANT_RUN {
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
     """
     # Fix DNS resolution in Singularity container
-    # Method 1: Try to create resolv.conf in writable location
-    mkdir -p \$HOME/.dns_fix 2>/dev/null || true
-    cat > \$HOME/.dns_fix/resolv.conf << 'DNSEOF'
+    # Use current working directory (guaranteed to be writable by Nextflow)
+    DNS_DIR="\$(pwd)/.dns_fix"
+    mkdir -p "\${DNS_DIR}"
+
+    # Create resolv.conf
+    cat > "\${DNS_DIR}/resolv.conf" << 'DNSEOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 nameserver 1.1.1.1
 DNSEOF
 
-    # Method 2: Try to write to /etc/resolv.conf (may fail in container)
-    if [[ -w /etc ]]; then
-        rm -f /etc/resolv.conf 2>/dev/null || true
-        cp \$HOME/.dns_fix/resolv.conf /etc/resolv.conf 2>/dev/null || true
-    fi
+    # Try to copy to /etc/resolv.conf (may fail in container)
+    cp "\${DNS_DIR}/resolv.conf" /etc/resolv.conf 2>/dev/null || true
 
-    # Method 3: If still no DNS, try using HOSTALIASES for key domains
-    # Pre-resolve GitHub domains using external DNS query
-    cat > \$HOME/.dns_fix/hosts << 'HOSTEOF'
+    # Create hosts file with pre-resolved IPs as fallback
+    cat > "\${DNS_DIR}/hosts" << 'HOSTEOF'
 140.82.121.6    api.github.com
 140.82.121.4    github.com
 185.199.108.133 raw.githubusercontent.com
@@ -61,7 +60,7 @@ DNSEOF
 185.199.110.133 objects.githubusercontent.com
 151.101.1.194   cloud.r-project.org
 HOSTEOF
-    export HOSTALIASES=\$HOME/.dns_fix/hosts
+    export HOSTALIASES="\${DNS_DIR}/hosts"
 
     # Ensure fasta file is available with the expected name (if it was gzipped)
     # The annotation might refer to the uncompressed name
