@@ -26,26 +26,33 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
     #   apptainer build -B /path/ORFquant.tar.gz:/opt/ORFquant.tar.gz image.sif Singularity.orfquant.def
     # Fallback: download the v1.1 zip from GitHub and unzip with R.
 
-    R --vanilla -q -e "\
-        tag <- 'v1.1';\
-        work <- '/tmp/orfquant_src';\
-        dir.create(work, showWarnings=FALSE, recursive=TRUE);\
-        local_tgz <- '/opt/ORFquant.tar.gz';\
-        if (file.exists(local_tgz) && file.info(local_tgz)\$size > 0) {\
-          utils::untar(local_tgz, exdir=work, tar='internal');\
-        } else {\
-          zip_url <- sprintf('https://github.com/ohlerlab/ORFquant/archive/refs/tags/%s.zip', tag);\
-          zip_path <- file.path(work, sprintf('ORFquant-%s.zip', tag));\
-          utils::download.file(zip_url, zip_path, mode='wb', quiet=FALSE);\
-          utils::unzip(zip_path, exdir=work);\
-        }\
-        pkg_dir <- list.dirs(work, recursive=FALSE, full.names=TRUE);\
-        if (length(pkg_dir) != 1) stop('Unexpected ORFquant source layout in: ', work);\
-        cmd <- sprintf('R CMD INSTALL %s', shQuote(pkg_dir[[1]]));\
-        message(cmd);\
-        status <- system(cmd);\
-        if (status != 0) stop('R CMD INSTALL failed with status ', status);\
-    "
+        cat > /tmp/install_orfquant.R <<'RSCRIPT'
+tag <- "v1.1"
+work <- "/tmp/orfquant_src"
+dir.create(work, showWarnings = FALSE, recursive = TRUE)
+
+local_tgz <- "/opt/ORFquant.tar.gz"
+if (file.exists(local_tgz) && file.info(local_tgz)$size > 0) {
+    utils::untar(local_tgz, exdir = work, tar = "internal")
+} else {
+    zip_url  <- sprintf("https://github.com/ohlerlab/ORFquant/archive/refs/tags/%s.zip", tag)
+    zip_path <- file.path(work, sprintf("ORFquant-%s.zip", tag))
+    utils::download.file(zip_url, zip_path, mode = "wb", quiet = FALSE)
+    utils::unzip(zip_path, exdir = work)
+}
+
+pkg_dir <- list.dirs(work, recursive = FALSE, full.names = TRUE)
+if (length(pkg_dir) != 1) {
+    stop("Unexpected ORFquant source layout in: ", work)
+}
+
+cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir[[1]]))
+message(cmd)
+status <- system(cmd)
+if (status != 0) stop("R CMD INSTALL failed with status ", status)
+RSCRIPT
+
+        R --vanilla -q -f /tmp/install_orfquant.R
 
 %runscript
     exec "$@"
