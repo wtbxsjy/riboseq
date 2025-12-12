@@ -3,16 +3,18 @@ process ORFQUANT_RUN {
     label 'process_high'
 
     conda "${moduleDir}/environment.yml"
-    // Use RiboseQC container since ORFquant needs RiboseQC to load annotation files
+    // Use custom container with ORFquant pre-installed
+    // Build from: containers/Singularity.orfquant.def
+    // Or specify via params.orfquant_container
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1' :
+        (params.orfquant_container ?: 'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1') :
         'quay.io/biocontainers/riboseqc:1.1--r36_1' }"
 
     input:
     tuple val(meta), path(for_orfquant)   // *_for_ORFquant file from RiboseQC
     path annotation                        // *_Rannot file from RiboseQC/ORFquant annotation
     path fasta                             // Genome fasta file
-    path orfquant_pkg                      // Pre-downloaded ORFquant R package (tar.gz)
+    path orfquant_pkg                      // Pre-downloaded ORFquant R package (tar.gz) - optional
 
     output:
     tuple val(meta), path("*_final_ORFquant_results")  , emit: results
@@ -35,68 +37,62 @@ process ORFQUANT_RUN {
     def write_fasta = args.contains('write_protein_fasta=FALSE') ? 'FALSE' : 'TRUE'
     def write_tmp = args.contains('write_temp_files=FALSE') ? 'FALSE' : 'TRUE'
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
-    def pkg_install = orfquant_pkg.name != 'NO_FILE' ? "install.packages('${orfquant_pkg}', repos = NULL, type = 'source')" : """
-        if (!requireNamespace('remotes', quietly = TRUE)) {
-            install.packages('remotes', repos = 'https://cloud.r-project.org', quiet = TRUE)
-        }
-        remotes::install_github('ohlerlab/ORFquant@v1.1', quiet = FALSE, upgrade = 'never')
-    """
+    def use_local_pkg = orfquant_pkg.name != 'NO_FILE'
+    def local_pkg_path = orfquant_pkg.name
     """
     # Ensure fasta file is available with the expected name (if it was gzipped)
-    # The annotation might refer to the uncompressed name
     if [[ "${fasta}" == *.gz ]]; then
         gunzip -c ${fasta} > \$(basename ${fasta} .gz)
     fi
 
-    # Write R script to file
-    cat <<'RSCRIPT' > run_orfquant.R
-    # Install ORFquant from local package or GitHub
-    if (!requireNamespace("ORFquant", quietly = TRUE)) {
-        message("Installing ORFquant...")
-        ${pkg_install}
-    }
+    # Write R script - ORFquant should be pre-installed in custom container
+    cat > run_orfquant.R <<RSCRIPTEOF
+# Check if ORFquant is available
+if (!requireNamespace("ORFquant", quietly = TRUE)) {
+    stop("ORFquant is not installed. Please use a container with ORFquant pre-installed or provide --orfquant_pkg parameter.")
+}
 
-    library(ORFquant)
+library(ORFquant)
 
-    # Run ORFquant
-    run_ORFquant(
-        for_ORFquant_file = "${for_orfquant}",
-        annotation_file = "${annotation}",
-        n_cores = ${n_cores},
-        prefix = "${prefix}",
-        write_temp_files = ${write_tmp},
-        write_GTF_file = ${write_gtf},
-        write_protein_fasta = ${write_fasta},
-        interactive = FALSE
-    )
+# Run ORFquant
+run_ORFquant(
+    for_ORFquant_file = "${for_orfquant}",
+    annotation_file = "${annotation}",
+    n_cores = ${n_cores},
+    prefix = "${prefix}",
+    write_temp_files = ${write_tmp},
+    write_GTF_file = ${write_gtf},
+    write_protein_fasta = ${write_fasta},
+    interactive = FALSE
+)
 
-    # Optionally generate plots
-    if (${plot_results}) {
-        tryCatch({
-            plot_ORFquant_results(
-                for_ORFquant_file = "${for_orfquant}",
-                ORFquant_output_file = paste0("${prefix}", "_final_ORFquant_results"),
-                annotation_file = "${annotation}",
-                output_plots_path = paste0("${prefix}", "_plots"),
-                prefix = "${prefix}"
-            )
-        }, error = function(e) {
-            message("Warning: Could not generate ORFquant plots: ", e\$message)
-        })
-    }
+# Optionally generate plots
+if (${plot_results}) {
+    tryCatch({
+        plot_ORFquant_results(
+            for_ORFquant_file = "${for_orfquant}",
+            ORFquant_output_file = paste0("${prefix}", "_final_ORFquant_results"),
+            annotation_file = "${annotation}",
+            output_plots_path = paste0("${prefix}", "_plots"),
+            prefix = "${prefix}"
+        )
+    }, error = function(e) {
+        message("Warning: Could not generate ORFquant plots: ", e\\\$message)
+    })
+}
 
-    # Write versions
-    writeLines(
-        c(
-            '"${task.process}":',
-            paste0('    orfquant: "', packageVersion("ORFquant"), '"'),
-            paste0('    r-base: "', R.Version()\$major, ".", R.Version()\$minor, '"')
-        ),
-        "versions.yml"
-    )
-RSCRIPT
+# Write versions
+writeLines(
+    c(
+        '"${task.process}":',
+        paste0('    orfquant: "', packageVersion("ORFquant"), '"'),
+        paste0('    r-base: "', R.Version()\\\$major, ".", R.Version()\\\$minor, '"')
+    ),
+    "versions.yml"
+)
+RSCRIPTEOF
 
-    # Run using Rscript (available in PATH for both Conda and container)
+    # Run using Rscript
     Rscript run_orfquant.R
     """
 
