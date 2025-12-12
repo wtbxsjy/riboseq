@@ -61,8 +61,21 @@ RSCRIPT
     This container includes RiboseQC and ORFquant for Ribo-seq analysis.
     ORFquant is pre-installed so no network access is required at runtime.
 
-    Build with:
-        singularity build riboseqc_orfquant.sif Singularity.orfquant.def
+    Build (recommended; no sudo password required):
+        apptainer build --fakeroot -F orfquant.sif containers/Singularity.orfquant.def
+
+    Build with Singularity (root / sudo required):
+        sudo singularity build -F orfquant.sif containers/Singularity.orfquant.def
+
+    Offline build (when GitHub is not reachable during build):
+        curl -L -o ORFquant.tar.gz https://github.com/ohlerlab/ORFquant/archive/refs/tags/v1.1.tar.gz
+        apptainer build --fakeroot -F \
+          -B $PWD/ORFquant.tar.gz:/opt/ORFquant.tar.gz \
+          orfquant.sif containers/Singularity.orfquant.def
+
+    Use in nf-core/riboseq:
+        nextflow run main.nf -profile test_local_singularity \
+          --orfquant_container /abs/path/orfquant.sif
 
     Usage:
-        singularity exec riboseqc_orfquant.sif Rscript your_script.R
+        apptainer exec orfquant.sif Rscript your_script.R
