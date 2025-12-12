@@ -93,8 +93,8 @@ process ORFQUANT_RUN {
     )
     EOF
 
-    # Run using the explicit Rscript path from Conda
-    \$CONDA_PREFIX/bin/Rscript run_orfquant.R
+    # Run using Rscript (available in PATH for both Conda and container)
+    Rscript run_orfquant.R
     """
 
     stub:
