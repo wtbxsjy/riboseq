@@ -37,13 +37,31 @@ process ORFQUANT_RUN {
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
     """
     # Fix DNS resolution in Singularity container
-    # Try to create/update resolv.conf, but don't fail if it doesn't work
-    if [[ -w /etc ]]; then
-        cat > /etc/resolv.conf 2>/dev/null << 'DNSEOF' || true
+    # Method 1: Try to create resolv.conf in writable location
+    mkdir -p \$HOME/.dns_fix 2>/dev/null || true
+    cat > \$HOME/.dns_fix/resolv.conf << 'DNSEOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
+nameserver 1.1.1.1
 DNSEOF
+
+    # Method 2: Try to write to /etc/resolv.conf (may fail in container)
+    if [[ -w /etc ]]; then
+        rm -f /etc/resolv.conf 2>/dev/null || true
+        cp \$HOME/.dns_fix/resolv.conf /etc/resolv.conf 2>/dev/null || true
     fi
+
+    # Method 3: If still no DNS, try using HOSTALIASES for key domains
+    # Pre-resolve GitHub domains using external DNS query
+    cat > \$HOME/.dns_fix/hosts << 'HOSTEOF'
+140.82.121.6    api.github.com
+140.82.121.4    github.com
+185.199.108.133 raw.githubusercontent.com
+185.199.109.133 raw.githubusercontent.com
+185.199.110.133 objects.githubusercontent.com
+151.101.1.194   cloud.r-project.org
+HOSTEOF
+    export HOSTALIASES=\$HOME/.dns_fix/hosts
 
     # Ensure fasta file is available with the expected name (if it was gzipped)
     # The annotation might refer to the uncompressed name
