@@ -36,6 +36,15 @@ process ORFQUANT_RUN {
     def write_tmp = args.contains('write_temp_files=FALSE') ? 'FALSE' : 'TRUE'
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
     """
+    # Fix DNS resolution in Singularity container if /etc/resolv.conf is missing
+    if [[ ! -f /etc/resolv.conf ]] && [[ -w /etc ]]; then
+        echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+    elif [[ ! -f /etc/resolv.conf ]]; then
+        # If /etc is not writable, set up DNS via environment variable for curl/wget
+        export RES_OPTIONS="attempts:2 timeout:5"
+    fi
+
     # Ensure fasta file is available with the expected name (if it was gzipped)
     # The annotation might refer to the uncompressed name
     if [[ "${fasta}" == *.gz ]]; then
