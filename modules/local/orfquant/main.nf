@@ -117,7 +117,7 @@ HOSTEOF
         ),
         "versions.yml"
     )
-    EOF
+EOF
 
     # Run using Rscript (available in PATH for both Conda and container)
     Rscript run_orfquant.R
