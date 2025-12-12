@@ -4,7 +4,7 @@ process RPBP_PREDICT {
 
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/rpbp:4.0.1--py312hf731ba3_0' :
+        (params.rpbp_container ?: 'https://depot.galaxyproject.org/singularity/rpbp:4.0.1--py312hf731ba3_0') :
         'biocontainers/rpbp:4.0.1--py312hf731ba3_0' }"
 
     input:
