@@ -4,7 +4,6 @@ process ORFQUANT_RUN {
 
     conda "${moduleDir}/environment.yml"
     // Use RiboseQC container since ORFquant needs RiboseQC to load annotation files
-    // ORFquant will be installed at runtime from GitHub
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1' :
         'quay.io/biocontainers/riboseqc:1.1--r36_1' }"
@@ -13,6 +12,7 @@ process ORFQUANT_RUN {
     tuple val(meta), path(for_orfquant)   // *_for_ORFquant file from RiboseQC
     path annotation                        // *_Rannot file from RiboseQC/ORFquant annotation
     path fasta                             // Genome fasta file
+    path orfquant_pkg                      // Pre-downloaded ORFquant R package (tar.gz)
 
     output:
     tuple val(meta), path("*_final_ORFquant_results")  , emit: results
@@ -35,33 +35,13 @@ process ORFQUANT_RUN {
     def write_fasta = args.contains('write_protein_fasta=FALSE') ? 'FALSE' : 'TRUE'
     def write_tmp = args.contains('write_temp_files=FALSE') ? 'FALSE' : 'TRUE'
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
+    def pkg_install = orfquant_pkg.name != 'NO_FILE' ? "install.packages('${orfquant_pkg}', repos = NULL, type = 'source')" : """
+        if (!requireNamespace('remotes', quietly = TRUE)) {
+            install.packages('remotes', repos = 'https://cloud.r-project.org', quiet = TRUE)
+        }
+        remotes::install_github('ohlerlab/ORFquant@v1.1', quiet = FALSE, upgrade = 'never')
     """
-    # Fix DNS resolution in Singularity container
-    # Use current working directory (guaranteed to be writable by Nextflow)
-    DNS_DIR="\$(pwd)/.dns_fix"
-    mkdir -p "\${DNS_DIR}"
-
-    # Create resolv.conf
-    cat > "\${DNS_DIR}/resolv.conf" << 'DNSEOF'
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-nameserver 1.1.1.1
-DNSEOF
-
-    # Try to copy to /etc/resolv.conf (may fail in container)
-    cp "\${DNS_DIR}/resolv.conf" /etc/resolv.conf 2>/dev/null || true
-
-    # Create hosts file with pre-resolved IPs as fallback
-    cat > "\${DNS_DIR}/hosts" << 'HOSTEOF'
-140.82.121.6    api.github.com
-140.82.121.4    github.com
-185.199.108.133 raw.githubusercontent.com
-185.199.109.133 raw.githubusercontent.com
-185.199.110.133 objects.githubusercontent.com
-151.101.1.194   cloud.r-project.org
-HOSTEOF
-    export HOSTALIASES="\${DNS_DIR}/hosts"
-
+    """
     # Ensure fasta file is available with the expected name (if it was gzipped)
     # The annotation might refer to the uncompressed name
     if [[ "${fasta}" == *.gz ]]; then
@@ -69,14 +49,11 @@ HOSTEOF
     fi
 
     # Write R script to file
-    cat <<'EOF' > run_orfquant.R
-    # Install ORFquant from GitHub if not available (needed for container mode)
+    cat <<'RSCRIPT' > run_orfquant.R
+    # Install ORFquant from local package or GitHub
     if (!requireNamespace("ORFquant", quietly = TRUE)) {
-        message("Installing ORFquant from GitHub...")
-        if (!requireNamespace("remotes", quietly = TRUE)) {
-            install.packages("remotes", repos = "https://cloud.r-project.org", quiet = TRUE)
-        }
-        remotes::install_github("ohlerlab/ORFquant@v1.1", quiet = FALSE, upgrade = "never")
+        message("Installing ORFquant...")
+        ${pkg_install}
     }
 
     library(ORFquant)
@@ -117,7 +94,7 @@ HOSTEOF
         ),
         "versions.yml"
     )
-EOF
+RSCRIPT
 
     # Run using Rscript (available in PATH for both Conda and container)
     Rscript run_orfquant.R

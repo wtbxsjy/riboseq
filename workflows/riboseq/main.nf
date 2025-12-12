@@ -412,10 +412,14 @@ workflow RIBOSEQ {
     // Requires RiboseQC to generate the *_for_ORFquant input files
     //
     if (!params.skip_orfquant && !params.skip_riboseqc) {
+        // Prepare ORFquant package channel
+        ch_orfquant_pkg = params.orfquant_pkg ? Channel.value(file(params.orfquant_pkg, checkIfExists: true)) : Channel.value(file('NO_FILE'))
+
         ORFQUANT(
             ch_riboseqc_orfquant,
             ch_riboseqc_annotation,
-            ch_fasta
+            ch_fasta,
+            ch_orfquant_pkg
         )
         ch_versions = ch_versions.mix(ORFQUANT.out.versions)
     } else if (!params.skip_orfquant && params.skip_riboseqc) {
