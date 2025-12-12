@@ -1,0 +1,24 @@
+Bootstrap: docker
+From: quay.io/biocontainers/riboseqc:1.1--r36_1
+
+%labels
+    Author nf-core/riboseq
+    Description RiboseQC container with ORFquant pre-installed
+
+%post
+    # Install ORFquant from GitHub
+    R -e "if (!requireNamespace('remotes', quietly = TRUE)) install.packages('remotes', repos = 'https://cloud.r-project.org')"
+    R -e "remotes::install_github('ohlerlab/ORFquant@v1.1', quiet = FALSE, upgrade = 'never')"
+
+%runscript
+    exec "$@"
+
+%help
+    This container includes RiboseQC and ORFquant for Ribo-seq analysis.
+    ORFquant is pre-installed so no network access is required at runtime.
+
+    Build with:
+        singularity build riboseqc_orfquant.sif Singularity.orfquant.def
+
+    Usage:
+        singularity exec riboseqc_orfquant.sif Rscript your_script.R
