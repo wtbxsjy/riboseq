@@ -13,3 +13,4 @@ nf-test
 test.xml
 results*
 tmp*
+*.sif
