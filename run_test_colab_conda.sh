@@ -32,6 +32,16 @@ echo "  Aligner: STAR (gold standard)"
 echo "  Package Manager: Conda/Mamba"
 echo "=============================================="
 
+# Ensure the pipeline uses project-local caches.
+# Important: Nextflow may create Conda environments from the main Nextflow process
+# (i.e. before a task starts), so these variables must be exported *before* `nextflow run`.
+PROJECT_DIR="$(pwd)"
+export NXF_HOME="${PROJECT_DIR}/.nextflow"
+export CONDA_PKGS_DIRS="${PROJECT_DIR}/.conda/pkgs"
+export CONDA_ENVS_DIRS="${PROJECT_DIR}/.conda/envs"
+export MAMBA_ROOT_PREFIX="${PROJECT_DIR}/.mamba"
+mkdir -p "${CONDA_PKGS_DIRS}" "${CONDA_ENVS_DIRS}" "${MAMBA_ROOT_PREFIX}" "${NXF_HOME}"
+
 # 检查 Nextflow 是否已安装
 if ! command -v nextflow &> /dev/null; then
     echo "Installing Nextflow..."
@@ -56,10 +66,16 @@ echo ""
 echo "Environment Info:"
 echo "  Nextflow: $(nextflow -version 2>&1 | head -1)"
 if command -v mamba &> /dev/null; then
+    echo "  Mamba path: $(command -v mamba)"
     echo "  Mamba: $(mamba --version | head -1)"
 elif command -v conda &> /dev/null; then
+    echo "  Conda path: $(command -v conda)"
     echo "  Conda: $(conda --version)"
 fi
+echo "  NXF_HOME: ${NXF_HOME}"
+echo "  CONDA_PKGS_DIRS: ${CONDA_PKGS_DIRS}"
+echo "  CONDA_ENVS_DIRS: ${CONDA_ENVS_DIRS}"
+echo "  MAMBA_ROOT_PREFIX: ${MAMBA_ROOT_PREFIX}"
 echo ""
 
 # 清理旧的工作目录（可选，取消注释以启用）
