@@ -36,10 +36,18 @@ process HISAT2_ALIGN {
     if (meta.single_end) {
         def unaligned = params.save_unaligned ? "--un-gz ${prefix}.unmapped.fastq.gz" : ''
         """
+        # Workaround for environments where /tmp in the container does not allow mkfifo
+        # (hisat2 may use a FIFO under /tmp when reading .gz input).
+        READS="$reads"
+        if [[ "${reads}" == *.gz ]]; then
+            gzip -cd "${reads}" > reads.fastq
+            READS="reads.fastq"
+        fi
+
         INDEX=`find -L ./ -name "*.1.ht2" | sed 's/\\.1.ht2\$//'`
         hisat2 \\
             -x \$INDEX \\
-            -U $reads \\
+            -U \$READS \\
             $strandedness \\
             $ss \\
             --summary-file ${prefix}.hisat2.summary.log \\
@@ -58,11 +66,24 @@ process HISAT2_ALIGN {
     } else {
         def unaligned = params.save_unaligned ? "--un-conc-gz ${prefix}.unmapped.fastq.gz" : ''
         """
+        # Workaround for environments where /tmp in the container does not allow mkfifo
+        # (hisat2 may use a FIFO under /tmp when reading .gz input).
+        READ1="${reads[0]}"
+        READ2="${reads[1]}"
+        if [[ "${reads[0]}" == *.gz ]]; then
+            gzip -cd "${reads[0]}" > reads_1.fastq
+            READ1="reads_1.fastq"
+        fi
+        if [[ "${reads[1]}" == *.gz ]]; then
+            gzip -cd "${reads[1]}" > reads_2.fastq
+            READ2="reads_2.fastq"
+        fi
+
         INDEX=`find -L ./ -name "*.1.ht2" | sed 's/\\.1.ht2\$//'`
         hisat2 \\
             -x \$INDEX \\
-            -1 ${reads[0]} \\
-            -2 ${reads[1]} \\
+            -1 \$READ1 \\
+            -2 \$READ2 \\
             $strandedness \\
             $ss \\
             --summary-file ${prefix}.hisat2.summary.log \\

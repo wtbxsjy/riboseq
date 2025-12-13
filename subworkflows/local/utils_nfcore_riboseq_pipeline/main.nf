@@ -56,6 +56,14 @@ workflow PIPELINE_INITIALISATION {
         null
     )
 
+    // Log custom containers (useful when running in restricted / offline environments)
+    if( params.orfquant_container ) {
+        log.info "Custom ORFQuant container: ${params.orfquant_container}"
+    }
+    if( params.rpbp_container ) {
+        log.info "Custom RPBP container: ${params.rpbp_container}"
+    }
+
     //
     // Check config provided to the pipeline
     //
