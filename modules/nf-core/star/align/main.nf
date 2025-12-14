@@ -56,24 +56,24 @@ process STAR_ALIGN {
     STAR_OUTTMPDIR=""
     STAR_TMP_BASE="${out_tmpdir_enabled ? star_tmp_base : ''}"
 
-    if [ -n "$STAR_TMP_BASE" ]; then
-        mkdir -p "$STAR_TMP_BASE" 2>/dev/null || true
-        chmod 1777 "$STAR_TMP_BASE" 2>/dev/null || true
+    if [ -n "\$STAR_TMP_BASE" ]; then
+        mkdir -p "\$STAR_TMP_BASE" 2>/dev/null || true
+        chmod 1777 "\$STAR_TMP_BASE" 2>/dev/null || true
 
-        if [ ! -d "$STAR_TMP_BASE" ] || [ ! -w "$STAR_TMP_BASE" ]; then
-            echo "WARNING: Requested star_out_tmpdir is not writable inside the container: $STAR_TMP_BASE" >&2
+        if [ ! -d "\$STAR_TMP_BASE" ] || [ ! -w "\$STAR_TMP_BASE" ]; then
+            echo "WARNING: Requested star_out_tmpdir is not writable inside the container: \$STAR_TMP_BASE" >&2
             echo "WARNING: Falling back to /tmp for STAR temporary files" >&2
             STAR_TMP_BASE="/tmp"
         fi
 
-        STAR_OUTTMPDIR="\$(mktemp -d -p \"$STAR_TMP_BASE\" \"${prefix}_STARtmp_XXXXXX\")"
-        if [ -z "$STAR_OUTTMPDIR" ] || [ ! -d "$STAR_OUTTMPDIR" ] || [ ! -w "$STAR_OUTTMPDIR" ]; then
-            echo "ERROR: Failed to create a writable STAR temporary directory under: $STAR_TMP_BASE" >&2
+        STAR_OUTTMPDIR="\$(mktemp -d -p \"\$STAR_TMP_BASE\" \"${prefix}_STARtmp_XXXXXX\")"
+        if [ -z "\$STAR_OUTTMPDIR" ] || [ ! -d "\$STAR_OUTTMPDIR" ] || [ ! -w "\$STAR_OUTTMPDIR" ]; then
+            echo "ERROR: Failed to create a writable STAR temporary directory under: \$STAR_TMP_BASE" >&2
             echo "ERROR: Try a different --star_out_tmpdir on a Linux filesystem, or ensure permissions allow writes" >&2
             exit 1
         fi
 
-        STAR_OUTTMP_OPT="--outTmpDir \"$STAR_OUTTMPDIR\""
+        STAR_OUTTMP_OPT="--outTmpDir \"\$STAR_OUTTMPDIR\""
     fi
 
     STAR \\
