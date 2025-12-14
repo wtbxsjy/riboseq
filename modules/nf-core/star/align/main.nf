@@ -41,6 +41,8 @@ process STAR_ALIGN {
     script:
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
+    def star_tmp_base = params.star_out_tmpdir ?: ''
+    def out_tmpdir_enabled = star_tmp_base && !args.contains('--outTmpDir')
     def reads1 = [], reads2 = []
     meta.single_end ? [reads].flatten().each{reads1 << it} : reads.eachWithIndex{ v, ix -> ( ix & 1 ? reads2 : reads1) << v }
     def ignore_gtf      = star_ignore_sjdbgtf ? '' : "--sjdbGTFfile $gtf"
@@ -50,17 +52,30 @@ process STAR_ALIGN {
     def out_sam_type    = (args.contains('--outSAMtype')) ? '' : '--outSAMtype BAM Unsorted'
     mv_unsorted_bam = (args.contains('--outSAMtype BAM Unsorted SortedByCoordinate')) ? "mv ${prefix}.Aligned.out.bam ${prefix}.Aligned.unsort.out.bam" : ''
     """
+    STAR_OUTTMP_OPT=""
+    if ${out_tmpdir_enabled ? 'true' : 'false'}; then
+        STAR_TMP_BASE="${star_tmp_base}"
+        mkdir -p "${star_tmp_base}"
+        STAR_OUTTMPDIR="\$(mktemp -d -p \"${star_tmp_base}\" \"${prefix}_STARtmp_XXXXXX\")"
+        STAR_OUTTMP_OPT="--outTmpDir \"\$STAR_OUTTMPDIR\""
+    fi
+
     STAR \\
         --genomeDir $index \\
         --readFilesIn ${reads1.join(",")} ${reads2.join(",")} \\
         --runThreadN $task.cpus \\
         --outFileNamePrefix $prefix. \\
+        \$STAR_OUTTMP_OPT \\
         $out_sam_type \\
         $ignore_gtf \\
         $attrRG \\
         $args
 
     $mv_unsorted_bam
+
+    if [ -n "\${STAR_OUTTMPDIR:-}" ]; then
+        rm -rf "\$STAR_OUTTMPDIR" || true
+    fi
 
     if [ -f ${prefix}.Unmapped.out.mate1 ]; then
         mv ${prefix}.Unmapped.out.mate1 ${prefix}.unmapped_1.fastq

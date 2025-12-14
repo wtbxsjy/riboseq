@@ -53,7 +53,7 @@ process RIBOCODE_DETECT {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        ribocode: \$(RiboCode_onestep --version 2>&1 | sed 's/^.* //')
+        ribocode: "\$(RiboCode_onestep --version 2>&1 | sed 's/^.* //')"
     END_VERSIONS
     """
 }

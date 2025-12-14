@@ -406,6 +406,11 @@
                     "description": "Extra arguments to pass to STAR alignment command in addition to defaults defined by the pipeline. Only available for the STAR-Salmon route.",
                     "fa_icon": "fas fa-plus"
                 },
+                "star_out_tmpdir": {
+                    "type": "string",
+                    "description": "Base directory for STAR temporary files (passed as --outTmpDir). Use a Linux/Posix filesystem that supports FIFO (avoid NTFS/FAT mounts). A unique subdirectory is created per task.",
+                    "fa_icon": "fas fa-folder"
+                },
                 "extra_salmon_quant_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to Salmon quant command in addition to defaults defined by the pipeline.",
