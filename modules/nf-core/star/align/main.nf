@@ -60,16 +60,25 @@ process STAR_ALIGN {
         mkdir -p "\$STAR_TMP_BASE" 2>/dev/null || true
         chmod 1777 "\$STAR_TMP_BASE" 2>/dev/null || true
 
+        # Verify we can write to the requested base directory inside the container
         if [ ! -d "\$STAR_TMP_BASE" ] || [ ! -w "\$STAR_TMP_BASE" ]; then
             echo "WARNING: Requested star_out_tmpdir is not writable inside the container: \$STAR_TMP_BASE" >&2
             echo "WARNING: Falling back to /tmp for STAR temporary files" >&2
             STAR_TMP_BASE="/tmp"
         fi
 
-        STAR_OUTTMPDIR="\$(mktemp -d -p \"\$STAR_TMP_BASE\" \"${prefix}_STARtmp_XXXXXX\")"
-        if [ -z "\$STAR_OUTTMPDIR" ] || [ ! -d "\$STAR_OUTTMPDIR" ] || [ ! -w "\$STAR_OUTTMPDIR" ]; then
-            echo "ERROR: Failed to create a writable STAR temporary directory under: \$STAR_TMP_BASE" >&2
-            echo "ERROR: Try a different --star_out_tmpdir on a Linux filesystem, or ensure permissions allow writes" >&2
+        mkdir -p "\$STAR_TMP_BASE" 2>/dev/null || true
+        TESTDIR="\$(mktemp -d -p \"\$STAR_TMP_BASE\" nxf_star_tmp_test_XXXXXX 2>/dev/null || true)"
+        if [ -z "\$TESTDIR" ] || [ ! -d "\$TESTDIR" ] || [ ! -w "\$TESTDIR" ]; then
+            echo "ERROR: star_out_tmpdir base is not writable inside the container: \$STAR_TMP_BASE" >&2
+            exit 1
+        fi
+        rmdir "\$TESTDIR" 2>/dev/null || true
+
+        # STAR expects --outTmpDir to NOT exist; it will create it itself.
+        STAR_OUTTMPDIR="\$(mktemp -u -p \"\$STAR_TMP_BASE\" \"${prefix}_STARtmp_XXXXXX\")"
+        if [ -z "\$STAR_OUTTMPDIR" ] || [ -e "\$STAR_OUTTMPDIR" ]; then
+            echo "ERROR: Failed to generate a non-existent STAR temporary directory path under: \$STAR_TMP_BASE" >&2
             exit 1
         fi
 
