@@ -38,18 +38,61 @@ process ORFQUANT_RUN {
     def write_tmp = args.contains('write_temp_files=FALSE') ? 'FALSE' : 'TRUE'
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
     def use_local_pkg = orfquant_pkg.name != 'NO_FILE'
-    def local_pkg_path = orfquant_pkg.name
+    def local_pkg_path = "${orfquant_pkg}"
     """
     # Ensure fasta file is available with the expected name (if it was gzipped)
     if [[ "${fasta}" == *.gz ]]; then
         gunzip -c ${fasta} > \$(basename ${fasta} .gz)
     fi
 
+    # Install ORFquant into a task-local library if needed (works for conda runs)
+    export R_LIBS_USER="${task.workDir}/Rlibs"
+    mkdir -p "\$R_LIBS_USER"
+
     # Write R script - ORFquant should be pre-installed in custom container
     cat > run_orfquant.R <<RSCRIPTEOF
-# Check if ORFquant is available
+install_orfquant <- function(local_pkg_tgz = NULL, tag = "v1.1") {
+    work <- file.path(getwd(), "orfquant_src")
+    dir.create(work, showWarnings = FALSE, recursive = TRUE)
+
+    tgz <- local_pkg_tgz
+    if (!is.null(tgz) && nzchar(tgz) && file.exists(tgz) && file.info(tgz)$size > 0) {
+        message("Installing ORFquant from local tar.gz: ", tgz)
+    } else {
+        url <- sprintf("https://github.com/ohlerlab/ORFquant/archive/refs/tags/%s.tar.gz", tag)
+        tgz <- file.path(work, sprintf("ORFquant-%s.tar.gz", tag))
+        message("Downloading ORFquant from GitHub: ", url)
+        utils::download.file(url, tgz, mode = "wb", quiet = FALSE)
+    }
+
+    utils::untar(tgz, exdir = work, tar = "internal")
+    pkg_dir <- list.dirs(work, recursive = FALSE, full.names = TRUE)
+    if (length(pkg_dir) != 1) {
+        stop("Unexpected ORFquant source layout in: ", work)
+    }
+
+    cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir[[1]]))
+    message(cmd)
+    status <- system(cmd)
+    if (status != 0) stop("R CMD INSTALL failed with status ", status)
+}
+
+# Ensure ORFquant is available
 if (!requireNamespace("ORFquant", quietly = TRUE)) {
-    stop("ORFquant is not installed. Please use a container with ORFquant pre-installed or provide --orfquant_pkg parameter.")
+    local_pkg <- if (${use_local_pkg ? 'TRUE' : 'FALSE'}) "${local_pkg_path}" else NULL
+    tryCatch({
+        install_orfquant(local_pkg_tgz = local_pkg, tag = "v1.1")
+    }, error = function(e) {
+        stop(
+            "ORFquant is not installed and automatic installation failed: ", e$message, "\n",
+            "Provide a pre-downloaded tarball with --orfquant_pkg (e.g. ORFquant-v1.1.tar.gz), ",
+            "or use a container with ORFquant pre-installed (e.g. --orfquant_container)."
+        )
+    })
+
+    if (!requireNamespace("ORFquant", quietly = TRUE)) {
+        stop("ORFquant install completed but package is still not available on library paths.")
+    }
 }
 
 library(ORFquant)
