@@ -37,9 +37,50 @@ process RIBOCODE_DETECT {
     // unstranded -> no
 
     """
+    # Ensure temporary/config directories are writable inside the container
+    export TMPDIR="$PWD/tmp"
+    mkdir -p "$TMPDIR"
+    export MPLCONFIGDIR="$PWD/mplconfig"
+    mkdir -p "$MPLCONFIGDIR"
+
+    # RiboCode can crash when transcript "level" is missing for some features.
+    # Normalize the GTF by adding a default level to any record lacking it.
+    GTF_IN="${gtf}"
+    if [[ "$GTF_IN" == *.gz ]]; then
+        gunzip -c "$GTF_IN" > input.gtf
+        GTF_IN="input.gtf"
+    fi
+
+    python - "$GTF_IN" ribocode.gtf <<'PY'
+import re
+import sys
+
+gtf_in = sys.argv[1]
+gtf_out = sys.argv[2]
+
+level_re = re.compile(r'(?:^|;\s*)level\s+"[^"]*"\s*;')
+
+with open(gtf_in, 'rt', encoding='utf-8', errors='replace') as fin, open(gtf_out, 'wt', encoding='utf-8') as fout:
+    for line in fin:
+        if line.startswith('#') or not line.strip():
+            fout.write(line)
+            continue
+        parts = line.rstrip('\n').split('\t')
+        if len(parts) < 9:
+            fout.write(line)
+            continue
+        attrs = parts[8].strip()
+        if not level_re.search(attrs):
+            if attrs and not attrs.endswith(';'):
+                attrs += ';'
+            attrs += ' level "NA";'
+            parts[8] = attrs
+        fout.write('\t'.join(parts) + '\n')
+PY
+
     # Run RiboCode, capture exit status
     RiboCode_onestep \\
-        -g $gtf \\
+        -g ribocode.gtf \\
         -f $fasta \\
         -r $bam \\
         --stranded $strandedness \\

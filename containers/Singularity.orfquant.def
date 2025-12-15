@@ -27,7 +27,7 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
     # Fallback: download the v1.1 zip from GitHub and unzip with R.
 
         cat > /tmp/install_orfquant.R <<'RSCRIPT'
-tag <- "v1.1"
+tag <- "1.02"
 work <- "/tmp/orfquant_src"
 dir.create(work, showWarnings = FALSE, recursive = TRUE)
 
@@ -35,7 +35,7 @@ local_tgz <- "/opt/ORFquant.tar.gz"
 if (file.exists(local_tgz) && file.info(local_tgz)$size > 0) {
     utils::untar(local_tgz, exdir = work, tar = "internal")
 } else {
-    zip_url  <- sprintf("https://github.com/ohlerlab/ORFquant/archive/refs/tags/%s.zip", tag)
+    zip_url  <- sprintf("https://github.com/lcalviell/ORFquant/archive/refs/tags/%s.zip", tag)
     zip_path <- file.path(work, sprintf("ORFquant-%s.zip", tag))
     utils::download.file(zip_url, zip_path, mode = "wb", quiet = FALSE)
     utils::unzip(zip_path, exdir = work)

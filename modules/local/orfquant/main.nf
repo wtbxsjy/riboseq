@@ -51,7 +51,7 @@ process ORFQUANT_RUN {
 
     # Write R script - ORFquant should be pre-installed in custom container
     cat > run_orfquant.R <<RSCRIPTEOF
-install_orfquant <- function(local_pkg_tgz = NULL, tag = "v1.1") {
+install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
     work <- file.path(getwd(), "orfquant_src")
     dir.create(work, showWarnings = FALSE, recursive = TRUE)
 
@@ -59,7 +59,7 @@ install_orfquant <- function(local_pkg_tgz = NULL, tag = "v1.1") {
     if (!is.null(tgz) && nzchar(tgz) && file.exists(tgz) && file.info(tgz)$size > 0) {
         message("Installing ORFquant from local tar.gz: ", tgz)
     } else {
-        url <- sprintf("https://github.com/ohlerlab/ORFquant/archive/refs/tags/%s.tar.gz", tag)
+        url <- sprintf("https://github.com/lcalviell/ORFquant/archive/refs/tags/%s.tar.gz", tag)
         tgz <- file.path(work, sprintf("ORFquant-%s.tar.gz", tag))
         message("Downloading ORFquant from GitHub: ", url)
         utils::download.file(url, tgz, mode = "wb", quiet = FALSE)
@@ -81,11 +81,11 @@ install_orfquant <- function(local_pkg_tgz = NULL, tag = "v1.1") {
 if (!requireNamespace("ORFquant", quietly = TRUE)) {
     local_pkg <- if (${use_local_pkg ? 'TRUE' : 'FALSE'}) "${local_pkg_path}" else NULL
     tryCatch({
-        install_orfquant(local_pkg_tgz = local_pkg, tag = "v1.1")
+        install_orfquant(local_pkg_tgz = local_pkg, tag = "1.02")
     }, error = function(e) {
         stop(
             "ORFquant is not installed and automatic installation failed: ", e$message, "\n",
-            "Provide a pre-downloaded tarball with --orfquant_pkg (e.g. ORFquant-v1.1.tar.gz), ",
+            "Provide a pre-downloaded tarball with --orfquant_pkg (e.g. ORFquant_1.02.0.tar.gz from lcalviell/ORFquant), ",
             "or use a container with ORFquant pre-installed (e.g. --orfquant_container)."
         )
     })
