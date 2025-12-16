@@ -58,14 +58,14 @@ import sys
 gtf_in = sys.argv[1]
 gtf_out = sys.argv[2]
 
-level_re = re.compile(r'(?:^|;\s*)level\s+"[^"]*"\s*;')
+level_re = re.compile(r'(?:^|;\\s*)level\\s+"[^"]*"\\s*;')
 
 with open(gtf_in, 'rt', encoding='utf-8', errors='replace') as fin, open(gtf_out, 'wt', encoding='utf-8') as fout:
     for line in fin:
         if line.startswith('#') or not line.strip():
             fout.write(line)
             continue
-        parts = line.rstrip('\n').split('\t')
+        parts = line.rstrip('\\n').split('\\t')
         if len(parts) < 9:
             fout.write(line)
             continue
@@ -75,7 +75,7 @@ with open(gtf_in, 'rt', encoding='utf-8', errors='replace') as fin, open(gtf_out
                 attrs += ';'
             attrs += ' level "NA";'
             parts[8] = attrs
-        fout.write('\t'.join(parts) + '\n')
+        fout.write('\\t'.join(parts) + '\\n')
 PY
 
     # Run RiboCode, capture exit status
