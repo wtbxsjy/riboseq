@@ -38,20 +38,20 @@ process RIBOCODE_DETECT {
 
     """
     # Ensure temporary/config directories are writable inside the container
-    export TMPDIR="$PWD/tmp"
-    mkdir -p "$TMPDIR"
-    export MPLCONFIGDIR="$PWD/mplconfig"
-    mkdir -p "$MPLCONFIGDIR"
+    export TMPDIR="\$PWD/tmp"
+    mkdir -p "\$TMPDIR"
+    export MPLCONFIGDIR="\$PWD/mplconfig"
+    mkdir -p "\$MPLCONFIGDIR"
 
     # RiboCode can crash when transcript "level" is missing for some features.
     # Normalize the GTF by adding a default level to any record lacking it.
     GTF_IN="${gtf}"
-    if [[ "$GTF_IN" == *.gz ]]; then
-        gunzip -c "$GTF_IN" > input.gtf
+    if [[ "\$GTF_IN" == *.gz ]]; then
+        gunzip -c "\$GTF_IN" > input.gtf
         GTF_IN="input.gtf"
     fi
 
-    python - "$GTF_IN" ribocode.gtf <<'PY'
+    python - "\$GTF_IN" ribocode.gtf <<'PY'
 import re
 import sys
 
