@@ -92,9 +92,7 @@ PY
         echo "FAILED: No periodicity detected" > ${meta.id}.ribocode_failed.txt
     }
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        ribocode: "\$(RiboCode_onestep --version 2>&1 | sed 's/^.* //')"
-    END_VERSIONS
+    ribocode_ver="\$(RiboCode_onestep --version 2>&1 | sed 's/^.* //')"
+    printf '"%s":\\n    ribocode: "%s"\\n' "${task.process}" "\$ribocode_ver" > versions.yml
     """.stripIndent()
 }
