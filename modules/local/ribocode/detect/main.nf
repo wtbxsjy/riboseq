@@ -36,7 +36,7 @@ process RIBOCODE_DETECT {
     // reverse -> reverse
     // unstranded -> no
 
-    """.stripIndent()
+    """
     # Ensure temporary/config directories are writable inside the container
     export TMPDIR="\$PWD/tmp"
     mkdir -p "\$TMPDIR"
