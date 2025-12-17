@@ -56,7 +56,7 @@ install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
     dir.create(work, showWarnings = FALSE, recursive = TRUE)
 
     tgz <- local_pkg_tgz
-    if (!is.null(tgz) && nzchar(tgz) && file.exists(tgz) && file.info(tgz)$size > 0) {
+    if (!is.null(tgz) && nzchar(tgz) && file.exists(tgz) && file.info(tgz)[1, "size"] > 0) {
         message("Installing ORFquant from local tar.gz: ", tgz)
     } else {
         url <- sprintf("https://github.com/lcalviell/ORFquant/archive/refs/tags/%s.tar.gz", tag)
