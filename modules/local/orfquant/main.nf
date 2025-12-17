@@ -84,7 +84,7 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
         install_orfquant(local_pkg_tgz = local_pkg, tag = "1.02")
     }, error = function(e) {
         stop(
-            "ORFquant is not installed and automatic installation failed: ", e$message, "\n",
+            "ORFquant is not installed and automatic installation failed: ", conditionMessage(e), "\n",
             "Provide a pre-downloaded tarball with --orfquant_pkg (e.g. ORFquant_1.02.0.tar.gz from lcalviell/ORFquant), ",
             "or use a container with ORFquant pre-installed (e.g. --orfquant_container)."
         )
@@ -120,7 +120,7 @@ if (${plot_results}) {
             prefix = "${prefix}"
         )
     }, error = function(e) {
-        message("Warning: Could not generate ORFquant plots: ", e\\\$message)
+        message("Warning: Could not generate ORFquant plots: ", conditionMessage(e))
     })
 }
 
@@ -129,7 +129,7 @@ writeLines(
     c(
         '"${task.process}":',
         paste0('    orfquant: "', packageVersion("ORFquant"), '"'),
-        paste0('    r-base: "', R.Version()\\\$major, ".", R.Version()\\\$minor, '"')
+        paste0('    r-base: "', R.Version()[["major"]], ".", R.Version()[["minor"]], '"')
     ),
     "versions.yml"
 )
