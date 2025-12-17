@@ -36,7 +36,7 @@ process RIBOCODE_DETECT {
     // reverse -> reverse
     // unstranded -> no
 
-    """
+    """.stripIndent()
     # Ensure temporary/config directories are writable inside the container
     export TMPDIR="\$PWD/tmp"
     mkdir -p "\$TMPDIR"
@@ -96,5 +96,5 @@ PY
     "${task.process}":
         ribocode: "\$(RiboCode_onestep --version 2>&1 | sed 's/^.* //')"
     END_VERSIONS
-    """
+    """.stripIndent()
 }
