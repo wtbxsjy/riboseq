@@ -9,14 +9,19 @@
 //
 include { BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS as BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS_GENOME        } from '../../subworkflows/nf-core/bam_dedup_stats_samtools_umitools/main'
 include { BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS as BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS_TRANSCRIPTOME } from '../../subworkflows/nf-core/bam_dedup_stats_samtools_umitools/main'
+include { BAM_SORT_STATS_SAMTOOLS                                                            } from '../../subworkflows/nf-core/bam_sort_stats_samtools/main'
 include { FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS                                                 } from '../../subworkflows/nf-core/fastq_qc_trim_filter_setstrandedness/main'
 include { BAM_DEDUP_UMI      } from '../../subworkflows/nf-core/bam_dedup_umi'
 include { FASTQ_ALIGN_STAR   } from '../../subworkflows/nf-core/fastq_align_star'
 include { FASTQ_ALIGN_HISAT2 } from '../../subworkflows/local/fastq_align_hisat2'
 include { RPBP               } from '../../subworkflows/local/rpbp'
 include { RIBOCODE           } from '../../subworkflows/local/ribocode'
-include { RIBOSEQC           } from '../../subworkflows/local/riboseqc'
+include { RIBOSEQC as RIBOSEQC_PREFILTER  } from '../../subworkflows/local/riboseqc'
+include { RIBOSEQC as RIBOSEQC_POSTFILTER } from '../../subworkflows/local/riboseqc'
 include { ORFQUANT           } from '../../subworkflows/local/orfquant'
+
+// Local module: sORF BAM filtering (unique mapping + contig exclusion + read length)
+include { SORF_BAM_FILTER } from '../../modules/local/sorf_bam_filter'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -31,11 +36,13 @@ include { SAMTOOLS_INDEX                                       } from '../../mod
 include { MULTIQC                                              } from '../../modules/nf-core/multiqc/main'
 include { SAMTOOLS_SORT                                        } from '../../modules/nf-core/samtools/sort'
 include { UMITOOLS_PREPAREFORRSEM as UMITOOLS_PREPAREFORSALMON } from '../../modules/nf-core/umitools/prepareforrsem'
+include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ_PREFILTER } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ         } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_TISEQ           } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_INDIVIDUAL      } from '../../modules/nf-core/ribotish/predict'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_ALL             } from '../../modules/nf-core/ribotish/predict'
 include { RIBOTRICER_PREPAREORFS                               } from '../../modules/nf-core/ribotricer/prepareorfs'
+include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_PREFILTER_QC } from '../../modules/nf-core/ribotricer/detectorfs'
 include { RIBOTRICER_DETECTORFS                                } from '../../modules/nf-core/ribotricer/detectorfs'
 include { HISAT2_EXTRACTSPLICESITES                            } from '../../modules/nf-core/hisat2/extractsplicesites/main'
 
@@ -119,31 +126,26 @@ workflow RIBOSEQ {
         log.info "Skipping: preprocessing, alignment, UMI deduplication, RiboCode"
         log.info "=".multiply(60)
 
-        // ch_samplesheet contains [ meta, bam, bai ] tuples
-        // Split into BAM and BAI channels, generate index if not provided
-        ch_samplesheet
-            .branch { meta, bam, bai ->
-                with_index: bai != null
-                    return [ meta, bam, bai ]
-                without_index: bai == null
-                    return [ meta, bam ]
-            }
-            .set { ch_bam_input }
+        // ch_samplesheet contains [ meta, bam, bai ] tuples.
+        // For downstream tools (e.g. Ribo-TISH), we require a coordinate-sorted BAM plus an index.
+        // We therefore always sort + index BAM inputs here and collect samtools QC stats for MultiQC.
 
-        // Generate index for BAMs without index
-        SAMTOOLS_INDEX ( ch_bam_input.without_index )
-        ch_versions = ch_versions.mix(SAMTOOLS_INDEX.out.versions.first())
+        BAM_SORT_STATS_SAMTOOLS(
+            ch_samplesheet.map { meta, bam, bai -> [ meta, bam ] },
+            ch_fasta.map { [ [:], it ] }
+        )
 
-        // Combine indexed and already-indexed BAMs
-        ch_bam_with_index = ch_bam_input.with_index
-            .mix(
-                ch_bam_input.without_index
-                    .join(SAMTOOLS_INDEX.out.bai)
-            )
+        ch_versions = ch_versions.mix(BAM_SORT_STATS_SAMTOOLS.out.versions)
 
         // Set genome BAM channels
-        ch_genome_bam = ch_bam_with_index.map { meta, bam, bai -> [ meta, bam ] }
-        ch_genome_bam_index = ch_bam_with_index.map { meta, bam, bai -> [ meta, bai ] }
+        ch_genome_bam       = BAM_SORT_STATS_SAMTOOLS.out.bam
+        ch_genome_bam_index = BAM_SORT_STATS_SAMTOOLS.out.bai.mix(BAM_SORT_STATS_SAMTOOLS.out.csi)
+
+        // MultiQC inputs (samtools stats/flagstat/idxstats)
+        ch_multiqc_files = ch_multiqc_files
+            .mix(BAM_SORT_STATS_SAMTOOLS.out.stats.collect{ it[1] })
+            .mix(BAM_SORT_STATS_SAMTOOLS.out.flagstat.collect{ it[1] })
+            .mix(BAM_SORT_STATS_SAMTOOLS.out.idxstats.collect{ it[1] })
 
     } else {
         //
@@ -305,14 +307,50 @@ workflow RIBOSEQ {
     ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_genome_bam_index)
     ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> [ [:], fasta, gtf ] }.first()
 
-    if (!params.skip_ribotish){
-        RIBOTISH_QUALITY_RIBOSEQ(
+    // Pre-filter QC runs should not overwrite post-filter outputs; suffix meta.id for QC-only runs
+    ch_bams_for_qc_prefilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ id: "${meta.id}_prefilter" ], bam, bai ] }
+
+    // sORF prediction BAMs: filtered by default; used by ALL sORF predictors
+    ch_bams_for_sorf_prediction = ch_bams_for_analysis
+
+    if (params.sorf_filter) {
+        SORF_BAM_FILTER(
             ch_bams_for_analysis,
+            ch_fai,
+            params.sorf_unique_mode,
+            params.sorf_unique_mapq,
+            params.sorf_read_len_min,
+            params.sorf_read_len_max,
+            params.sorf_exclude_contigs_regex
+        )
+        ch_versions = ch_versions.mix(SORF_BAM_FILTER.out.versions)
+        ch_multiqc_files = ch_multiqc_files.mix(SORF_BAM_FILTER.out.stats)
+
+        SAMTOOLS_INDEX(
+            SORF_BAM_FILTER.out.bam
+        )
+        ch_versions = ch_versions.mix(SAMTOOLS_INDEX.out.versions)
+
+        def ch_filtered_index = params.bam_csi_index ? SAMTOOLS_INDEX.out.csi : SAMTOOLS_INDEX.out.bai
+        ch_bams_for_sorf_prediction = SORF_BAM_FILTER.out.bam.join(ch_filtered_index)
+    }
+
+    if (!params.skip_ribotish){
+        // Pre-filter QC (QC only; does not feed prediction)
+        RIBOTISH_QUALITY_RIBOSEQ_PREFILTER(
+            ch_bams_for_qc_prefilter,
+            ch_gtf.map { [ [:], it ] }.first()
+        )
+        ch_versions      = ch_versions.mix(RIBOTISH_QUALITY_RIBOSEQ_PREFILTER.out.versions)
+
+        // Post-filter QC + offsets for prediction (prediction consumes filtered BAMs)
+        RIBOTISH_QUALITY_RIBOSEQ(
+            ch_bams_for_sorf_prediction,
             ch_gtf.map { [ [:], it ] }.first()
         )
         ch_versions      = ch_versions.mix(RIBOTISH_QUALITY_RIBOSEQ.out.versions)
 
-        ribotish_predict_inputs = ch_bams_for_analysis
+        ribotish_predict_inputs = ch_bams_for_sorf_prediction
             .join(RIBOTISH_QUALITY_RIBOSEQ.out.offset)
             .multiMap{ meta, bam, bai, offset ->
                 bam: [ meta, bam, bai ]
@@ -329,15 +367,19 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOTISH_PREDICT_INDIVIDUAL.out.versions)
 
-        RIBOTISH_PREDICT_ALL(
-            ribotish_predict_inputs.bam.map{meta, bam, bai -> [[id:'allsamples'], bam, bai]}.groupTuple(),
-            [[:],[],[]],
-            ch_fasta_gtf,
-            [[:],[]],
-            ribotish_predict_inputs.offset.map{meta, offset -> [[id:'allsamples'], offset]}.groupTuple(),
-            [[:],[]]
-        )
-        ch_versions = ch_versions.mix(RIBOTISH_PREDICT_ALL.out.versions)
+        if (params.sorf_predict_pooled) {
+            RIBOTISH_PREDICT_ALL(
+                ribotish_predict_inputs.bam.map{meta, bam, bai -> [[id:'allsamples'], bam, bai]}.groupTuple(),
+                [[:],[],[]],
+                ch_fasta_gtf,
+                [[:],[]],
+                ribotish_predict_inputs.offset.map{meta, offset -> [[id:'allsamples'], offset]}.groupTuple(),
+                [[:],[]]
+            )
+            ch_versions = ch_versions.mix(RIBOTISH_PREDICT_ALL.out.versions)
+        } else {
+            log.info "Pooled(all-samples) RiboTISH prediction is disabled (set --sorf_predict_pooled to enable)."
+        }
     }
 
     if (!params.skip_ribotricer){
@@ -346,8 +388,15 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOTRICER_PREPAREORFS.out.versions)
 
+        // Pre-filter run as QC-only (suffix meta.id to avoid output collisions)
+        RIBOTRICER_DETECTORFS_PREFILTER_QC(
+            ch_bams_for_qc_prefilter,
+            RIBOTRICER_PREPAREORFS.out.candidate_orfs
+        )
+        ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_PREFILTER_QC.out.versions)
+
         RIBOTRICER_DETECTORFS(
-            ch_bams_for_analysis,
+            ch_bams_for_sorf_prediction,
             RIBOTRICER_PREPAREORFS.out.candidate_orfs
         )
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS.out.versions)
@@ -360,7 +409,7 @@ workflow RIBOSEQ {
         }
 
         RPBP(
-            ch_bams_for_analysis,
+            ch_bams_for_sorf_prediction,
             ch_fasta,
             ch_gtf,
             ribosomal_fasta
@@ -395,16 +444,26 @@ workflow RIBOSEQ {
     ch_riboseqc_orfquant   = Channel.empty()
 
     if (!params.skip_riboseqc) {
-        RIBOSEQC(
+        // Pre-filter RiboseQC (used by ORFquant)
+        RIBOSEQC_PREFILTER(
             ch_bams_for_analysis,
             ch_gtf,
             ch_fasta
         )
-        ch_versions = ch_versions.mix(RIBOSEQC.out.versions)
+        ch_versions = ch_versions.mix(RIBOSEQC_PREFILTER.out.versions)
 
         // Store RiboseQC outputs for ORFquant
-        ch_riboseqc_annotation = RIBOSEQC.out.annotation
-        ch_riboseqc_orfquant   = RIBOSEQC.out.orfquant
+        ch_riboseqc_annotation = RIBOSEQC_PREFILTER.out.annotation
+        ch_riboseqc_orfquant   = RIBOSEQC_PREFILTER.out.orfquant
+
+        // Post-filter RiboseQC (QC-only; suffix meta.id to avoid output collisions)
+        ch_bams_for_qc_postfilter = ch_bams_for_sorf_prediction.map { meta, bam, bai -> [ meta + [ id: "${meta.id}_postfilter" ], bam, bai ] }
+        RIBOSEQC_POSTFILTER(
+            ch_bams_for_qc_postfilter,
+            ch_gtf,
+            ch_fasta
+        )
+        ch_versions = ch_versions.mix(RIBOSEQC_POSTFILTER.out.versions)
     }
 
     //
@@ -450,21 +509,23 @@ workflow RIBOSEQ {
         ch_multiqc_files                      = ch_multiqc_files.mix(ch_collated_versions)
         ch_multiqc_files                      = ch_multiqc_files.mix(ch_methods_description.collectFile(name: 'methods_description_mqc.yaml', sort: true))
 
-        ch_name_replacements = ch_fastq
-            .map{ meta, reads ->
-                def name1 = file(reads[0][0]).simpleName + "\t" + meta.id + '_1'
-                def fastqcnames = meta.id + "_raw\t" + meta.id + "\n" + meta.id + "_trimmed\t" + meta.id
-                if (reads[0][1] ){
-                    def name2 = file(reads[0][1]).simpleName + "\t" + meta.id + '_2'
-                    def fastqcnames1 = meta.id + "_raw_1\t" + meta.id + "_1\n" + meta.id + "_trimmed_1\t" + meta.id + "_1"
-                    def fastqcnames2 = meta.id + "_raw_2\t" + meta.id + "_2\n" + meta.id + "_trimmed_2\t" + meta.id + "_2"
-                    return [ name1, name2, fastqcnames1, fastqcnames2 ]
-                } else{
-                    return [ name1, fastqcnames ]
+        ch_name_replacements = is_bam_input ?
+            Channel.value(file("$projectDir/assets/name_replacement.empty.txt", checkIfExists: true)) :
+            ch_fastq
+                .map{ meta, reads ->
+                    def name1 = file(reads[0][0]).simpleName + "\t" + meta.id + '_1'
+                    def fastqcnames = meta.id + "_raw\t" + meta.id + "\n" + meta.id + "_trimmed\t" + meta.id
+                    if (reads[0][1] ){
+                        def name2 = file(reads[0][1]).simpleName + "\t" + meta.id + '_2'
+                        def fastqcnames1 = meta.id + "_raw_1\t" + meta.id + "_1\n" + meta.id + "_trimmed_1\t" + meta.id + "_1"
+                        def fastqcnames2 = meta.id + "_raw_2\t" + meta.id + "_2\n" + meta.id + "_trimmed_2\t" + meta.id + "_2"
+                        return [ name1, name2, fastqcnames1, fastqcnames2 ]
+                    } else{
+                        return [ name1, fastqcnames ]
+                    }
                 }
-            }
-            .flatten()
-            .collectFile(name: 'name_replacement.txt', newLine: true)
+                .flatten()
+                .collectFile(name: 'name_replacement.txt', newLine: true)
 
         MULTIQC (
             ch_multiqc_files.collect(),

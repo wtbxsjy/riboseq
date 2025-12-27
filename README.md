@@ -119,6 +119,18 @@ flowchart TB
 2. **Ribo-TISH Quality**: Check reads distribution around annotated protein coding regions, show frame bias and estimate P-site offset ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
 3. **ggRibo Output**: Generates compatible output files for visualization with the [`ggRibo`](https://github.com/hsinyenwu/ggRibo) R package.
 
+> [!IMPORTANT]
+> **Design specification (development note): QC and filtering policy**
+>
+> The pipeline is evolving to support a strict separation between **QC** and **sORF prediction inputs**:
+>
+> - **RiboseQC is applied only to samples with `type=riboseq`.**
+> - The pipeline will run the **QC suite twice** on `type=riboseq` samples:
+>   - **Pre-filter QC** on *unfiltered* genome BAMs (for baseline QC and comparability).
+>   - **Post-filter QC** on *filtered* genome BAMs (to assess the effect of filtering).
+> - All **sORF prediction tools** (e.g. Ribo-TISH predict, Ribotricer, rp-bp, and any future sORF predictors integrated into the pipeline) are expected to consume **filtered BAMs only**, to ensure consistent inputs across tools.
+> - Unfiltered BAMs are still retained to enable downstream quantification modules (planned), e.g. CDS-based read counting and DE analysis.
+
 ### ORF Prediction Tools
 
 1. **Ribo-TISH** (default): Predict translated ORFs and translation initiation sites _de novo_ from alignment data ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
@@ -126,6 +138,16 @@ flowchart TB
 3. **RiboCode** (optional): Detect actively translating ORFs using transcriptome-aligned reads ([`RiboCode`](https://github.com/xztcwang/RiboCode))
 4. **rp-bp** (optional): Ribosome profiling with Bayesian predictions for translated ORFs ([`rp-bp`](https://github.com/dieterich-lab/rp-bp))
 5. **ORFquant** (default, requires RiboseQC): Splice-aware ORF detection and quantification at the single-ORF level ([`ORFquant`](https://github.com/lcalviell/ORFquant))
+
+> [!IMPORTANT]
+> **Design specification (development note): per-sample prediction only**
+>
+> Some sORF tools support a pooled / all-samples mode. When running large cohorts, pooled prediction can make runtime and memory difficult to control.
+>
+> - The pipeline design will therefore keep **only per-sample sORF prediction**.
+> - Any pooled(all-samples) prediction runs will be **disabled/removed**.
+> - Cross-sample merging/aggregation of per-sample predictions is expected to be handled by downstream user scripts.
+> - The pipeline will retain sufficient intermediate outputs (per-sample result files and shared reference artefacts such as candidate ORFs where applicable) to make post-hoc merging feasible.
 
 ## Usage
 
@@ -162,6 +184,13 @@ CONTROL_REP2,/path/to/sample2.bam,,forward,riboseq
 > - `strandedness` must be explicitly specified (`forward`, `reverse`, or `unstranded`) - `auto` is not supported
 > - UMI deduplication and RiboCode are automatically skipped in BAM input mode
 > - All samples in a samplesheet must be the same type (all FASTQ or all BAM)
+
+> [!NOTE]
+> **Planned behaviour (sORF filtering + QC before/after):**
+> - Genome BAMs will be coordinate-sorted and indexed if required.
+> - For `type=riboseq` samples, the pipeline will run **RiboseQC (and other riboseq QC steps)** on the **unfiltered** BAM first.
+> - The pipeline will then create a **filtered BAM** used for **all sORF prediction tools**.
+> - For `type=riboseq` samples, the pipeline will also run the same QC steps again on the **filtered** BAM.
 
 Now, you can run the pipeline using:
 
@@ -215,6 +244,57 @@ To skip specific tools:
 
 > [!NOTE]
 > **ORFquant** uses the P-site analysis output from **RiboseQC** (`*_for_ORFquant` files). If you skip RiboseQC, ORFquant will also be automatically skipped.
+
+### sORF BAM filtering (design specification)
+
+To ensure consistent inputs across sORF prediction tools, the pipeline design includes an explicit BAM filtering step applied *after* alignment (and optional UMI deduplication) and *after* a first round of riboseq QC.
+
+Filtering rules (applied to genome-aligned BAMs):
+
+1. **Unique mapping reads only**
+    - Strategy is configurable; preferred is an `NH:i:1`-based check when the tag is present.
+    - A MAPQ-based strategy can be used as a fallback when `NH` is unavailable.
+    - Duplicate-marked reads (SAM flag `0x400`) are removed.
+2. **Exclude reads aligned to unwanted reference contigs**
+    - Intended to drop alignments to mitochondrial / chloroplast contigs and ambiguous scaffolds.
+    - Implemented via a configurable contig-name regex (or explicit allow/deny list), derived from the reference `*.fai`.
+    - **Species-specific naming note:**
+        - Animals (e.g. Gencode human/mouse) commonly use `chrM` / `MT` for mitochondria and may include unlocalized/alternative contigs such as `chrUn_*`, `*_random`, `*_alt`, `*_fix`.
+        - Plants (e.g. Ensembl Plants rice/maize) commonly use `Mt` (mitochondrion) and `Pt` (plastid/chloroplast), and may include numerous scaffold/unanchored contigs depending on the assembly.
+        - If your reference uses different names, override `--sorf_exclude_contigs_regex` in your run config.
+3. **Read length filter**
+    - Keep reads whose sequence length falls within a configurable interval.
+    - Default interval: **28–30 nt**.
+
+Planned parameters (names may change slightly as implementation lands):
+
+- `--sorf_filter` (bool): Enable/disable the sORF BAM filtering step.
+- `--sorf_read_len_min` (int, default `28`)
+- `--sorf_read_len_max` (int, default `30`)
+- `--sorf_exclude_contigs_regex` (string): Regex for contigs to exclude (e.g. mitochondria/chloroplast/ambiguous scaffolds).
+- `--sorf_unique_mode` (`auto|nh|mapq`): How to enforce unique mapping.
+- `--sorf_unique_mapq` (int): MAPQ threshold used when `--sorf_unique_mode` requires MAPQ.
+- `--sorf_predict_pooled` (bool, default `false`): Whether to run pooled(all-samples) sORF prediction in addition to per-sample prediction.
+
+Example contig exclusion regex presets (copy/paste and customize):
+
+- **Animals (Gencode human/mouse; UCSC-style contigs)**
+    - Typical mitochondria: `chrM` / `MT`
+    - Typical ambiguous/unlocalized contigs: `chrUn_*`, `*_random`, `*_alt`, `*_fix`
+    - Suggested preset:
+        - `--sorf_exclude_contigs_regex '^(chr)?(M|MT|chrM|chrMT|ChrM|ChrMT)$|^chrUn_.*|.*_random$|.*_alt$|.*_fix$'`
+
+- **Plants (Ensembl Plants rice/maize; organelle contigs commonly Mt/Pt)**
+    - Typical mitochondrion: `Mt` (sometimes also `chrMt`)
+    - Typical plastid/chloroplast: `Pt` (sometimes also `chrPt`)
+    - Suggested preset (keep the scaffold patterns if your assembly includes them):
+        - `--sorf_exclude_contigs_regex '^(chr)?(Mt|chrMt|ChrMt)$|^(chr)?(Pt|chrPt|ChrPt)$|^chrUn_.*|.*_random$|.*_alt$|.*_fix$'`
+
+> [!NOTE]
+> Species-specific configuration logic: the pipeline cannot reliably infer organelle / scaffold contigs across all assemblies. Defaults aim to cover common cases, but for non-Gencode/Ensembl references you should explicitly set `--sorf_exclude_contigs_regex` based on your FASTA headers / `*.fai`.
+
+> [!NOTE]
+> The filtering step is intended to apply to both FASTQ and BAM input modes, and to affect only the BAMs passed into sORF prediction tools. Unfiltered BAMs remain available for QC baselines and planned quantification modules.
 
 > [!WARNING]
 > Please provide pipeline parameters via the CLI or Nextflow `-params-file` option. Custom config files including those provided by the `-c` Nextflow option can be used to provide any configuration _**except for parameters**_; see [docs](https://nf-co.re/docs/usage/getting_started/configuration#custom-configuration-files).
