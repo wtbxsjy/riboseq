@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Mirrors: modules/nf-core/ribotricer/prepareorfs/main.nf
+IMG_URL="https://depot.galaxyproject.org/singularity/ribotricer:1.3.3--pyhdfd78af_0"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  07_ribotricer_prepareorfs.sh --prefix NAME --gtf annot.gtf --fasta genome.fa [--outdir DIR]
+
+Required:
+  --prefix output prefix
+  --gtf    GTF
+  --fasta  genome FASTA
+
+Options:
+  --outdir output directory (default: ./out_ribotricer_index)
+
+Env:
+  BIND_EXTRA extra singularity binds, comma-separated (e.g. /mnt:/mnt)
+EOF
+}
+
+PREFIX=""
+GTF=""
+FASTA=""
+OUTDIR="./out_ribotricer_index"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prefix) PREFIX="$2"; shift 2;;
+    --gtf) GTF="$2"; shift 2;;
+    --fasta) FASTA="$2"; shift 2;;
+    --outdir) OUTDIR="$2"; shift 2;;
+    -h|--help) usage; exit 0;;
+    *) echo "Unknown arg: $1"; usage; exit 2;;
+  esac
+done
+
+if [[ -z "$PREFIX" || -z "$GTF" || -z "$FASTA" ]]; then
+  usage
+  exit 2
+fi
+
+mkdir -p "$OUTDIR" "./containers"
+OUTDIR="$(cd "$OUTDIR" && pwd)"
+WORKDIR="$(pwd)"
+
+pull_img() {
+  local url="$1"
+  local base
+  base="$(basename "$url")"
+  base="${base//:/_}"
+  local sif="$(pwd)/containers/${base}.sif"
+  if [[ ! -f "$sif" ]]; then
+    singularity pull --disable-cache --force "$sif" "$url"
+  fi
+  echo "$sif"
+}
+
+IMG="$(pull_img "$IMG_URL")"
+
+singularity exec \
+  --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+  --pwd "$WORKDIR" \
+  "$IMG" \
+  bash -lc "
+set -euo pipefail
+cd '$OUTDIR'
+
+ribotricer prepare-orfs \
+  --gtf '$GTF' \
+  --fasta '$FASTA' \
+  --prefix '$PREFIX'
+
+ribotricer --version 2>&1 | head -n 1 > versions.ribotricer.txt
+"
+
+echo "[OK] Output: $OUTDIR/${PREFIX}_candidate_orfs.tsv"
