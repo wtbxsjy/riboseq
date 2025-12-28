@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Avoid noisy locale warnings inside the container (host locales may not exist there)
+export SINGULARITYENV_LANG=${SINGULARITYENV_LANG:-C}
+export SINGULARITYENV_LC_ALL=${SINGULARITYENV_LC_ALL:-C}
+export APPTAINERENV_LANG=${APPTAINERENV_LANG:-C}
+export APPTAINERENV_LC_ALL=${APPTAINERENV_LC_ALL:-C}
+
 # Mirrors: modules/local/riboseqc/prepareannotation/main.nf
 IMG_URL="https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1"
 SAMTOOLS_IMG_URL="https://depot.galaxyproject.org/singularity/samtools:1.21--h50ea8bc_0"
