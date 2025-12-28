@@ -35,6 +35,7 @@ Options:
   --annotation    Existing RiboseQC annotation file (*_Rannot). If provided, skip prepareannotation.
   --orfquant-pkg  Local ORFquant source tar.gz (optional; avoids GitHub download)
   --orfquant-sif  ORFquant container SIF path (optional; if set, passed to 04_orfquant_run.sh --container)
+  --orfquant-annotation Existing ORFquant annotation (*_Rannot). If not set, will be generated for ORFquant.
 
 Env:
   BIND_EXTRA  Extra singularity binds, comma-separated (e.g. /mnt:/mnt)
@@ -58,6 +59,7 @@ FAST_MODE="TRUE"
 RANNOT=""
 ORFQUANT_PKG=""
 ORFQUANT_SIF=""
+ORFQUANT_RANNOT=""
 
 SKIP_FILTER="FALSE"
 RESUME="TRUE"
@@ -87,6 +89,7 @@ while [[ $# -gt 0 ]]; do
     --annotation) RANNOT="$2"; shift 2;;
     --orfquant-pkg) ORFQUANT_PKG="$2"; shift 2;;
     --orfquant-sif) ORFQUANT_SIF="$2"; shift 2;;
+    --orfquant-annotation) ORFQUANT_RANNOT="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 2;;
   esac
@@ -127,6 +130,14 @@ if [[ -n "$ORFQUANT_SIF" ]]; then
     exit 2
   fi
   ORFQUANT_SIF="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$ORFQUANT_SIF")"
+fi
+
+if [[ -n "$ORFQUANT_RANNOT" ]]; then
+  if [[ ! -f "$ORFQUANT_RANNOT" ]]; then
+    echo "[ERROR] --orfquant-annotation not found: $ORFQUANT_RANNOT" >&2
+    exit 2
+  fi
+  ORFQUANT_RANNOT="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$ORFQUANT_RANNOT")"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -244,6 +255,29 @@ if [[ ! -f "$FOR_ORFQUANT" ]]; then
 fi
 
 echo "[INFO] Step 4/4: ORFquant"
+ORFQ_ANNOT_DIR="$OUT_ORFQUANT/orfquant_annot"
+mkdir -p "$ORFQ_ANNOT_DIR"
+
+# IMPORTANT (from the referenced Nextflow example): ORFquant requires its own Rannot.
+# RiboseQC *_Rannot is not guaranteed to work for ORFquant.
+if [[ -z "$ORFQUANT_RANNOT" ]]; then
+  if [[ "$RESUME" == "TRUE" ]] && ORFQUANT_RANNOT="$(resolve_rannot "$ORFQ_ANNOT_DIR" "$GTF")"; then
+    echo "[INFO] Step 4/4: ORFquant annotation skipped (resume): $ORFQUANT_RANNOT"
+  else
+    echo "[INFO] Step 4/4: Preparing ORFquant annotation (ORFquant-specific *_Rannot)"
+    ORFQ_ANN_ARGS=(--gtf "$GTF" --fasta "$FASTA" --outdir "$ORFQ_ANNOT_DIR")
+    if [[ -n "$ORFQUANT_SIF" ]]; then
+      ORFQ_ANN_ARGS+=(--container "$ORFQUANT_SIF")
+    fi
+    bash "$SCRIPT_DIR/13_orfquant_prepareannotation.sh" "${ORFQ_ANN_ARGS[@]}"
+    if ! ORFQUANT_RANNOT="$(resolve_rannot "$ORFQ_ANNOT_DIR" "$GTF")"; then
+      echo "[ERROR] Cannot uniquely determine ORFquant *_Rannot in: $ORFQ_ANNOT_DIR" >&2
+      find "$ORFQ_ANNOT_DIR" -maxdepth 1 -type f -name "*_Rannot" -print >&2 || true
+      exit 2
+    fi
+  fi
+fi
+
 ORFQUANT_ARGS=()
 if [[ -n "$ORFQUANT_PKG" ]]; then
   ORFQUANT_ARGS+=(--orfquant-pkg "$ORFQUANT_PKG")
@@ -258,7 +292,7 @@ else
   bash "$SCRIPT_DIR/04_orfquant_run.sh" \
     --sample "$SAMPLE" \
     --for-orfquant "$FOR_ORFQUANT" \
-    --annotation "$RANNOT" \
+    --annotation "$ORFQUANT_RANNOT" \
     --fasta "$FASTA" \
     --cpus "$CPUS" \
     --outdir "$OUT_ORFQUANT" \

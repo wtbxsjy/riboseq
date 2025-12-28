@@ -7,9 +7,10 @@ export SINGULARITYENV_LC_ALL=${SINGULARITYENV_LC_ALL:-C}
 export APPTAINERENV_LANG=${APPTAINERENV_LANG:-C}
 export APPTAINERENV_LC_ALL=${APPTAINERENV_LC_ALL:-C}
 
-# Mirrors: modules/local/orfquant/main.nf
-# Default container in pipeline points to riboseqc:1.1 (ORFquant may be installed at runtime)
-IMG_URL="https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1"
+# Reference-aligned default:
+# The provided Nextflow example uses a dedicated ORFquant biocontainer (R 4.0).
+# This generally avoids runtime installation and reduces namespace/version issues.
+IMG_URL="https://depot.galaxyproject.org/singularity/orfquant:1.1.0--r40_1"
 
 usage() {
   cat <<'EOF'
