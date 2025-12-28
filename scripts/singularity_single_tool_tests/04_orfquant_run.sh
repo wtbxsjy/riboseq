@@ -158,6 +158,26 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
 
 library(ORFquant)
 
+# Work around namespace collisions observed in some environments:
+# - ggplot2::Position is a ggproto object and can overwrite BiocGenerics::Position (function/generic)
+#   leading to: "attempt to apply non-function".
+repair_ns_symbol <- function(pkg, sym, from_pkg = "BiocGenerics") {
+  ns <- tryCatch(asNamespace(pkg), error = function(e) NULL)
+  from <- tryCatch(asNamespace(from_pkg), error = function(e) NULL)
+  if (is.null(ns) || is.null(from)) return(invisible(FALSE))
+  if (!exists(sym, envir = ns, inherits = FALSE)) return(invisible(FALSE))
+  obj <- get(sym, envir = ns, inherits = FALSE)
+  if (is.function(obj)) return(invisible(FALSE))
+  if (!exists(sym, envir = from, inherits = FALSE)) return(invisible(FALSE))
+  assign(sym, get(sym, envir = from, inherits = FALSE), envir = ns)
+  invisible(TRUE)
+}
+
+repair_ns_symbol("ORFquant", "Position")
+repair_ns_symbol("ORFquant", "combine")
+repair_ns_symbol("RiboseQC", "Position")
+repair_ns_symbol("RiboseQC", "combine")
+
 run_ORFquant(
   for_ORFquant_file = Sys.getenv("FOR_ORFQUANT"),
   annotation_file   = Sys.getenv("ANNOT"),
