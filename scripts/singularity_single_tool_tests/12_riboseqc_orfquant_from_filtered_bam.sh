@@ -34,6 +34,7 @@ Options:
   --exclude-regex contig regex to EXCLUDE for filtering (default: pipeline-like contig excludes)
   --annotation    Existing RiboseQC annotation file (*_Rannot). If provided, skip prepareannotation.
   --orfquant-pkg  Local ORFquant source tar.gz (optional; avoids GitHub download)
+  --orfquant-sif  ORFquant container SIF path (optional; if set, passed to 04_orfquant_run.sh --container)
 
 Env:
   BIND_EXTRA  Extra singularity binds, comma-separated (e.g. /mnt:/mnt)
@@ -56,6 +57,7 @@ CPUS=4
 FAST_MODE="TRUE"
 RANNOT=""
 ORFQUANT_PKG=""
+ORFQUANT_SIF=""
 
 SKIP_FILTER="FALSE"
 RESUME="TRUE"
@@ -84,6 +86,7 @@ while [[ $# -gt 0 ]]; do
     --exclude-regex) EXCLUDE_REGEX="$2"; shift 2;;
     --annotation) RANNOT="$2"; shift 2;;
     --orfquant-pkg) ORFQUANT_PKG="$2"; shift 2;;
+    --orfquant-sif) ORFQUANT_SIF="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 2;;
   esac
@@ -116,6 +119,14 @@ if [[ -n "$ORFQUANT_PKG" ]]; then
     exit 2
   fi
   ORFQUANT_PKG="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$ORFQUANT_PKG")"
+fi
+
+if [[ -n "$ORFQUANT_SIF" ]]; then
+  if [[ ! -f "$ORFQUANT_SIF" ]]; then
+    echo "[ERROR] --orfquant-sif not found: $ORFQUANT_SIF" >&2
+    exit 2
+  fi
+  ORFQUANT_SIF="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$ORFQUANT_SIF")"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -236,6 +247,9 @@ echo "[INFO] Step 4/4: ORFquant"
 ORFQUANT_ARGS=()
 if [[ -n "$ORFQUANT_PKG" ]]; then
   ORFQUANT_ARGS+=(--orfquant-pkg "$ORFQUANT_PKG")
+fi
+if [[ -n "$ORFQUANT_SIF" ]]; then
+  ORFQUANT_ARGS+=(--container "$ORFQUANT_SIF")
 fi
 
 if [[ "$RESUME" == "TRUE" ]] && find "$OUT_ORFQUANT" -maxdepth 1 -name "${SAMPLE}_final_ORFquant_results*" -print -quit | grep -q .; then

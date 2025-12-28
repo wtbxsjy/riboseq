@@ -24,6 +24,8 @@ Required:
 
 Options:
   --orfquant-pkg  local ORFquant source tar.gz (optional; avoids GitHub download)
+  --container     SIF file path to run ORFquant in (optional). If not set, will
+                  use ./orfquant.sif when present, otherwise pull riboseqc:1.1.
   --cpus          threads (default: 4)
   --outdir        output directory (default: ./out_orfquant)
 
@@ -37,6 +39,7 @@ FOR_ORFQUANT=""
 ANNOT=""
 FASTA=""
 ORFQUANT_PKG=""
+CONTAINER_SIF=""
 CPUS=4
 OUTDIR="./out_orfquant"
 
@@ -47,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --annotation) ANNOT="$2"; shift 2;;
     --fasta) FASTA="$2"; shift 2;;
     --orfquant-pkg) ORFQUANT_PKG="$2"; shift 2;;
+    --container) CONTAINER_SIF="$2"; shift 2;;
     --cpus) CPUS="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     -h|--help) usage; exit 0;;
@@ -83,7 +87,17 @@ pull_img() {
   echo "$sif"
 }
 
-IMG="$(pull_img "$IMG_URL")"
+if [[ -n "$CONTAINER_SIF" ]]; then
+  if [[ ! -f "$CONTAINER_SIF" ]]; then
+    echo "[ERROR] --container not found: $CONTAINER_SIF" >&2
+    exit 2
+  fi
+  IMG="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$CONTAINER_SIF")"
+elif [[ -f "$WORKDIR/orfquant.sif" ]]; then
+  IMG="$WORKDIR/orfquant.sif"
+else
+  IMG="$(pull_img "$IMG_URL")"
+fi
 
 # Write a small wrapper to execute inside the container (avoids fragile nested quoting)
 quote_sh() {
