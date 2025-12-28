@@ -256,9 +256,9 @@ RS
 echo "[INFO] ORFquant annotation: species=$SPECIES ann_name=$ANN_NAME"
 "$RUNTIME" exec \
   --bind "$BIND_SPEC" \
-  --pwd "$WORKDIR" \
+  --pwd "$OUTDIR" \
   "$ORFQ_IMG" \
-  Rscript --vanilla "$OUTDIR/run_orfquant_prepareannotation.R" \
+  Rscript --vanilla "./run_orfquant_prepareannotation.R" \
     "$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$GTF")" \
     "$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$FASTA")" \
     "$TWOBIT_ABS" \
