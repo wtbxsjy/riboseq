@@ -75,6 +75,22 @@ mkdir -p "$OUTDIR" "./containers"
 OUTDIR="$(cd "$OUTDIR" && pwd)"
 WORKDIR="$(pwd)"
 
+detect_runtime() {
+  if command -v apptainer >/dev/null 2>&1; then
+    echo "apptainer"
+    return 0
+  fi
+  if command -v singularity >/dev/null 2>&1; then
+    echo "singularity"
+    return 0
+  fi
+  echo "[ERROR] Neither 'apptainer' nor 'singularity' is available on PATH." >&2
+  echo "        Install Apptainer/Singularity or run on a node that provides it." >&2
+  exit 2
+}
+
+RUNTIME="$(detect_runtime)"
+
 pull_img() {
   local url="$1"
   local base
@@ -82,7 +98,7 @@ pull_img() {
   base="${base//:/_}"
   local sif="$(pwd)/containers/${base}.sif"
   if [[ ! -f "$sif" ]]; then
-    singularity pull --disable-cache --force "$sif" "$url"
+    "$RUNTIME" pull --disable-cache --force "$sif" "$url"
   fi
   echo "$sif"
 }
@@ -98,6 +114,56 @@ elif [[ -f "$WORKDIR/orfquant.sif" ]]; then
 else
   IMG="$(pull_img "$IMG_URL")"
 fi
+
+echo "[INFO] Container runtime: $RUNTIME"
+echo "[INFO] Container image:   $IMG"
+
+collect_binds() {
+  local binds=()
+  local add
+  add() {
+    local p="$1"
+    [[ -z "$p" ]] && return 0
+    if [[ -e "$p" ]]; then
+      local d
+      if [[ -d "$p" ]]; then
+        d="$p"
+      else
+        d="$(cd "$(dirname "$p")" && pwd)"
+      fi
+      binds+=("$d:$d")
+    fi
+  }
+
+  add "$WORKDIR"
+  add "$OUTDIR"
+  add "$FOR_ORFQUANT"
+  add "$ANNOT"
+  add "$FASTA"
+  add "$ORFQUANT_PKG"
+
+  # Add any extra user binds.
+  if [[ -n "${BIND_EXTRA:-}" ]]; then
+    IFS=',' read -r -a extra <<<"$BIND_EXTRA"
+    for b in "${extra[@]}"; do
+      [[ -n "$b" ]] && binds+=("$b")
+    done
+  fi
+
+  # Deduplicate binds while preserving order.
+  python3 - "$@" <<'PY'
+import sys
+seen=set()
+out=[]
+for b in sys.argv[1:]:
+    if b not in seen:
+        seen.add(b)
+        out.append(b)
+print(",".join(out))
+PY
+}
+
+BIND_SPEC="$(collect_binds "${WORKDIR}:${WORKDIR}" "${OUTDIR}:${OUTDIR}" )"
 
 # Write a small wrapper to execute inside the container (avoids fragile nested quoting)
 quote_sh() {
@@ -268,6 +334,8 @@ writeLines(
 RSCRIPTEOF
 
 echo [INFO] Running ORFquant R script...
+echo [INFO] Container markers: APPTAINER_NAME=${APPTAINER_NAME:-} SINGULARITY_NAME=${SINGULARITY_NAME:-}
+echo [INFO] which Rscript: $(command -v Rscript || true)
 set -o pipefail
 Rscript --vanilla run_orfquant.R 2>&1 | tee run_orfquant.log
 
@@ -287,8 +355,8 @@ EOSH
 
 chmod +x "$INNER_SH"
 
-singularity exec \
-  --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+"$RUNTIME" exec \
+  --bind "$BIND_SPEC" \
   --pwd "$WORKDIR" \
   "$IMG" \
   bash "$INNER_SH"
