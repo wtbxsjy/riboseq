@@ -93,7 +93,7 @@ cat <<'RSCRIPT' > script.R
 library(RiboseQC)
 
 prepare_annotation_files(
-  annotation_directory = ".",
+  annotation_directory = \".\",
   genome_seq = \"$FASTA\",
   gtf_file = \"$GTF\",
   scientific_name = \"Genome.annotation\",

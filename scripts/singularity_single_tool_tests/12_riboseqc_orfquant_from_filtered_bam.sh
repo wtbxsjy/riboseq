@@ -143,21 +143,7 @@ resolve_rannot() {
   return 1
 }
 
-if [[ -z "$RANNOT" ]]; then
-  echo "[INFO] Step 1/3: RiboseQC prepareannotation"
-  bash "$SCRIPT_DIR/02_riboseqc_prepareannotation.sh" \
-    --gtf "$GTF" \
-    --fasta "$FASTA" \
-    --outdir "$OUT_ANNOT"
-
-  if ! RANNOT="$(resolve_rannot "$OUT_ANNOT" "$GTF")"; then
-    echo "[ERROR] Cannot uniquely determine *_Rannot in: $OUT_ANNOT" >&2
-    echo "        Please provide it explicitly with --annotation /path/to/*_Rannot" >&2
-    echo "        Files found:" >&2
-    find "$OUT_ANNOT" -maxdepth 1 -type f -name "*_Rannot" -print >&2 || true
-    exit 2
-  fi
-else
+if [[ -n "$RANNOT" ]]; then
   echo "[INFO] Using provided annotation: $RANNOT"
 fi
 
