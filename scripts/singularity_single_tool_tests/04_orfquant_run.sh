@@ -162,7 +162,9 @@ export ANNOT='$ANNOT'
 export CPUS='$CPUS'
 export ORFQUANT_PKG='${ORFQUANT_PKG}'
 
-Rscript run_orfquant.R
+echo [INFO] Running ORFquant R script...
+set -o pipefail
+Rscript run_orfquant.R 2>&1 | tee run_orfquant.log
 
 # Sanity-check expected outputs (ORFquant often writes a directory with this prefix)
 if ls -1 ${SAMPLE}_final_ORFquant_results* >/dev/null 2>&1; then
@@ -173,6 +175,8 @@ else
   echo [ERROR] Contents of current directory: >&2
   pwd >&2 || true
   ls -la >&2 || true
+  echo [ERROR] Tail of run_orfquant.log: >&2
+  tail -n 200 run_orfquant.log >&2 || true
   exit 2
 fi
 "
