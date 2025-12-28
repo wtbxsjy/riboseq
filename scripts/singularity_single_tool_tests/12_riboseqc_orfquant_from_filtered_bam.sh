@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Pipeline wrapper (single-tool chain)
-# Start from a filtered BAM, run RiboseQC (prepareannotation + analysis), then ORFquant.
+# Start from an input BAM, run sORF-style BAM filtering, then RiboseQC (prepareannotation + analysis), then ORFquant.
 # Reuses the existing single-tool scripts in this directory:
+#   01_sorf_bam_filter.sh
 #   02_riboseqc_prepareannotation.sh
 #   03_riboseqc_analysis.sh
 #   04_orfquant_run.sh
@@ -11,11 +12,12 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  12_riboseqc_orfquant_from_filtered_bam.sh --sample ID --bam filtered.bam --gtf annot.gtf --fasta genome.fa [options]
+  12_riboseqc_orfquant_from_filtered_bam.sh --sample ID --bam in.bam --fai genome.fa.fai --gtf annot.gtf --fasta genome.fa [options]
 
 Required:
   --sample    Sample ID (prefix)
-  --bam       Filtered BAM (sorted + indexed recommended)
+  --bam       Input BAM (sorted + indexed recommended)
+  --fai       FASTA index (.fai) for contig list (used by filtering step)
   --gtf       Annotation GTF (can be .gz)
   --fasta     Genome FASTA (can be .gz)
 
@@ -23,6 +25,12 @@ Options:
   --outdir        Output directory (default: ./out_riboseqc_orfquant)
   --cpus          Threads (default: 4)
   --fast-mode     TRUE|FALSE for RiboseQC_analysis (default: TRUE)
+  --skip-filter   TRUE|FALSE (default: FALSE). If TRUE, skip filtering and treat --bam as already filtered.
+  --unique-mode   auto|nh|mapq for filtering (default: auto)
+  --mapq          MAPQ threshold for filtering (default: 60)
+  --len-min       read length min for filtering (default: 28)
+  --len-max       read length max for filtering (default: 30)
+  --exclude-regex contig regex to EXCLUDE for filtering (default: pipeline-like contig excludes)
   --annotation    Existing RiboseQC annotation file (*_Rannot). If provided, skip prepareannotation.
   --orfquant-pkg  Local ORFquant source tar.gz (optional; avoids GitHub download)
 
@@ -30,6 +38,7 @@ Env:
   BIND_EXTRA  Extra singularity binds, comma-separated (e.g. /mnt:/mnt)
 
 Outputs (inside --outdir):
+  00_sorf_filter/         -> filtered BAM (${sample}.sorf.filtered.bam)
   01_riboseqc_annot/      -> RiboseQC annotation (contains *_Rannot)
   02_riboseqc_analysis/   -> RiboseQC analysis (contains ${sample}_for_ORFquant)
   03_orfquant/            -> ORFquant results
@@ -38,6 +47,7 @@ EOF
 
 SAMPLE=""
 BAM=""
+FAI=""
 GTF=""
 FASTA=""
 OUTDIR="./out_riboseqc_orfquant"
@@ -46,15 +56,29 @@ FAST_MODE="TRUE"
 RANNOT=""
 ORFQUANT_PKG=""
 
+SKIP_FILTER="FALSE"
+UNIQUE_MODE="auto"
+MAPQ=60
+LEN_MIN=28
+LEN_MAX=30
+EXCLUDE_REGEX='^(chr)?(M|MT|Mt|chrM|chrMT|chrMt|ChrM|ChrMT|ChrMt)$|^(chr)?(C|CP|Pt|chrC|chrCP|chrPt|ChrC|ChrCP|ChrPt)$|^chrUn_.*|.*_random$|.*_alt$|.*_fix$'
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sample) SAMPLE="$2"; shift 2;;
     --bam) BAM="$2"; shift 2;;
+    --fai) FAI="$2"; shift 2;;
     --gtf) GTF="$2"; shift 2;;
     --fasta) FASTA="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     --cpus) CPUS="$2"; shift 2;;
     --fast-mode) FAST_MODE="$2"; shift 2;;
+    --skip-filter) SKIP_FILTER="$2"; shift 2;;
+    --unique-mode) UNIQUE_MODE="$2"; shift 2;;
+    --mapq) MAPQ="$2"; shift 2;;
+    --len-min) LEN_MIN="$2"; shift 2;;
+    --len-max) LEN_MAX="$2"; shift 2;;
+    --exclude-regex) EXCLUDE_REGEX="$2"; shift 2;;
     --annotation) RANNOT="$2"; shift 2;;
     --orfquant-pkg) ORFQUANT_PKG="$2"; shift 2;;
     -h|--help) usage; exit 0;;
@@ -67,16 +91,28 @@ if [[ -z "$SAMPLE" || -z "$BAM" || -z "$GTF" || -z "$FASTA" ]]; then
   exit 2
 fi
 
+if [[ "$SKIP_FILTER" != "TRUE" && "$SKIP_FILTER" != "FALSE" ]]; then
+  echo "[ERROR] --skip-filter must be TRUE or FALSE" >&2
+  exit 2
+fi
+
+if [[ "$SKIP_FILTER" == "FALSE" && -z "$FAI" ]]; then
+  echo "[ERROR] --fai is required unless --skip-filter TRUE" >&2
+  usage
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$OUTDIR"
 OUTDIR="$(cd "$OUTDIR" && pwd)"
 
+OUT_FILTER="$OUTDIR/00_sorf_filter"
 OUT_ANNOT="$OUTDIR/01_riboseqc_annot"
 OUT_ANALYSIS="$OUTDIR/02_riboseqc_analysis"
 OUT_ORFQUANT="$OUTDIR/03_orfquant"
 
-mkdir -p "$OUT_ANNOT" "$OUT_ANALYSIS" "$OUT_ORFQUANT"
+mkdir -p "$OUT_FILTER" "$OUT_ANNOT" "$OUT_ANALYSIS" "$OUT_ORFQUANT"
 
 resolve_rannot() {
   local search_dir="$1"
@@ -125,10 +161,50 @@ else
   echo "[INFO] Using provided annotation: $RANNOT"
 fi
 
-echo "[INFO] Step 2/3: RiboseQC analysis"
+BAM_FOR_DOWNSTREAM="$BAM"
+if [[ "$SKIP_FILTER" == "FALSE" ]]; then
+  echo "[INFO] Step 1/4: BAM filtering (sorf_bam_filter)"
+  bash "$SCRIPT_DIR/01_sorf_bam_filter.sh" \
+    --sample "$SAMPLE" \
+    --bam "$BAM" \
+    --fai "$FAI" \
+    --unique-mode "$UNIQUE_MODE" \
+    --mapq "$MAPQ" \
+    --len-min "$LEN_MIN" \
+    --len-max "$LEN_MAX" \
+    --exclude-regex "$EXCLUDE_REGEX" \
+    --cpus "$CPUS" \
+    --outdir "$OUT_FILTER"
+
+  BAM_FOR_DOWNSTREAM="$OUT_FILTER/${SAMPLE}.sorf.filtered.bam"
+  if [[ ! -f "$BAM_FOR_DOWNSTREAM" ]]; then
+    echo "[ERROR] Filtering step did not produce: $BAM_FOR_DOWNSTREAM" >&2
+    exit 2
+  fi
+else
+  echo "[INFO] Step 1/4: Skipping filtering; using provided BAM as filtered input"
+fi
+
+if [[ -z "$RANNOT" ]]; then
+  echo "[INFO] Step 2/4: RiboseQC prepareannotation"
+  bash "$SCRIPT_DIR/02_riboseqc_prepareannotation.sh" \
+    --gtf "$GTF" \
+    --fasta "$FASTA" \
+    --outdir "$OUT_ANNOT"
+
+  if ! RANNOT="$(resolve_rannot "$OUT_ANNOT" "$GTF")"; then
+    echo "[ERROR] Cannot uniquely determine *_Rannot in: $OUT_ANNOT" >&2
+    echo "        Please provide it explicitly with --annotation /path/to/*_Rannot" >&2
+    echo "        Files found:" >&2
+    find "$OUT_ANNOT" -maxdepth 1 -type f -name "*_Rannot" -print >&2 || true
+    exit 2
+  fi
+fi
+
+echo "[INFO] Step 3/4: RiboseQC analysis"
 bash "$SCRIPT_DIR/03_riboseqc_analysis.sh" \
   --sample "$SAMPLE" \
-  --bam "$BAM" \
+  --bam "$BAM_FOR_DOWNSTREAM" \
   --annotation "$RANNOT" \
   --fasta "$FASTA" \
   --outdir "$OUT_ANALYSIS" \
@@ -142,7 +218,7 @@ if [[ ! -f "$FOR_ORFQUANT" ]]; then
   exit 2
 fi
 
-echo "[INFO] Step 3/3: ORFquant"
+echo "[INFO] Step 4/4: ORFquant"
 ORFQUANT_ARGS=()
 if [[ -n "$ORFQUANT_PKG" ]]; then
   ORFQUANT_ARGS+=(--orfquant-pkg "$ORFQUANT_PKG")
@@ -158,6 +234,7 @@ bash "$SCRIPT_DIR/04_orfquant_run.sh" \
   "${ORFQUANT_ARGS[@]}"
 
 echo "[OK] Done. Outputs:"
+echo "  - Filtered BAM:         $BAM_FOR_DOWNSTREAM"
 echo "  - RiboseQC annotation: $OUT_ANNOT"
 echo "  - RiboseQC analysis:   $OUT_ANALYSIS"
 echo "  - ORFquant:            $OUT_ORFQUANT"
