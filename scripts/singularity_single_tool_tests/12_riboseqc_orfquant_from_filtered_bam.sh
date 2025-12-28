@@ -230,7 +230,7 @@ if [[ -n "$ORFQUANT_PKG" ]]; then
   ORFQUANT_ARGS+=(--orfquant-pkg "$ORFQUANT_PKG")
 fi
 
-if [[ "$RESUME" == "TRUE" ]] && find "$OUT_ORFQUANT" -maxdepth 1 -type f -name "${SAMPLE}_final_ORFquant_results*" -print -quit | grep -q .; then
+if [[ "$RESUME" == "TRUE" ]] && find "$OUT_ORFQUANT" -maxdepth 1 -name "${SAMPLE}_final_ORFquant_results*" -print -quit | grep -q .; then
   echo "[INFO] Step 4/4: ORFquant skipped (resume): ${SAMPLE}_final_ORFquant_results*"
 else
   bash "$SCRIPT_DIR/04_orfquant_run.sh" \

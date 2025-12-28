@@ -163,6 +163,18 @@ export CPUS='$CPUS'
 export ORFQUANT_PKG='${ORFQUANT_PKG}'
 
 Rscript run_orfquant.R
+
+# Sanity-check expected outputs (ORFquant often writes a directory with this prefix)
+if ls -1 ${SAMPLE}_final_ORFquant_results* >/dev/null 2>&1; then
+  echo [INFO] ORFquant results:
+  ls -la ${SAMPLE}_final_ORFquant_results* || true
+else
+  echo [ERROR] ORFquant finished but expected outputs were not found: ${SAMPLE}_final_ORFquant_results* >&2
+  echo [ERROR] Contents of current directory: >&2
+  pwd >&2 || true
+  ls -la >&2 || true
+  exit 2
+fi
 "
 
 echo "[OK] ORFquant outputs in: $OUTDIR (look for ${SAMPLE}_final_ORFquant_results)"
