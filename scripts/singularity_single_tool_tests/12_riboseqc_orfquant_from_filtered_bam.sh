@@ -27,6 +27,7 @@ Options:
   --fast-mode     TRUE|FALSE for RiboseQC_analysis (default: TRUE)
   --resume        TRUE|FALSE (default: TRUE). If TRUE, skip steps with existing expected outputs.
   --skip-filter   TRUE|FALSE (default: FALSE). If TRUE, skip filtering and treat --bam as already filtered.
+  --skip-orfquant TRUE|FALSE (default: FALSE). If TRUE, skip ORFquant and only produce RiboseQC outputs.
   --unique-mode   auto|nh|mapq for filtering (default: auto)
   --mapq          MAPQ threshold for filtering (default: 60)
   --len-min       read length min for filtering (default: 28)
@@ -62,6 +63,7 @@ ORFQUANT_SIF=""
 ORFQUANT_RANNOT=""
 
 SKIP_FILTER="FALSE"
+SKIP_ORFQUANT="FALSE"
 RESUME="TRUE"
 UNIQUE_MODE="auto"
 MAPQ=60
@@ -81,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --fast-mode) FAST_MODE="$2"; shift 2;;
     --resume) RESUME="$2"; shift 2;;
     --skip-filter) SKIP_FILTER="$2"; shift 2;;
+    --skip-orfquant) SKIP_ORFQUANT="$2"; shift 2;;
     --unique-mode) UNIQUE_MODE="$2"; shift 2;;
     --mapq) MAPQ="$2"; shift 2;;
     --len-min) LEN_MIN="$2"; shift 2;;
@@ -102,6 +105,11 @@ fi
 
 if [[ "$SKIP_FILTER" != "TRUE" && "$SKIP_FILTER" != "FALSE" ]]; then
   echo "[ERROR] --skip-filter must be TRUE or FALSE" >&2
+  exit 2
+fi
+
+if [[ "$SKIP_ORFQUANT" != "TRUE" && "$SKIP_ORFQUANT" != "FALSE" ]]; then
+  echo "[ERROR] --skip-orfquant must be TRUE or FALSE" >&2
   exit 2
 fi
 
@@ -252,6 +260,15 @@ if [[ ! -f "$FOR_ORFQUANT" ]]; then
   echo "[ERROR] Missing RiboseQC output for ORFquant: $FOR_ORFQUANT" >&2
   echo "        Check RiboseQC outputs in: $OUT_ANALYSIS" >&2
   exit 2
+fi
+
+if [[ "$SKIP_ORFQUANT" == "TRUE" ]]; then
+  echo "[INFO] Step 4/4: Skipping ORFquant (--skip-orfquant TRUE)"
+  echo "[OK] Done. Outputs:"
+  echo "  - Filtered BAM:         $BAM_FOR_DOWNSTREAM"
+  echo "  - RiboseQC annotation: $OUT_ANNOT"
+  echo "  - RiboseQC analysis:   $OUT_ANALYSIS"
+  exit 0
 fi
 
 echo "[INFO] Step 4/4: ORFquant"
