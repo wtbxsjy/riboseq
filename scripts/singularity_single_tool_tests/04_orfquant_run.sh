@@ -216,6 +216,31 @@ options(error = function() {
   quit(save = "no", status = 1)
 })
 
+# Some environments can throw a fatal error from R6 finalizers during garbage
+# collection, e.g. "x$.self$finalize() : attempt to apply non-function".
+# This is usually unrelated to the analysis logic but aborts the whole run.
+# We defensively wrap R6-registered finalizers so they cannot terminate the job.
+patch_r6_finalizers <- function() {
+  if (!requireNamespace("R6", quietly = TRUE)) return(invisible(FALSE))
+  safe_reg_finalizer <- function(e, f, onexit = FALSE) {
+    wrapped <- function(x) {
+      tryCatch(f(x), error = function(err) {
+        message("[WARN] Suppressed error in finalizer: ", conditionMessage(err))
+        invisible(NULL)
+      })
+    }
+    environment(wrapped) <- baseenv()
+    base::reg.finalizer(e, wrapped, onexit = onexit)
+  }
+  ok <- tryCatch({
+    assignInNamespace("reg.finalizer", safe_reg_finalizer, ns = "R6")
+    TRUE
+  }, error = function(e) FALSE)
+  invisible(ok)
+}
+
+patch_r6_finalizers()
+
 install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
   work <- file.path(getwd(), "orfquant_src")
   dir.create(work, showWarnings = FALSE, recursive = TRUE)
