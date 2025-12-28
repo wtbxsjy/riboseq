@@ -124,10 +124,10 @@ Rscript script.R
 
 # Convert P-sites bedgraphs to ggRibo TSV (same as module)
 if [ -f \"${SAMPLE}_P_sites_plus.bedgraph\" ]; then
-  awk -v OFS='\t' '{print $4, $1, $3, "+"}' \"${SAMPLE}_P_sites_plus.bedgraph\" > \"${SAMPLE}_ggribo.tsv\"
+  awk -v OFS='\t' '{print \$4, \$1, \$3, "+"}' \"${SAMPLE}_P_sites_plus.bedgraph\" > \"${SAMPLE}_ggribo.tsv\"
 fi
 if [ -f \"${SAMPLE}_P_sites_minus.bedgraph\" ]; then
-  awk -v OFS='\t' '{print $4, $1, $3, "-"}' \"${SAMPLE}_P_sites_minus.bedgraph\" >> \"${SAMPLE}_ggribo.tsv\"
+  awk -v OFS='\t' '{print \$4, \$1, \$3, "-"}' \"${SAMPLE}_P_sites_minus.bedgraph\" >> \"${SAMPLE}_ggribo.tsv\"
 fi
 "
 

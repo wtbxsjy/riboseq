@@ -25,6 +25,7 @@ Options:
   --outdir        Output directory (default: ./out_riboseqc_orfquant)
   --cpus          Threads (default: 4)
   --fast-mode     TRUE|FALSE for RiboseQC_analysis (default: TRUE)
+  --resume        TRUE|FALSE (default: TRUE). If TRUE, skip steps with existing expected outputs.
   --skip-filter   TRUE|FALSE (default: FALSE). If TRUE, skip filtering and treat --bam as already filtered.
   --unique-mode   auto|nh|mapq for filtering (default: auto)
   --mapq          MAPQ threshold for filtering (default: 60)
@@ -57,6 +58,7 @@ RANNOT=""
 ORFQUANT_PKG=""
 
 SKIP_FILTER="FALSE"
+RESUME="TRUE"
 UNIQUE_MODE="auto"
 MAPQ=60
 LEN_MIN=28
@@ -73,6 +75,7 @@ while [[ $# -gt 0 ]]; do
     --outdir) OUTDIR="$2"; shift 2;;
     --cpus) CPUS="$2"; shift 2;;
     --fast-mode) FAST_MODE="$2"; shift 2;;
+    --resume) RESUME="$2"; shift 2;;
     --skip-filter) SKIP_FILTER="$2"; shift 2;;
     --unique-mode) UNIQUE_MODE="$2"; shift 2;;
     --mapq) MAPQ="$2"; shift 2;;
@@ -93,6 +96,11 @@ fi
 
 if [[ "$SKIP_FILTER" != "TRUE" && "$SKIP_FILTER" != "FALSE" ]]; then
   echo "[ERROR] --skip-filter must be TRUE or FALSE" >&2
+  exit 2
+fi
+
+if [[ "$RESUME" != "TRUE" && "$RESUME" != "FALSE" ]]; then
+  echo "[ERROR] --resume must be TRUE or FALSE" >&2
   exit 2
 fi
 
@@ -149,55 +157,67 @@ fi
 
 BAM_FOR_DOWNSTREAM="$BAM"
 if [[ "$SKIP_FILTER" == "FALSE" ]]; then
-  echo "[INFO] Step 1/4: BAM filtering (sorf_bam_filter)"
-  bash "$SCRIPT_DIR/01_sorf_bam_filter.sh" \
-    --sample "$SAMPLE" \
-    --bam "$BAM" \
-    --fai "$FAI" \
-    --unique-mode "$UNIQUE_MODE" \
-    --mapq "$MAPQ" \
-    --len-min "$LEN_MIN" \
-    --len-max "$LEN_MAX" \
-    --exclude-regex "$EXCLUDE_REGEX" \
-    --cpus "$CPUS" \
-    --outdir "$OUT_FILTER"
-
   BAM_FOR_DOWNSTREAM="$OUT_FILTER/${SAMPLE}.sorf.filtered.bam"
-  if [[ ! -f "$BAM_FOR_DOWNSTREAM" ]]; then
-    echo "[ERROR] Filtering step did not produce: $BAM_FOR_DOWNSTREAM" >&2
-    exit 2
+  if [[ "$RESUME" == "TRUE" && -f "$BAM_FOR_DOWNSTREAM" ]]; then
+    echo "[INFO] Step 1/4: BAM filtering skipped (resume): $BAM_FOR_DOWNSTREAM"
+  else
+    echo "[INFO] Step 1/4: BAM filtering (sorf_bam_filter)"
+    bash "$SCRIPT_DIR/01_sorf_bam_filter.sh" \
+      --sample "$SAMPLE" \
+      --bam "$BAM" \
+      --fai "$FAI" \
+      --unique-mode "$UNIQUE_MODE" \
+      --mapq "$MAPQ" \
+      --len-min "$LEN_MIN" \
+      --len-max "$LEN_MAX" \
+      --exclude-regex "$EXCLUDE_REGEX" \
+      --cpus "$CPUS" \
+      --outdir "$OUT_FILTER"
+
+    if [[ ! -f "$BAM_FOR_DOWNSTREAM" ]]; then
+      echo "[ERROR] Filtering step did not produce: $BAM_FOR_DOWNSTREAM" >&2
+      exit 2
+    fi
   fi
 else
   echo "[INFO] Step 1/4: Skipping filtering; using provided BAM as filtered input"
 fi
 
 if [[ -z "$RANNOT" ]]; then
-  echo "[INFO] Step 2/4: RiboseQC prepareannotation"
-  bash "$SCRIPT_DIR/02_riboseqc_prepareannotation.sh" \
-    --gtf "$GTF" \
-    --fasta "$FASTA" \
-    --outdir "$OUT_ANNOT"
+  if [[ "$RESUME" == "TRUE" ]] && RANNOT="$(resolve_rannot "$OUT_ANNOT" "$GTF")"; then
+    echo "[INFO] Step 2/4: RiboseQC prepareannotation skipped (resume): $RANNOT"
+  else
+    echo "[INFO] Step 2/4: RiboseQC prepareannotation"
+    bash "$SCRIPT_DIR/02_riboseqc_prepareannotation.sh" \
+      --gtf "$GTF" \
+      --fasta "$FASTA" \
+      --outdir "$OUT_ANNOT"
 
-  if ! RANNOT="$(resolve_rannot "$OUT_ANNOT" "$GTF")"; then
-    echo "[ERROR] Cannot uniquely determine *_Rannot in: $OUT_ANNOT" >&2
-    echo "        Please provide it explicitly with --annotation /path/to/*_Rannot" >&2
-    echo "        Files found:" >&2
-    find "$OUT_ANNOT" -maxdepth 1 -type f -name "*_Rannot" -print >&2 || true
-    exit 2
+    if ! RANNOT="$(resolve_rannot "$OUT_ANNOT" "$GTF")"; then
+      echo "[ERROR] Cannot uniquely determine *_Rannot in: $OUT_ANNOT" >&2
+      echo "        Please provide it explicitly with --annotation /path/to/*_Rannot" >&2
+      echo "        Files found:" >&2
+      find "$OUT_ANNOT" -maxdepth 1 -type f -name "*_Rannot" -print >&2 || true
+      exit 2
+    fi
   fi
 fi
 
-echo "[INFO] Step 3/4: RiboseQC analysis"
-bash "$SCRIPT_DIR/03_riboseqc_analysis.sh" \
-  --sample "$SAMPLE" \
-  --bam "$BAM_FOR_DOWNSTREAM" \
-  --annotation "$RANNOT" \
-  --fasta "$FASTA" \
-  --outdir "$OUT_ANALYSIS" \
-  --cpus "$CPUS" \
-  --fast-mode "$FAST_MODE"
-
 FOR_ORFQUANT="$OUT_ANALYSIS/${SAMPLE}_for_ORFquant"
+if [[ "$RESUME" == "TRUE" && -f "$FOR_ORFQUANT" ]]; then
+  echo "[INFO] Step 3/4: RiboseQC analysis skipped (resume): $FOR_ORFQUANT"
+else
+  echo "[INFO] Step 3/4: RiboseQC analysis"
+  bash "$SCRIPT_DIR/03_riboseqc_analysis.sh" \
+    --sample "$SAMPLE" \
+    --bam "$BAM_FOR_DOWNSTREAM" \
+    --annotation "$RANNOT" \
+    --fasta "$FASTA" \
+    --outdir "$OUT_ANALYSIS" \
+    --cpus "$CPUS" \
+    --fast-mode "$FAST_MODE"
+fi
+
 if [[ ! -f "$FOR_ORFQUANT" ]]; then
   echo "[ERROR] Missing RiboseQC output for ORFquant: $FOR_ORFQUANT" >&2
   echo "        Check RiboseQC outputs in: $OUT_ANALYSIS" >&2
@@ -210,14 +230,18 @@ if [[ -n "$ORFQUANT_PKG" ]]; then
   ORFQUANT_ARGS+=(--orfquant-pkg "$ORFQUANT_PKG")
 fi
 
-bash "$SCRIPT_DIR/04_orfquant_run.sh" \
-  --sample "$SAMPLE" \
-  --for-orfquant "$FOR_ORFQUANT" \
-  --annotation "$RANNOT" \
-  --fasta "$FASTA" \
-  --cpus "$CPUS" \
-  --outdir "$OUT_ORFQUANT" \
-  "${ORFQUANT_ARGS[@]}"
+if [[ "$RESUME" == "TRUE" ]] && find "$OUT_ORFQUANT" -maxdepth 1 -type f -name "${SAMPLE}_final_ORFquant_results*" -print -quit | grep -q .; then
+  echo "[INFO] Step 4/4: ORFquant skipped (resume): ${SAMPLE}_final_ORFquant_results*"
+else
+  bash "$SCRIPT_DIR/04_orfquant_run.sh" \
+    --sample "$SAMPLE" \
+    --for-orfquant "$FOR_ORFQUANT" \
+    --annotation "$RANNOT" \
+    --fasta "$FASTA" \
+    --cpus "$CPUS" \
+    --outdir "$OUT_ORFQUANT" \
+    "${ORFQUANT_ARGS[@]}"
+fi
 
 echo "[OK] Done. Outputs:"
 echo "  - Filtered BAM:         $BAM_FOR_DOWNSTREAM"
