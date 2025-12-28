@@ -37,6 +37,9 @@ export BIND_EXTRA=${BIND_EXTRA:-"/mnt:/mnt"}
 # 目录约定：输出都写到本目录下的 out_* 子目录。
 BASE_OUT=${BASE_OUT:-"$(pwd)"}
 
+# 统一线程数（示例用）：按需要覆盖，例如 `CPUS=16 DRY_RUN=0 ./00_run_order_example.sh`
+CPUS=${CPUS:-8}
+
 ###############################################################################
 # 1) 输入路径（你需要修改这里）
 ###############################################################################
@@ -82,6 +85,7 @@ if [[ "${SORF_FILTER}" == "1" || "${SORF_FILTER}" == "true" || "${SORF_FILTER}" 
     --len-min '${SORF_READ_LEN_MIN}' \
     --len-max '${SORF_READ_LEN_MAX}' \
     --exclude-regex '${EXCLUDE_REGEX}' \
+    --cpus '${CPUS}' \
     --outdir '${OUT_01}'"
 else
   echo "[INFO] SORF_FILTER is disabled; using unfiltered BAM for predictors (example only)."
@@ -121,6 +125,7 @@ run "./03_riboseqc_analysis.sh \
   --annotation '${RANNOT}' \
   --fasta '${FASTA}' \
   --outdir '${OUT_03}' \
+  --cpus '${CPUS}' \
   --fast-mode TRUE"
 
 run "./03_riboseqc_analysis.sh \
@@ -129,6 +134,7 @@ run "./03_riboseqc_analysis.sh \
   --annotation '${RANNOT}' \
   --fasta '${FASTA}' \
   --outdir '${OUT_04}' \
+  --cpus '${CPUS}' \
   --fast-mode TRUE"
 
 # ORFquant 需要 RiboseQC 的 *_for_ORFquant 文件。
@@ -145,7 +151,7 @@ run "./04_orfquant_run.sh \
   --for-orfquant '${FOR_ORFQUANT}' \
   --annotation '${RANNOT}' \
   --fasta '${FASTA}' \
-  --cpus 4 \
+  --cpus '${CPUS}' \
   --outdir '${OUT_05}'"
 
 # 如果你所在环境无法访问 GitHub 下载 ORFquant 源码包，可在真实跑时加：
@@ -162,7 +168,7 @@ run "./05_ribotish_quality.sh \
   --sample '${SAMPLE}' \
   --bam '${BAM_FILT}' \
   --gtf '${GTF}' \
-  --cpus 4 \
+  --cpus '${CPUS}' \
   --outdir '${OUT_06}'"
 
 RIBOPARA=${RIBOPARA:-"$OUT_06/${SAMPLE}.para.py"}
@@ -173,7 +179,7 @@ run "./06_ribotish_predict.sh \
   --gtf '${GTF}' \
   --fasta '${FASTA}' \
   --ribopara '${RIBOPARA}' \
-  --cpus 4 \
+  --cpus '${CPUS}' \
   --outdir '${OUT_07}'"
 
 ###############################################################################
@@ -203,6 +209,7 @@ run "./08_ribotricer_detectorfs.sh \
   --bam '${BAM_FILT}' \
   --index '${RIBOTRICER_INDEX}' \
   --stranded '${STRANDEDNESS}' \
+  --cpus '${CPUS}' \
   --outdir '${OUT_09}'"
 
 ###############################################################################
@@ -216,7 +223,7 @@ run "./09_rpbp_prepare_genome.sh \
   --fasta '${FASTA}' \
   --gtf '${GTF}' \
   --rrna '${RRNA}' \
-  --cpus 8 \
+  --cpus '${CPUS}' \
   --outdir '${OUT_10}'"
 
 ORFS_GEN=${ORFS_GEN:-"$OUT_10/transcript-index/genome.orfs-genomic.bed.gz"}
@@ -227,7 +234,7 @@ run "./10_rpbp_predict.sh \
   --bam '${BAM_FILT}' \
   --orfs-genomic '${ORFS_GEN}' \
   --orfs-exons '${ORFS_EX}' \
-  --cpus 8 \
+  --cpus '${CPUS}' \
   --outdir '${OUT_11}'"
 
 ###############################################################################
@@ -242,6 +249,7 @@ run "./11_ribocode_detect.sh \
   --gtf '${GTF}' \
   --fasta '${FASTA}' \
   --stranded '${STRANDEDNESS}' \
+  --cpus '${CPUS}' \
   --outdir '${OUT_12}'"
 
 ###############################################################################

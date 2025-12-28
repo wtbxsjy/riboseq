@@ -20,6 +20,7 @@ Options:
   --len-min       read length min (SEQ length) (default: 28)
   --len-max       read length max (SEQ length) (default: 30)
   --exclude-regex contig regex to EXCLUDE (default from pipeline in nextflow.config is not auto-applied here)
+  --cpus          threads for samtools (index/view) (default: 4)
   --outdir        output directory (default: ./out_sorf_filter)
 
 Env:
@@ -36,6 +37,7 @@ LEN_MIN=28
 LEN_MAX=30
 EXCLUDE_REGEX=""
 OUTDIR="./out_sorf_filter"
+CPUS=4
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --len-min) LEN_MIN="$2"; shift 2;;
     --len-max) LEN_MAX="$2"; shift 2;;
     --exclude-regex) EXCLUDE_REGEX="$2"; shift 2;;
+    --cpus) CPUS="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 2;;
@@ -85,7 +88,7 @@ ensure_bai() {
     --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
     --pwd "$WORKDIR" \
     "$img" \
-    samtools index -@ 2 "$bam"
+    samtools index -@ "$CPUS" "$bam"
 }
 
 IMG="$(pull_img "$IMG_URL")"
@@ -116,7 +119,7 @@ fi
 # Exclude: unmapped(0x4), secondary(0x100), duplicate(0x400), supplementary(0x800)
 # 0xD04 = 0x4 + 0x100 + 0x400 + 0x800
 
-total_primary_mapped=\`samtools view -c -F 0xD04 '$BAM'\`
+total_primary_mapped=\`samtools view -@ '$CPUS' -c -F 0xD04 '$BAM'\`
 
 samtools view -h -F 0xD04 '$BAM' \
   | awk -v mode=\"\$mode\" -v mapq=\"\$mapq\" -v rlmin=\"\$rlmin\" -v rlmax=\"\$rlmax\" -v re=\"\$re\" '
@@ -151,9 +154,9 @@ samtools view -h -F 0xD04 '$BAM' \
         print
       }
     ' \
-  | samtools view -b -o \"\${prefix}.sorf.filtered.bam\" -
+      | samtools view -@ '$CPUS' -b -o \"\${prefix}.sorf.filtered.bam\" -
 
-kept_primary_mapped=\`samtools view -c -F 0xD04 \"\${prefix}.sorf.filtered.bam\"\`
+    kept_primary_mapped=\`samtools view -@ '$CPUS' -c -F 0xD04 \"\${prefix}.sorf.filtered.bam\"\`
 
 printf \"sample\\ttotal_primary_mapped\\tkept_primary_mapped\\tpct_kept\\n\" > \"\${prefix}.sorf.filter_stats.tsv\"
 awk -v s=\"\${prefix}\" -v t=\"\${total_primary_mapped}\" -v k=\"\${kept_primary_mapped}\" 'BEGIN{pct=(t>0)?(100.0*k/t):0; printf \"%s\\t%d\\t%d\\t%.2f\\n\", s, t, k, pct}' >> \"\${prefix}.sorf.filter_stats.tsv\"

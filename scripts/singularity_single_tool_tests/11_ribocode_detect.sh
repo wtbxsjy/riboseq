@@ -8,7 +8,7 @@ SAMTOOLS_IMG_URL="https://depot.galaxyproject.org/singularity/samtools:1.21--h50
 usage() {
   cat <<'EOF'
 Usage:
-  11_ribocode_detect.sh --sample ID --bam in.bam --gtf annot.gtf --fasta genome.fa [--outdir DIR] [--stranded forward|reverse|unstranded]
+  11_ribocode_detect.sh --sample ID --bam in.bam --gtf annot.gtf --fasta genome.fa [--outdir DIR] [--stranded forward|reverse|unstranded] [--cpus N]
 
 Notes:
   - 更推荐 transcriptome BAM（pipeline 在 FASTQ 模式会额外生成 transcriptome BAM）。
@@ -23,6 +23,7 @@ Required:
 Options:
   --outdir   output directory (default: ./out_ribocode)
   --stranded forward|reverse|unstranded (default: forward)
+  --cpus     threads for samtools index (default: 4)
   --args     extra args passed to RiboCode_onestep (quoted string)
 
 Env:
@@ -37,6 +38,7 @@ FASTA=""
 OUTDIR="./out_ribocode"
 STRANDED="forward"
 EXTRA_ARGS=""
+CPUS=4
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --fasta) FASTA="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     --stranded) STRANDED="$2"; shift 2;;
+    --cpus) CPUS="$2"; shift 2;;
     --args) EXTRA_ARGS="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 2;;
@@ -84,7 +87,7 @@ ensure_bai() {
     --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
     --pwd "$WORKDIR" \
     "$img" \
-    samtools index -@ 2 "$bam"
+    samtools index -@ "$CPUS" "$bam"
 }
 
 IMG="$(pull_img "$IMG_URL")"

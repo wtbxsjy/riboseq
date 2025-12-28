@@ -19,6 +19,7 @@ Required:
 Options:
   --outdir    output directory (default: ./out_riboseqc_analysis)
   --fast-mode TRUE|FALSE (default: TRUE)
+  --cpus      threads for samtools index (default: 4)
 
 Env:
   BIND_EXTRA extra singularity binds, comma-separated (e.g. /mnt:/mnt)
@@ -31,6 +32,7 @@ ANNOT=""
 FASTA=""
 OUTDIR="./out_riboseqc_analysis"
 FAST_MODE="TRUE"
+CPUS=4
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --fasta) FASTA="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     --fast-mode) FAST_MODE="$2"; shift 2;;
+    --cpus) CPUS="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 2;;
   esac
@@ -77,7 +80,7 @@ ensure_bai() {
     --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
     --pwd "$WORKDIR" \
     "$img" \
-    samtools index -@ 2 "$bam"
+    samtools index -@ "$CPUS" "$bam"
 }
 
 IMG="$(pull_img "$IMG_URL")"

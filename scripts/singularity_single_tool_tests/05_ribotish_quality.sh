@@ -74,7 +74,7 @@ ensure_bai() {
     --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
     --pwd "$WORKDIR" \
     "$img" \
-    samtools index -@ 2 "$bam"
+    samtools index -@ "$CPUS" "$bam"
 }
 
 IMG="$(pull_img "$IMG_URL")"

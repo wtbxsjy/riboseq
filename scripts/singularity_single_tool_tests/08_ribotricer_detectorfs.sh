@@ -8,7 +8,7 @@ SAMTOOLS_IMG_URL="https://depot.galaxyproject.org/singularity/samtools:1.21--h50
 usage() {
   cat <<'EOF'
 Usage:
-  08_ribotricer_detectorfs.sh --sample ID --bam in.bam --index PREFIX_candidate_orfs.tsv [--stranded forward|reverse|unstranded] [--outdir DIR]
+  08_ribotricer_detectorfs.sh --sample ID --bam in.bam --index PREFIX_candidate_orfs.tsv [--stranded forward|reverse|unstranded] [--cpus N] [--outdir DIR]
 
 Required:
   --sample sample ID (prefix)
@@ -17,6 +17,7 @@ Required:
 
 Options:
   --stranded forward|reverse|unstranded (default: forward)
+  --cpus     threads for samtools index (default: 4)
   --outdir   output directory (default: ./out_ribotricer_detect)
   --args     extra args passed to ribotricer detect-orfs (quoted string)
 
@@ -31,6 +32,7 @@ INDEX=""
 STRANDED="forward"
 OUTDIR="./out_ribotricer_detect"
 EXTRA_ARGS=""
+CPUS=4
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --bam) BAM="$2"; shift 2;;
     --index) INDEX="$2"; shift 2;;
     --stranded) STRANDED="$2"; shift 2;;
+    --cpus) CPUS="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     --args) EXTRA_ARGS="$2"; shift 2;;
     -h|--help) usage; exit 0;;
@@ -77,7 +80,7 @@ ensure_bai() {
     --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
     --pwd "$WORKDIR" \
     "$img" \
-    samtools index -@ 2 "$bam"
+    samtools index -@ "$CPUS" "$bam"
 }
 
 IMG="$(pull_img "$IMG_URL")"

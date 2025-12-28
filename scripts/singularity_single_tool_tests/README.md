@@ -7,6 +7,9 @@
 - 需要 `singularity` 可用（或 Apptainer 兼容命令）。
 - 建议在一个“干净的工作目录”里运行脚本，输出会写到当前目录下的子目录。
 - 大多数脚本要求输入 BAM **已排序并已建立索引**（`.bai` 或 `.csi`）。脚本里对常见情况会自动补 `samtools index` / `samtools faidx`。
+- 多线程：
+  - `--cpus` 会用于 `samtools index`（以及 BAM 过滤脚本中的 `samtools view`），这类步骤通常能明显加速。
+  - 其它工具是否真正多线程取决于工具本身；如果脚本没有显式线程参数，可用 `--args` 透传（例如 ribotricer/ribocode 的额外参数）。
 
 ## WSL / OneDrive 路径（可选）
 
