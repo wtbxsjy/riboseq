@@ -158,25 +158,62 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
 
 library(ORFquant)
 
-# Work around namespace collisions observed in some environments:
-# - ggplot2::Position is a ggproto object and can overwrite BiocGenerics::Position (function/generic)
-#   leading to: "attempt to apply non-function".
-repair_ns_symbol <- function(pkg, sym, from_pkg = "BiocGenerics") {
+# Ensure RiboseQC is loaded here so we can patch its imports before ORFquant runs.
+suppressPackageStartupMessages(library(RiboseQC))
+
+# Work around import-environment collisions observed in some environments:
+# - ggplot2::Position is a ggproto object (not a function) and can override base/BiocGenerics::Position,
+#   causing: "attempt to apply non-function".
+#
+# Note: these conflicting symbols live in the *imports environment* (parent of the namespace), not
+# necessarily in the namespace environment itself.
+repair_imported_symbol <- function(pkg, sym, replacement_env, replacement_sym = sym) {
   ns <- tryCatch(asNamespace(pkg), error = function(e) NULL)
-  from <- tryCatch(asNamespace(from_pkg), error = function(e) NULL)
-  if (is.null(ns) || is.null(from)) return(invisible(FALSE))
-  if (!exists(sym, envir = ns, inherits = FALSE)) return(invisible(FALSE))
-  obj <- get(sym, envir = ns, inherits = FALSE)
+  if (is.null(ns)) return(invisible(FALSE))
+  imp <- parent.env(ns)
+  if (!exists(sym, envir = imp, inherits = FALSE)) return(invisible(FALSE))
+  obj <- get(sym, envir = imp, inherits = FALSE)
   if (is.function(obj)) return(invisible(FALSE))
-  if (!exists(sym, envir = from, inherits = FALSE)) return(invisible(FALSE))
-  assign(sym, get(sym, envir = from, inherits = FALSE), envir = ns)
+
+  repl <- if (identical(replacement_env, "base")) {
+    get(replacement_sym, envir = baseenv(), inherits = FALSE)
+  } else {
+    get(replacement_sym, envir = asNamespace(replacement_env), inherits = FALSE)
+  }
+
+  was_locked <- FALSE
+  if (bindingIsLocked(sym, imp)) {
+    was_locked <- TRUE
+    unlockBinding(sym, imp)
+  }
+  assign(sym, repl, envir = imp)
+  if (was_locked) lockBinding(sym, imp)
   invisible(TRUE)
 }
 
-repair_ns_symbol("ORFquant", "Position")
-repair_ns_symbol("ORFquant", "combine")
-repair_ns_symbol("RiboseQC", "Position")
-repair_ns_symbol("RiboseQC", "combine")
+# Patch both ORFquant and RiboseQC imports.
+repair_imported_symbol("ORFquant", "Position", "base")
+repair_imported_symbol("RiboseQC", "Position", "base")
+
+# combine is a BiocGenerics generic; some setups import gridExtra::combine instead.
+repair_imported_symbol("ORFquant", "combine", "BiocGenerics")
+repair_imported_symbol("RiboseQC", "combine", "BiocGenerics")
+
+# Fail fast with a clear message if the repair did not take effect.
+check_import_is_function <- function(pkg, sym) {
+  ns <- asNamespace(pkg)
+  imp <- parent.env(ns)
+  if (!exists(sym, envir = imp, inherits = FALSE)) return(invisible(TRUE))
+  obj <- get(sym, envir = imp, inherits = FALSE)
+  if (!is.function(obj)) {
+    stop(sprintf("After repair, %s import '%s' is still not a function (class: %s)",
+                 pkg, sym, paste(class(obj), collapse = ",")))
+  }
+  invisible(TRUE)
+}
+
+check_import_is_function("ORFquant", "Position")
+check_import_is_function("RiboseQC", "Position")
 
 run_ORFquant(
   for_ORFquant_file = Sys.getenv("FOR_ORFQUANT"),
