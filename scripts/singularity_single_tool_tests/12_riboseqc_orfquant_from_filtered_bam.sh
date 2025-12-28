@@ -110,6 +110,14 @@ if [[ "$SKIP_FILTER" == "FALSE" && -z "$FAI" ]]; then
   exit 2
 fi
 
+if [[ -n "$ORFQUANT_PKG" ]]; then
+  if [[ ! -f "$ORFQUANT_PKG" ]]; then
+    echo "[ERROR] --orfquant-pkg not found: $ORFQUANT_PKG" >&2
+    exit 2
+  fi
+  ORFQUANT_PKG="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$ORFQUANT_PKG")"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$OUTDIR"

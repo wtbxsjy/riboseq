@@ -59,6 +59,14 @@ if [[ -z "$SAMPLE" || -z "$FOR_ORFQUANT" || -z "$ANNOT" || -z "$FASTA" ]]; then
   exit 2
 fi
 
+if [[ -n "$ORFQUANT_PKG" ]]; then
+  if [[ ! -f "$ORFQUANT_PKG" ]]; then
+    echo "[ERROR] --orfquant-pkg not found: $ORFQUANT_PKG" >&2
+    exit 2
+  fi
+  ORFQUANT_PKG="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$ORFQUANT_PKG")"
+fi
+
 mkdir -p "$OUTDIR" "./containers"
 OUTDIR="$(cd "$OUTDIR" && pwd)"
 WORKDIR="$(pwd)"
@@ -79,10 +87,7 @@ IMG="$(pull_img "$IMG_URL")"
 
 # Write a small wrapper to execute inside the container (avoids fragile nested quoting)
 quote_sh() {
-  python3 - <<'PY'
-import sys, shlex
-print(shlex.quote(sys.argv[1]))
-PY
+  python3 -c 'import sys,shlex; s=sys.stdin.read().rstrip("\n"); print(shlex.quote(s))' <<<"$1"
 }
 
 ENV_SH="$OUTDIR/orfquant_env.sh"
