@@ -118,7 +118,24 @@ fi
 export R_LIBS_USER="$(pwd)/Rlibs"
 mkdir -p "$R_LIBS_USER"
 
+# Prevent host/user R startup files from interfering inside the container.
+export R_PROFILE_USER=/dev/null
+export R_ENVIRON_USER=/dev/null
+
 cat > run_orfquant.R <<'RSCRIPTEOF'
+options(show.error.locations = TRUE)
+options(error = function() {
+  cat("\n=== R ERROR ===\n")
+  cat(geterrmessage(), "\n")
+  cat("\n=== sys.calls() ===\n")
+  print(sys.calls())
+  cat("\n=== traceback() ===\n")
+  try(traceback(50), silent = TRUE)
+  cat("\n=== sessionInfo() ===\n")
+  print(sessionInfo())
+  quit(save = "no", status = 1)
+})
+
 install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
   work <- file.path(getwd(), "orfquant_src")
   dir.create(work, showWarnings = FALSE, recursive = TRUE)
@@ -238,7 +255,7 @@ RSCRIPTEOF
 
 echo [INFO] Running ORFquant R script...
 set -o pipefail
-Rscript run_orfquant.R 2>&1 | tee run_orfquant.log
+Rscript --vanilla run_orfquant.R 2>&1 | tee run_orfquant.log
 
 if ls -1 ${SAMPLE}_final_ORFquant_results* >/dev/null 2>&1; then
   echo [INFO] ORFquant results:
