@@ -77,23 +77,41 @@ pull_img() {
 
 IMG="$(pull_img "$IMG_URL")"
 
-singularity exec \
-  --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
-  --pwd "$WORKDIR" \
-  "$IMG" \
-  bash -lc "
+# Write a small wrapper to execute inside the container (avoids fragile nested quoting)
+quote_sh() {
+  python3 - <<'PY'
+import sys, shlex
+print(shlex.quote(sys.argv[1]))
+PY
+}
+
+ENV_SH="$OUTDIR/orfquant_env.sh"
+cat > "$ENV_SH" <<EOF
+export SAMPLE=$(quote_sh "$SAMPLE")
+export FOR_ORFQUANT=$(quote_sh "$FOR_ORFQUANT")
+export ANNOT=$(quote_sh "$ANNOT")
+export FASTA=$(quote_sh "$FASTA")
+export CPUS=$(quote_sh "$CPUS")
+export ORFQUANT_PKG=$(quote_sh "$ORFQUANT_PKG")
+EOF
+
+INNER_SH="$OUTDIR/run_orfquant_container.sh"
+cat > "$INNER_SH" <<'EOSH'
+#!/usr/bin/env bash
 set -euo pipefail
-cd '$OUTDIR'
+
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source ./orfquant_env.sh
 
 # Handle gz fasta like module does
-FASTA_IN='$FASTA'
-if [[ \"\$FASTA_IN\" == *.gz ]]; then
-  gunzip -c \"\$FASTA_IN\" > \"\$(basename \"\$FASTA_IN\" .gz)\"
-  FASTA_IN=\"\$(basename \"\$FASTA_IN\" .gz)\"
+FASTA_IN="$FASTA"
+if [[ "$FASTA_IN" == *.gz ]]; then
+  gunzip -c "$FASTA_IN" > "$(basename "$FASTA_IN" .gz)"
+  FASTA_IN="$(basename "$FASTA_IN" .gz)"
 fi
 
-export R_LIBS_USER=\"$OUTDIR/Rlibs\"
-mkdir -p \"\$R_LIBS_USER\"
+export R_LIBS_USER="$(pwd)/Rlibs"
+mkdir -p "$R_LIBS_USER"
 
 cat > run_orfquant.R <<'RSCRIPTEOF'
 install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
@@ -156,17 +174,10 @@ writeLines(
 )
 RSCRIPTEOF
 
-export SAMPLE='$SAMPLE'
-export FOR_ORFQUANT='$FOR_ORFQUANT'
-export ANNOT='$ANNOT'
-export CPUS='$CPUS'
-export ORFQUANT_PKG='${ORFQUANT_PKG}'
-
 echo [INFO] Running ORFquant R script...
 set -o pipefail
 Rscript run_orfquant.R 2>&1 | tee run_orfquant.log
 
-# Sanity-check expected outputs (ORFquant often writes a directory with this prefix)
 if ls -1 ${SAMPLE}_final_ORFquant_results* >/dev/null 2>&1; then
   echo [INFO] ORFquant results:
   ls -la ${SAMPLE}_final_ORFquant_results* || true
@@ -179,6 +190,14 @@ else
   tail -n 200 run_orfquant.log >&2 || true
   exit 2
 fi
-"
+EOSH
+
+chmod +x "$INNER_SH"
+
+singularity exec \
+  --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+  --pwd "$WORKDIR" \
+  "$IMG" \
+  bash "$INNER_SH"
 
 echo "[OK] ORFquant outputs in: $OUTDIR (look for ${SAMPLE}_final_ORFquant_results)"
