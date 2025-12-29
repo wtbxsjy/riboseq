@@ -293,7 +293,7 @@ if [[ ! -f "$FOR_ORFQUANT" ]]; then
   exit 2
 fi
 
-if [[ "$SKIP_ORFQUANT" == "TRUE" ]]; thenscm-history-item:%5Cmnt%5Cc%5CUsers%5Crenzhe%5COneDrive%20-%20BGI%20Hong%20Kong%20Tech%20Co.%2C%20Limited%5CPolyu%5C2025s1%5CRiboSeq%5Cnextflow%5Criboseq?%7B%22repositoryId%22%3A%22scm0%22%2C%22historyItemId%22%3A%2250007a63e64914a284c8f22a640b6ef2af8ad312%22%2C%22historyItemParentId%22%3A%22c947a0ca3bbffab99730519e4825c819e6d0a1e9%22%2C%22historyItemDisplayId%22%3A%2250007a6%22%7D
+if [[ "$SKIP_ORFQUANT" == "TRUE" ]]; then
   echo "[INFO] Step 4/4: Skipping ORFquant (--skip-orfquant TRUE)"
   echo "[OK] Done. Outputs:"
   echo "  - Filtered BAM:         $BAM_FOR_DOWNSTREAM"
