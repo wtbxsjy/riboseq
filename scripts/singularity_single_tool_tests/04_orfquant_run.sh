@@ -282,6 +282,19 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
   })
 }
 
+# Use conflicted package (if available) to resolve namespace conflicts BEFORE loading packages.
+# This is cleaner than post-hoc patching because it prevents the conflict from happening.
+if (requireNamespace("conflicted", quietly = TRUE)) {
+  library(conflicted)
+  # Prefer base::Position over ggplot2::Position (ggplot2's is a ggproto object, not a function)
+  conflict_prefer("Position", "base", quiet = TRUE)
+  # Prefer BiocGenerics::combine over gridExtra::combine
+  conflict_prefer("combine", "BiocGenerics", quiet = TRUE)
+  message("[INFO] Using 'conflicted' package to resolve namespace conflicts.")
+} else {
+  message("[WARN] 'conflicted' package not available. Will attempt post-hoc namespace patching.")
+}
+
 library(ORFquant)
 
 # Try to load RiboseQC if available (some containers like orfquant:1.1.0--r40_1 don't include it).

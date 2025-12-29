@@ -54,6 +54,9 @@ RSCRIPT
 
         R --vanilla -q -f /tmp/install_orfquant.R
 
+    # Install conflicted package to handle namespace conflicts (ggplot2::Position vs base::Position)
+    R --vanilla -q -e "install.packages('conflicted', repos='https://cloud.r-project.org', quiet=TRUE)"
+
 %runscript
     exec "$@"
 
