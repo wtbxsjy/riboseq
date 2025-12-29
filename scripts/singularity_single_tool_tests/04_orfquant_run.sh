@@ -284,8 +284,14 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
 
 library(ORFquant)
 
-# Ensure RiboseQC is loaded here so we can patch its imports before ORFquant runs.
-suppressPackageStartupMessages(library(RiboseQC))
+# Try to load RiboseQC if available (some containers like orfquant:1.1.0--r40_1 don't include it).
+# RiboseQC is only needed for patching import collisions; ORFquant can run without it.
+has_riboseqc <- requireNamespace("RiboseQC", quietly = TRUE)
+if (has_riboseqc) {
+  suppressPackageStartupMessages(library(RiboseQC))
+} else {
+  message("Note: RiboseQC package not available. Skipping RiboseQC-specific import patches.")
+}
 
 # Work around import-environment collisions observed in some environments:
 # - ggplot2::Position is a ggproto object (not a function) and can override base/BiocGenerics::Position,
@@ -319,14 +325,19 @@ repair_imported_symbol <- function(pkg, sym, replacement_env, replacement_sym = 
 
 # Patch both ORFquant and RiboseQC imports.
 repair_imported_symbol("ORFquant", "Position", "base")
-repair_imported_symbol("RiboseQC", "Position", "base")
+if (has_riboseqc) {
+  repair_imported_symbol("RiboseQC", "Position", "base")
+}
 
 # combine is a BiocGenerics generic; some setups import gridExtra::combine instead.
 repair_imported_symbol("ORFquant", "combine", "BiocGenerics")
-repair_imported_symbol("RiboseQC", "combine", "BiocGenerics")
+if (has_riboseqc) {
+  repair_imported_symbol("RiboseQC", "combine", "BiocGenerics")
+}
 
 # Fail fast with a clear message if the repair did not take effect.
 check_import_is_function <- function(pkg, sym) {
+  if (!requireNamespace(pkg, quietly = TRUE)) return(invisible(TRUE))
   ns <- asNamespace(pkg)
   imp <- parent.env(ns)
   if (!exists(sym, envir = imp, inherits = FALSE)) return(invisible(TRUE))
@@ -339,18 +350,59 @@ check_import_is_function <- function(pkg, sym) {
 }
 
 check_import_is_function("ORFquant", "Position")
-check_import_is_function("RiboseQC", "Position")
+if (has_riboseqc) {
+  check_import_is_function("RiboseQC", "Position")
+}
 
-run_ORFquant(
-  for_ORFquant_file = Sys.getenv("FOR_ORFQUANT"),
-  annotation_file   = Sys.getenv("ANNOT"),
-  n_cores           = as.integer(Sys.getenv("CPUS")),
-  prefix            = Sys.getenv("SAMPLE"),
-  write_temp_files  = TRUE,
-  write_GTF_file    = TRUE,
-  write_protein_fasta = TRUE,
-  interactive       = FALSE
-)
+# Force gc() to trigger any pending finalizers BEFORE entering parallel code.
+# This can reduce the chance of GC-triggered errors in child processes.
+invisible(gc(verbose = FALSE, full = TRUE))
+
+# Wrap run_ORFquant in a tryCatch; if it fails with the "attempt to apply non-function"
+# error (common in parallel mode), retry with n_cores = 1.
+n_cores_requested <- as.integer(Sys.getenv("CPUS"))
+run_orfquant_result <- tryCatch({
+  run_ORFquant(
+    for_ORFquant_file = Sys.getenv("FOR_ORFQUANT"),
+    annotation_file   = Sys.getenv("ANNOT"),
+    n_cores           = n_cores_requested,
+    prefix            = Sys.getenv("SAMPLE"),
+    write_temp_files  = TRUE,
+    write_GTF_file    = TRUE,
+    write_protein_fasta = TRUE,
+    interactive       = FALSE
+  )
+  "success"
+}, error = function(e) {
+  msg <- conditionMessage(e)
+  # Check if it's the known parallel/import collision error
+  if (grepl("attempt to apply non-function", msg, fixed = TRUE) && n_cores_requested > 1) {
+    message("\n[WARN] ORFquant failed with 'attempt to apply non-function' error in parallel mode.")
+    message("[WARN] This is a known R namespace collision issue when using doMC/mclapply.")
+    message("[WARN] Retrying with n_cores = 1 (single-threaded mode)...\n")
+    tryCatch({
+      run_ORFquant(
+        for_ORFquant_file = Sys.getenv("FOR_ORFQUANT"),
+        annotation_file   = Sys.getenv("ANNOT"),
+        n_cores           = 1L,
+        prefix            = Sys.getenv("SAMPLE"),
+        write_temp_files  = TRUE,
+        write_GTF_file    = TRUE,
+        write_protein_fasta = TRUE,
+        interactive       = FALSE
+      )
+      "success_single_core"
+    }, error = function(e2) {
+      stop("ORFquant failed even in single-core mode: ", conditionMessage(e2))
+    })
+  } else {
+    stop(e)
+  }
+})
+
+if (run_orfquant_result == "success_single_core") {
+  message("[INFO] ORFquant completed successfully in single-core fallback mode.")
+}
 
 writeLines(
   c(
