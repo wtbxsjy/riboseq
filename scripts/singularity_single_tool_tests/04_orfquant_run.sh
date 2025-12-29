@@ -358,6 +358,12 @@ if (has_riboseqc) {
 # This can reduce the chance of GC-triggered errors in child processes.
 invisible(gc(verbose = FALSE, full = TRUE))
 
+# IMPORTANT: Temporarily disable the global error handler so tryCatch can catch errors.
+# The global error handler (options(error = ...)) calls quit() which prevents tryCatch
+# from handling errors for the fallback mechanism.
+saved_error_handler <- getOption("error")
+options(error = NULL)
+
 # Wrap run_ORFquant in a tryCatch; if it fails with the "attempt to apply non-function"
 # error (common in parallel mode), retry with n_cores = 1.
 n_cores_requested <- as.integer(Sys.getenv("CPUS"))
@@ -393,12 +399,19 @@ run_orfquant_result <- tryCatch({
       )
       "success_single_core"
     }, error = function(e2) {
+      # Restore error handler before stopping
+      options(error = saved_error_handler)
       stop("ORFquant failed even in single-core mode: ", conditionMessage(e2))
     })
   } else {
+    # Restore error handler before stopping
+    options(error = saved_error_handler)
     stop(e)
   }
 })
+
+# Restore the global error handler
+options(error = saved_error_handler)
 
 if (run_orfquant_result == "success_single_core") {
   message("[INFO] ORFquant completed successfully in single-core fallback mode.")
