@@ -71,28 +71,54 @@ LEN_MIN=28
 LEN_MAX=30
 EXCLUDE_REGEX='^(chr)?(M|MT|Mt|chrM|chrMT|chrMt|ChrM|ChrMT|ChrMt)$|^(chr)?(C|CP|Pt|chrC|chrCP|chrPt|ChrC|ChrCP|ChrPt)$|^chrUn_.*|.*_random$|.*_alt$|.*_fix$'
 
+die_missing_value() {
+  local opt="$1"
+  echo "[ERROR] Missing value for: $opt" >&2
+  usage >&2
+  exit 2
+}
+
+parse_bool_or_flag_true() {
+  # Usage: parse_bool_or_flag_true --opt_name "$@"; echoes value and returns shift count via global PARSE_SHIFT
+  # Behavior:
+  #   --opt TRUE|FALSE  -> value=TRUE/FALSE, shift=2
+  #   --opt             -> value=TRUE, shift=1
+  local opt="$1"; shift
+  if [[ $# -ge 2 && "${2:-}" != --* ]]; then
+    echo "$2"
+    PARSE_SHIFT=2
+  else
+    echo "TRUE"
+    PARSE_SHIFT=1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --sample) SAMPLE="$2"; shift 2;;
-    --bam) BAM="$2"; shift 2;;
-    --fai) FAI="$2"; shift 2;;
-    --gtf) GTF="$2"; shift 2;;
-    --fasta) FASTA="$2"; shift 2;;
-    --outdir) OUTDIR="$2"; shift 2;;
-    --cpus) CPUS="$2"; shift 2;;
-    --fast-mode) FAST_MODE="$2"; shift 2;;
-    --resume) RESUME="$2"; shift 2;;
-    --skip-filter) SKIP_FILTER="$2"; shift 2;;
-    --skip-orfquant) SKIP_ORFQUANT="$2"; shift 2;;
-    --unique-mode) UNIQUE_MODE="$2"; shift 2;;
-    --mapq) MAPQ="$2"; shift 2;;
-    --len-min) LEN_MIN="$2"; shift 2;;
-    --len-max) LEN_MAX="$2"; shift 2;;
-    --exclude-regex) EXCLUDE_REGEX="$2"; shift 2;;
-    --annotation) RANNOT="$2"; shift 2;;
-    --orfquant-pkg) ORFQUANT_PKG="$2"; shift 2;;
-    --orfquant-sif) ORFQUANT_SIF="$2"; shift 2;;
-    --orfquant-annotation) ORFQUANT_RANNOT="$2"; shift 2;;
+    --sample) [[ $# -ge 2 ]] || die_missing_value "$1"; SAMPLE="$2"; shift 2;;
+    --bam) [[ $# -ge 2 ]] || die_missing_value "$1"; BAM="$2"; shift 2;;
+    --fai) [[ $# -ge 2 ]] || die_missing_value "$1"; FAI="$2"; shift 2;;
+    --gtf) [[ $# -ge 2 ]] || die_missing_value "$1"; GTF="$2"; shift 2;;
+    --fasta) [[ $# -ge 2 ]] || die_missing_value "$1"; FASTA="$2"; shift 2;;
+    --outdir) [[ $# -ge 2 ]] || die_missing_value "$1"; OUTDIR="$2"; shift 2;;
+    --cpus) [[ $# -ge 2 ]] || die_missing_value "$1"; CPUS="$2"; shift 2;;
+    --fast-mode) [[ $# -ge 2 ]] || die_missing_value "$1"; FAST_MODE="$2"; shift 2;;
+    --resume) [[ $# -ge 2 ]] || die_missing_value "$1"; RESUME="$2"; shift 2;;
+    --skip-filter)
+      SKIP_FILTER="$(parse_bool_or_flag_true "$1" "$@")"
+      shift "$PARSE_SHIFT";;
+    --skip-orfquant)
+      SKIP_ORFQUANT="$(parse_bool_or_flag_true "$1" "$@")"
+      shift "$PARSE_SHIFT";;
+    --unique-mode) [[ $# -ge 2 ]] || die_missing_value "$1"; UNIQUE_MODE="$2"; shift 2;;
+    --mapq) [[ $# -ge 2 ]] || die_missing_value "$1"; MAPQ="$2"; shift 2;;
+    --len-min) [[ $# -ge 2 ]] || die_missing_value "$1"; LEN_MIN="$2"; shift 2;;
+    --len-max) [[ $# -ge 2 ]] || die_missing_value "$1"; LEN_MAX="$2"; shift 2;;
+    --exclude-regex) [[ $# -ge 2 ]] || die_missing_value "$1"; EXCLUDE_REGEX="$2"; shift 2;;
+    --annotation) [[ $# -ge 2 ]] || die_missing_value "$1"; RANNOT="$2"; shift 2;;
+    --orfquant-pkg) [[ $# -ge 2 ]] || die_missing_value "$1"; ORFQUANT_PKG="$2"; shift 2;;
+    --orfquant-sif) [[ $# -ge 2 ]] || die_missing_value "$1"; ORFQUANT_SIF="$2"; shift 2;;
+    --orfquant-annotation) [[ $# -ge 2 ]] || die_missing_value "$1"; ORFQUANT_RANNOT="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 2;;
   esac
@@ -262,7 +288,7 @@ if [[ ! -f "$FOR_ORFQUANT" ]]; then
   exit 2
 fi
 
-if [[ "$SKIP_ORFQUANT" == "TRUE" ]]; then
+if [[ "$SKIP_ORFQUANT" == "TRUE" ]]; thenscm-history-item:%5Cmnt%5Cc%5CUsers%5Crenzhe%5COneDrive%20-%20BGI%20Hong%20Kong%20Tech%20Co.%2C%20Limited%5CPolyu%5C2025s1%5CRiboSeq%5Cnextflow%5Criboseq?%7B%22repositoryId%22%3A%22scm0%22%2C%22historyItemId%22%3A%2250007a63e64914a284c8f22a640b6ef2af8ad312%22%2C%22historyItemParentId%22%3A%22c947a0ca3bbffab99730519e4825c819e6d0a1e9%22%2C%22historyItemDisplayId%22%3A%2250007a6%22%7D
   echo "[INFO] Step 4/4: Skipping ORFquant (--skip-orfquant TRUE)"
   echo "[OK] Done. Outputs:"
   echo "  - Filtered BAM:         $BAM_FOR_DOWNSTREAM"

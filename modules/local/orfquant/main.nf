@@ -45,9 +45,11 @@ process ORFQUANT_RUN {
         gunzip -c ${fasta} > \$(basename ${fasta} .gz)
     fi
 
-    # Install ORFquant into a task-local library if needed (works for conda runs)
-    export R_LIBS_USER="${task.workDir}/Rlibs"
-    mkdir -p "\$R_LIBS_USER"
+    # Append a task-local Rlibs directory instead of replacing R_LIBS_USER, so that
+    # packages pre-installed in the container (e.g. ORFquant) remain accessible.
+    _local_rlibs="${task.workDir}/Rlibs"
+    mkdir -p "\$_local_rlibs"
+    export R_LIBS_USER="\${_local_rlibs}\${R_LIBS_USER:+:\${R_LIBS_USER}}"
 
     # Write R script - ORFquant should be pre-installed in custom container
     cat > run_orfquant.R <<RSCRIPTEOF

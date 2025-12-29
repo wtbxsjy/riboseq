@@ -196,8 +196,11 @@ if [[ "$FASTA_IN" == *.gz ]]; then
   FASTA_IN="$(basename "$FASTA_IN" .gz)"
 fi
 
-export R_LIBS_USER="$(pwd)/Rlibs"
-mkdir -p "$R_LIBS_USER"
+# Append task-local Rlibs to R_LIBS_USER instead of replacing, so that packages
+# pre-installed in the container (e.g. ORFquant) remain accessible.
+_local_rlibs="$(pwd)/Rlibs"
+mkdir -p "$_local_rlibs"
+export R_LIBS_USER="${_local_rlibs}${R_LIBS_USER:+:${R_LIBS_USER}}"
 
 # Prevent host/user R startup files from interfering inside the container.
 export R_PROFILE_USER=/dev/null
