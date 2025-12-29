@@ -49,6 +49,32 @@ Outputs (inside --outdir):
 EOF
 }
 
+die_missing_value() {
+  local opt="$1"
+  echo "[ERROR] Missing value for: $opt" >&2
+  usage >&2
+  exit 2
+}
+
+# Helper: parse boolean flag that accepts either --flag or --flag TRUE|FALSE
+# Sets the variable named by first arg to the parsed value, and shifts appropriately.
+# Usage: parse_bool_flag VARNAME "$@"; set -- "${REMAINING_ARGS[@]}"
+parse_bool_flag() {
+  local varname="$1"; shift
+  local opt="$1"
+  if [[ $# -ge 2 && "${2:-}" =~ ^(TRUE|FALSE)$ ]]; then
+    eval "$varname=\"\$2\""
+    REMAINING_ARGS=("${@:3}")
+  else
+    eval "$varname=TRUE"
+    REMAINING_ARGS=("${@:2}")
+  fi
+}
+
+# Collect all positional args, then parse
+ALL_ARGS=("$@")
+set --
+
 SAMPLE=""
 BAM=""
 FAI=""
@@ -61,7 +87,6 @@ RANNOT=""
 ORFQUANT_PKG=""
 ORFQUANT_SIF=""
 ORFQUANT_RANNOT=""
-
 SKIP_FILTER="FALSE"
 SKIP_ORFQUANT="FALSE"
 RESUME="TRUE"
@@ -71,27 +96,7 @@ LEN_MIN=28
 LEN_MAX=30
 EXCLUDE_REGEX='^(chr)?(M|MT|Mt|chrM|chrMT|chrMt|ChrM|ChrMT|ChrMt)$|^(chr)?(C|CP|Pt|chrC|chrCP|chrPt|ChrC|ChrCP|ChrPt)$|^chrUn_.*|.*_random$|.*_alt$|.*_fix$'
 
-die_missing_value() {
-  local opt="$1"
-  echo "[ERROR] Missing value for: $opt" >&2
-  usage >&2
-  exit 2
-}
-
-parse_bool_or_flag_true() {
-  # Usage: parse_bool_or_flag_true --opt_name "$@"; echoes value and returns shift count via global PARSE_SHIFT
-  # Behavior:
-  #   --opt TRUE|FALSE  -> value=TRUE/FALSE, shift=2
-  #   --opt             -> value=TRUE, shift=1
-  local opt="$1"; shift
-  if [[ $# -ge 2 && "${2:-}" != --* ]]; then
-    echo "$2"
-    PARSE_SHIFT=2
-  else
-    echo "TRUE"
-    PARSE_SHIFT=1
-  fi
-}
+set -- "${ALL_ARGS[@]}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -105,11 +110,11 @@ while [[ $# -gt 0 ]]; do
     --fast-mode) [[ $# -ge 2 ]] || die_missing_value "$1"; FAST_MODE="$2"; shift 2;;
     --resume) [[ $# -ge 2 ]] || die_missing_value "$1"; RESUME="$2"; shift 2;;
     --skip-filter)
-      SKIP_FILTER="$(parse_bool_or_flag_true "$1" "$@")"
-      shift "$PARSE_SHIFT";;
+      parse_bool_flag SKIP_FILTER "$@"
+      set -- "${REMAINING_ARGS[@]}";;
     --skip-orfquant)
-      SKIP_ORFQUANT="$(parse_bool_or_flag_true "$1" "$@")"
-      shift "$PARSE_SHIFT";;
+      parse_bool_flag SKIP_ORFQUANT "$@"
+      set -- "${REMAINING_ARGS[@]}";;
     --unique-mode) [[ $# -ge 2 ]] || die_missing_value "$1"; UNIQUE_MODE="$2"; shift 2;;
     --mapq) [[ $# -ge 2 ]] || die_missing_value "$1"; MAPQ="$2"; shift 2;;
     --len-min) [[ $# -ge 2 ]] || die_missing_value "$1"; LEN_MIN="$2"; shift 2;;
