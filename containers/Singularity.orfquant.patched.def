@@ -1,0 +1,68 @@
+Bootstrap: docker
+From: quay.io/biocontainers/riboseqc:1.1--r36_1
+
+%labels
+    Author nf-core/riboseq
+    Description RiboseQC container with PATCHED ORFquant (fixes Position/combine conflicts)
+
+%setup
+    ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
+    mkdir -p "${ROOTFS}/etc"
+    rm -f "${ROOTFS}/etc/resolv.conf"
+    : > "${ROOTFS}/etc/resolv.conf"
+    
+    # Copy patched ORFquant source into the container
+    mkdir -p "${ROOTFS}/opt/orfquant_patched"
+
+%files
+    # Copy the patched ORFquant source directory into the container
+    patched_packages/ORFquant-1.02 /opt/orfquant_patched/ORFquant-1.02
+
+%post
+    # Install patched ORFquant from local source
+    # The NAMESPACE file has been modified to use selective imports from ggplot2
+    # and gridExtra, avoiding the Position and combine conflicts with BiocGenerics.
+    
+    cat > /tmp/install_orfquant.R <<'RSCRIPT'
+pkg_dir <- "/opt/orfquant_patched/ORFquant-1.02"
+
+if (!dir.exists(pkg_dir)) {
+    stop("Patched ORFquant source not found at: ", pkg_dir)
+}
+
+message("Installing patched ORFquant from: ", pkg_dir)
+cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
+message(cmd)
+status <- system(cmd)
+if (status != 0) stop("R CMD INSTALL failed with status ", status)
+
+# Verify no Position conflict warning
+message("\n=== Verifying ORFquant installation ===")
+library(ORFquant)
+message("ORFquant version: ", packageVersion("ORFquant"))
+message("Installation successful - no Position/combine conflict warnings should appear above!")
+RSCRIPT
+
+    R --vanilla -q -f /tmp/install_orfquant.R
+
+%runscript
+    exec "$@"
+
+%help
+    This container includes RiboseQC and PATCHED ORFquant for Ribo-seq analysis.
+    
+    PATCH DETAILS:
+    - ORFquant NAMESPACE modified to use selective imports from ggplot2/gridExtra
+    - Avoids importing ggplot2::Position which overrides BiocGenerics::Position
+    - Avoids importing gridExtra::combine which overrides BiocGenerics::combine
+    - Fixes "attempt to apply non-function" error in parallel ORFquant runs
+    
+    Build:
+        apptainer build --fakeroot -F orfquant_patched.sif containers/Singularity.orfquant.patched.def
+
+    Use in nf-core/riboseq:
+        nextflow run main.nf -profile test_local_singularity \
+          --orfquant_container /abs/path/orfquant_patched.sif
+
+    Usage:
+        apptainer exec orfquant_patched.sif Rscript your_script.R

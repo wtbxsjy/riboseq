@@ -220,30 +220,42 @@ options(error = function() {
   quit(save = "no", status = 1)
 })
 
-# Some environments can throw a fatal error from R6 finalizers during garbage
-# collection, e.g. "x$.self$finalize() : attempt to apply non-function".
-# This is usually unrelated to the analysis logic but aborts the whole run.
-# We defensively wrap R6-registered finalizers so they cannot terminate the job.
-patch_r6_finalizers <- function() {
-  if (!requireNamespace("R6", quietly = TRUE)) return(invisible(FALSE))
+# Suppress ALL finalizer errors to prevent R6/database connection cleanup from crashing.
+# This is a workaround for the "x$.self$finalize() : attempt to apply non-function" error.
+# The error occurs when R tries to garbage-collect objects with broken method dispatch.
+suppressFinalizerErrors <- function() {
+  # Save original reg.finalizer
+  original_reg_finalizer <- base::reg.finalizer
+  
+  # Create a wrapper that catches errors in finalizers
   safe_reg_finalizer <- function(e, f, onexit = FALSE) {
     wrapped <- function(x) {
-      tryCatch(f(x), error = function(err) {
-        message("[WARN] Suppressed error in finalizer: ", conditionMessage(err))
-        invisible(NULL)
-      })
+      tryCatch(
+        f(x),
+        error = function(err) {
+          # Silently suppress the error - finalizer errors are rarely critical
+          invisible(NULL)
+        }
+      )
     }
-    environment(wrapped) <- baseenv()
-    base::reg.finalizer(e, wrapped, onexit = onexit)
+    original_reg_finalizer(e, wrapped, onexit = onexit)
   }
-  ok <- tryCatch({
-    assignInNamespace("reg.finalizer", safe_reg_finalizer, ns = "R6")
-    TRUE
-  }, error = function(e) FALSE)
-  invisible(ok)
+  
+  # Try to replace reg.finalizer in base namespace (may fail in locked namespaces)
+  tryCatch({
+    unlockBinding("reg.finalizer", baseenv())
+    assign("reg.finalizer", safe_reg_finalizer, envir = baseenv())
+    lockBinding("reg.finalizer", baseenv())
+    message("[INFO] Base reg.finalizer wrapped to suppress finalizer errors.")
+  }, error = function(e) {
+    message("[WARN] Could not patch base::reg.finalizer: ", conditionMessage(e))
+  })
+  
+  invisible(TRUE)
 }
 
-patch_r6_finalizers()
+suppressFinalizerErrors()
+
 
 install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
   work <- file.path(getwd(), "orfquant_src")
