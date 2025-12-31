@@ -51,6 +51,50 @@ mkdir -p "$OUTDIR" "./containers"
 OUTDIR="$(cd "$OUTDIR" && pwd)"
 WORKDIR="$(pwd)"
 
+abspath() {
+  # Resolve to absolute path without requiring the file to exist.
+  # (We check existence separately with -f.)
+  python3 - <<'PY' "$1"
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+}
+
+# Convert to absolute paths before we ever cd into OUTDIR.
+BAM="$(abspath "$BAM")"
+GTF="$(abspath "$GTF")"
+
+if [[ ! -f "$BAM" ]]; then
+  echo "[ERROR] BAM not found: $BAM" >&2
+  echo "[HINT] Provide a valid --bam path (relative paths are resolved from your current directory)." >&2
+  exit 2
+fi
+
+if [[ ! -f "$GTF" ]]; then
+  echo "[ERROR] GTF not found: $GTF" >&2
+  echo "[HINT] Provide a valid --gtf path. If you used a relative path, this script now resolves it to an absolute path automatically." >&2
+  exit 2
+fi
+
+add_bind() {
+  local p="$1"
+  [[ -z "$p" ]] && return 0
+  # Ensure it is an absolute, existing directory.
+  p="$(cd "$p" && pwd)"
+  local entry="${p}:${p}"
+  case ",${BIND_SPEC:-}," in
+    *",${entry},"*) ;;
+    *) BIND_SPEC="${BIND_SPEC:+$BIND_SPEC,}${entry}" ;;
+  esac
+}
+
+# Bind the working directory plus any external input directories.
+BIND_SPEC=""
+add_bind "$WORKDIR"
+add_bind "$OUTDIR"
+add_bind "$(dirname "$BAM")"
+add_bind "$(dirname "$GTF")"
+
 pull_img() {
   local url="$1"
   local base
@@ -71,7 +115,7 @@ ensure_bai() {
   fi
   echo "[INFO] Missing BAM index; creating with samtools index"
   singularity exec \
-    --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+    --bind "$BIND_SPEC${BIND_EXTRA:+,$BIND_EXTRA}" \
     --pwd "$WORKDIR" \
     "$img" \
     samtools index -@ "$CPUS" "$bam"
@@ -83,7 +127,7 @@ SAMTOOLS_IMG="$(pull_img "$SAMTOOLS_IMG_URL")"
 ensure_bai "$BAM" "$SAMTOOLS_IMG"
 
 singularity exec \
-  --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+  --bind "$BIND_SPEC${BIND_EXTRA:+,$BIND_EXTRA}" \
   --pwd "$WORKDIR" \
   "$IMG" \
   bash -lc "
