@@ -60,6 +60,62 @@ mkdir -p "$OUTDIR" "./containers"
 OUTDIR="$(cd "$OUTDIR" && pwd)"
 WORKDIR="$(pwd)"
 
+abspath() {
+  # Resolve to absolute path without requiring the file to exist.
+  # (We check existence separately with -f.)
+  python3 - <<'PY' "$1"
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+}
+
+# Convert to absolute paths before we ever cd into OUTDIR.
+BAM="$(abspath "$BAM")"
+GTF="$(abspath "$GTF")"
+FASTA="$(abspath "$FASTA")"
+RIBOPARA="$(abspath "$RIBOPARA")"
+
+if [[ ! -f "$BAM" ]]; then
+  echo "[ERROR] BAM not found: $BAM" >&2
+  exit 2
+fi
+
+if [[ ! -f "$GTF" ]]; then
+  echo "[ERROR] GTF not found: $GTF" >&2
+  exit 2
+fi
+
+if [[ ! -f "$FASTA" ]]; then
+  echo "[ERROR] FASTA not found: $FASTA" >&2
+  exit 2
+fi
+
+if [[ ! -f "$RIBOPARA" ]]; then
+  echo "[ERROR] ribopara not found: $RIBOPARA" >&2
+  echo "[HINT] This should be the '*.para.py' output from 05_ribotish_quality.sh." >&2
+  exit 2
+fi
+
+add_bind() {
+  local p="$1"
+  [[ -z "$p" ]] && return 0
+  p="$(cd "$p" && pwd)"
+  local entry="${p}:${p}"
+  case ",${BIND_SPEC:-}," in
+    *",${entry},"*) ;;
+    *) BIND_SPEC="${BIND_SPEC:+$BIND_SPEC,}${entry}" ;;
+  esac
+}
+
+# Bind the working directory plus any external input directories.
+BIND_SPEC=""
+add_bind "$WORKDIR"
+add_bind "$OUTDIR"
+add_bind "$(dirname "$BAM")"
+add_bind "$(dirname "$GTF")"
+add_bind "$(dirname "$FASTA")"
+add_bind "$(dirname "$RIBOPARA")"
+
 pull_img() {
   local url="$1"
   local base
@@ -80,7 +136,7 @@ ensure_bai() {
   fi
   echo "[INFO] Missing BAM index; creating with samtools index"
   singularity exec \
-    --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+    --bind "$BIND_SPEC${BIND_EXTRA:+,$BIND_EXTRA}" \
     --pwd "$WORKDIR" \
     "$img" \
     samtools index -@ "$CPUS" "$bam"
@@ -92,7 +148,7 @@ SAMTOOLS_IMG="$(pull_img "$SAMTOOLS_IMG_URL")"
 ensure_bai "$BAM" "$SAMTOOLS_IMG"
 
 singularity exec \
-  --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+  --bind "$BIND_SPEC${BIND_EXTRA:+,$BIND_EXTRA}" \
   --pwd "$WORKDIR" \
   "$IMG" \
   bash -lc "
