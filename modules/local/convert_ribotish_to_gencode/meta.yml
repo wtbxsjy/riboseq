@@ -1,0 +1,64 @@
+name: convert_ribotish_to_gencode
+description: Convert Ribo-TISH output to gencode-riboseqORFs compatible format
+keywords:
+  - riboseq
+  - orf
+  - format conversion
+  - ribo-tish
+  - gencode
+tools:
+  - ribotish:
+      description: Ribo-TISH ORF prediction tool
+      homepage: https://github.com/zhpn1024/ribotish
+      documentation: https://github.com/zhpn1024/ribotish/blob/master/README.md
+      doi: "10.1038/nmeth.4631"
+      licence: ["GPL v3"]
+
+input:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information
+        e.g. [ id:'test', study_id:'my_study' ]
+  - ribotish_predict:
+      type: file
+      description: Ribo-TISH predict output file
+      pattern: "*.txt"
+  - ribotish_quality:
+      type: file
+      description: Ribo-TISH quality output file (optional)
+      pattern: "*.txt"
+  - fasta:
+      type: file
+      description: Genome FASTA file for sequence extraction
+      pattern: "*.{fa,fasta,fa.gz,fasta.gz}"
+  - gtf:
+      type: file
+      description: GTF annotation file (optional)
+      pattern: "*.gtf"
+
+output:
+  - meta:
+      type: map
+      description: Groovy Map containing sample information
+  - fasta:
+      type: file
+      description: |
+        ORF sequences in gencode-riboseqORFs format
+        Format: >{ORF_NAME}--{STUDY_ID}
+      pattern: "*.gencode.fa"
+  - bed:
+      type: file
+      description: |
+        ORF coordinates in 1-based BED format
+        Columns: chr, start, end, ORF_NAME, STUDY_ID, strand
+      pattern: "*.gencode.bed"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+
+authors:
+  - "@nf-core"
+maintainers:
+  - "@nf-core"

@@ -1,0 +1,64 @@
+Bootstrap: docker
+From: continuumio/miniconda3:23.10.0-1
+
+%labels
+    Author nf-core/riboseq
+    Description Container for gencode-riboseqORFs integration with nf-core/riboseq
+    Version 1.1.0
+
+%post
+    # Install system dependencies
+    apt-get update && apt-get install -y \
+        build-essential \
+        wget \
+        git \
+        procps
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+    # Install Conda packages
+    conda install -c bioconda -c conda-forge -y \
+        bedtools=2.30.0 \
+        gffread=0.12.7
+    conda clean -a -y
+
+    # Install Python dependencies
+    pip install --no-cache-dir biopython==1.81
+
+    # Clone gencode-riboseqORFs project
+    cd /opt
+    git clone https://github.com/jorruior/gencode-riboseqORFs.git
+    cd gencode-riboseqORFs
+    chmod +x scripts/*.sh scripts/*.py ORF_mapper_to_GENCODE_v1.1.py
+
+    # Verify installations
+    python3 --version
+    bedtools --version
+    gffread --version
+    python3 -c "import Bio; print('Biopython:', Bio.__version__)"
+
+%environment
+    export PATH="/opt/gencode-riboseqORFs:/opt/gencode-riboseqORFs/scripts:${PATH}"
+
+%runscript
+    exec "$@"
+
+%help
+    Container for gencode-riboseqORFs integration with nf-core/riboseq
+
+    This container includes:
+    - Python 3 with Biopython 1.81
+    - bedtools 2.30.0
+    - gffread 0.12.7
+    - gencode-riboseqORFs scripts (v1.1.0)
+
+    Main script: ORF_mapper_to_GENCODE_v1.1.py
+
+    Usage:
+        singularity exec gencode-orf-mapper.sif python3 /opt/gencode-riboseqORFs/ORF_mapper_to_GENCODE_v1.1.py --help
+
+    Build:
+        singularity build gencode-orf-mapper.sif Singularity.def
+
+    For more information:
+        https://github.com/jorruior/gencode-riboseqORFs

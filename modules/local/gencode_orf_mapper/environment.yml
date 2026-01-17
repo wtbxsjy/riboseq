@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  - python=3.9
+  - biopython=1.81
+  - bedtools=2.30.0
+  - gffread=0.12.7

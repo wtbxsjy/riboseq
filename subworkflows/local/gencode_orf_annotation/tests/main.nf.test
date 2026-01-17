@@ -1,0 +1,108 @@
+nextflow_workflow {
+
+    name "Test Subworkflow GENCODE_ORF_ANNOTATION"
+    script "../main.nf"
+    workflow "GENCODE_ORF_ANNOTATION"
+
+    tag "subworkflows"
+    tag "subworkflows_local"
+    tag "gencode_orf_annotation"
+
+    test("Should run without failures - stub") {
+
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.empty()  // ribotish_orfs
+                input[1] = Channel.empty()  // ribotricer_orfs
+                input[2] = Channel.value(file('genome.fa'))
+                input[3] = Channel.value(file('genome.gtf'))
+                input[4] = 110              // ensembl_release
+                input[5] = 'GRCh38'         // genome_assembly
+                input[6] = 'homo_sapiens'   // species
+                input[7] = 'test_project'   // project_id
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().size() > 0 }
+            )
+        }
+    }
+
+    test("Should process Ribo-TISH ORFs - stub") {
+
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id:'sample1', study_id:'study1' ],
+                    file('ribotish_predict.txt'),
+                    file('ribotish_quality.txt')
+                ])
+                input[1] = Channel.empty()
+                input[2] = Channel.value(file('genome.fa'))
+                input[3] = Channel.value(file('genome.gtf'))
+                input[4] = 110
+                input[5] = 'GRCh38'
+                input[6] = 'homo_sapiens'
+                input[7] = 'test_project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.unified_fasta != null },
+                { assert workflow.out.unified_bed != null },
+                { assert workflow.out.unified_gtf != null },
+                { assert workflow.out.unified_table != null }
+            )
+        }
+    }
+
+    test("Should process both Ribo-TISH and Ribotricer - stub") {
+
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id:'sample1', study_id:'study1' ],
+                    file('ribotish_predict.txt'),
+                    file('ribotish_quality.txt')
+                ])
+                input[1] = Channel.of([
+                    [ id:'sample1', study_id:'study1' ],
+                    file('ribotricer_orfs.tsv')
+                ])
+                input[2] = Channel.value(file('genome.fa'))
+                input[3] = Channel.value(file('genome.gtf'))
+                input[4] = 110
+                input[5] = 'GRCh38'
+                input[6] = 'homo_sapiens'
+                input[7] = 'test_project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.unified_fasta != null },
+                { assert workflow.out.merged_fasta != null },
+                { assert workflow.out.merged_bed != null },
+                { assert workflow.out.versions != null }
+            )
+        }
+    }
+}
