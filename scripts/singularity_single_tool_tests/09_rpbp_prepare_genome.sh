@@ -53,6 +53,33 @@ mkdir -p "$OUTDIR" "./containers"
 OUTDIR="$(cd "$OUTDIR" && pwd)"
 WORKDIR="$(pwd)"
 
+# Auto-detect and bind mount input file directories
+auto_bind_paths() {
+  local fasta_path="$1"
+  local gtf_path="$2"
+  local rrna_path="$3"
+  local bind_paths=""
+
+  # Convert to absolute paths
+  fasta_abs="$(cd "$(dirname "$fasta_path")" && pwd)/$(basename "$fasta_path")"
+  gtf_abs="$(cd "$(dirname "$gtf_path")" && pwd)/$(basename "$gtf_path")"
+  rrna_abs="$(cd "$(dirname "$rrna_path")" && pwd)/$(basename "$rrna_path")"
+
+  # Extract parent directories
+  fasta_dir="$(dirname "$fasta_abs")"
+  gtf_dir="$(dirname "$gtf_abs")"
+  rrna_dir="$(dirname "$rrna_abs")"
+
+  # Add unique directories to bind list
+  for dir in "$fasta_dir" "$gtf_dir" "$rrna_dir" "$OUTDIR"; do
+    if [[ ":$bind_paths:" != *":$dir:"* ]]; then
+      bind_paths="${bind_paths:+$bind_paths,}$dir:$dir"
+    fi
+  done
+
+  echo "$bind_paths"
+}
+
 pull_img() {
   local url="$1"
   local base
@@ -65,10 +92,24 @@ pull_img() {
   echo "$sif"
 }
 
+# Auto-detect bind mounts
+AUTO_BINDS="$(auto_bind_paths "$FASTA" "$GTF" "$RRNA")"
+echo "[INFO] Auto-detected bind mounts: $AUTO_BINDS"
+
+# Convert inputs to absolute paths for container
+FASTA="$(cd "$(dirname "$FASTA")" && pwd)/$(basename "$FASTA")"
+GTF="$(cd "$(dirname "$GTF")" && pwd)/$(basename "$GTF")"
+RRNA="$(cd "$(dirname "$RRNA")" && pwd)/$(basename "$RRNA")"
+
 IMG="$(pull_img "$IMG_URL")"
 
+# Combine auto-detected binds with BIND_EXTRA
+ALL_BINDS="$WORKDIR:$WORKDIR,$AUTO_BINDS${BIND_EXTRA:+,$BIND_EXTRA}"
+
+echo "[INFO] Final bind mounts: $ALL_BINDS"
+
 singularity exec \
-  --bind "$WORKDIR:$WORKDIR${BIND_EXTRA:+,$BIND_EXTRA}" \
+  --bind "$ALL_BINDS" \
   --pwd "$WORKDIR" \
   "$IMG" \
   bash -lc "
