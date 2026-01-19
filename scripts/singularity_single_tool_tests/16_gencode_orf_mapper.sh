@@ -9,7 +9,7 @@ IMG_URL="https://depot.galaxyproject.org/singularity/mulled-v2-8849acf39a43cdd6c
 usage() {
   cat <<'EOF'
 Usage:
-  16_gencode_orf_mapper.sh --project ID --fasta merged.fa --bed merged.bed --ensembl-dir DIR [--outdir DIR]
+  16_gencode_orf_mapper.sh --project ID --fasta merged.fa --bed merged.bed --ensembl-dir DIR [OPTIONS]
 
 Required:
   --project       project/study ID (output prefix)
@@ -20,6 +20,8 @@ Required:
 
 Options:
   --outdir               output directory (default: ./out_gencode_orf_mapper)
+  --image                path to gencode-orf-mapper Singularity image (.sif file)
+                         if not specified, will auto-pull to ./containers/
   --min-length           minimum ORF length for mapping (default: 16)
   --collapse-threshold   similarity threshold for ORF merging (default: 0.9)
   --collapse-method      method for ORF deduplication: longest_string or psite_overlap (default: longest_string)
@@ -36,6 +38,16 @@ Output:
   ${PROJECT}.altmapped     - Alternative mappings
   ${PROJECT}.unmapped      - Unmapped ORFs
 
+Examples:
+  # Use pre-built image (recommended for HPC)
+  16_gencode_orf_mapper.sh --project PROJ1 --fasta merged.fa --bed merged.bed \
+    --ensembl-dir /path/to/Ens110_GRCh38 \
+    --image /path/to/containers/gencode_orf_mapper.sif
+
+  # Auto-download image (first run only)
+  16_gencode_orf_mapper.sh --project PROJ1 --fasta merged.fa --bed merged.bed \
+    --ensembl-dir /path/to/Ens110_GRCh38
+
 Note:
   This script expects the gencode-riboseqORFs repository to be available.
   It will look for ORF_mapper_to_GENCODE_v1.1.py in the container or local path.
@@ -47,6 +59,7 @@ FASTA=""
 BED=""
 ENSEMBL_DIR=""
 OUTDIR="./out_gencode_orf_mapper"
+IMAGE=""
 MIN_LENGTH=16
 COLLAPSE_THRESHOLD=0.9
 COLLAPSE_METHOD="longest_string"
@@ -59,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --bed) BED="$2"; shift 2;;
     --ensembl-dir) ENSEMBL_DIR="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
+    --image) IMAGE="$2"; shift 2;;
     --min-length) MIN_LENGTH="$2"; shift 2;;
     --collapse-threshold) COLLAPSE_THRESHOLD="$2"; shift 2;;
     --collapse-method) COLLAPSE_METHOD="$2"; shift 2;;
@@ -147,12 +161,31 @@ pull_img() {
   base="${base//:/_}"
   local sif="$(pwd)/containers/${base}.sif"
   if [[ ! -f "$sif" ]]; then
+    echo "[INFO] Image not found at $sif, downloading..."
+    mkdir -p "$(dirname "$sif")"
     singularity pull --disable-cache --force "$sif" "$url"
   fi
   echo "$sif"
 }
 
-IMG="$(pull_img "$IMG_URL")"
+# Determine which image to use
+if [[ -n "$IMAGE" ]]; then
+  # User specified image path
+  if [[ ! -f "$IMAGE" ]]; then
+    echo "[ERROR] Specified image not found: $IMAGE" >&2
+    exit 2
+  fi
+  IMG="$(abspath "$IMAGE")"
+  echo "[INFO] Using user-specified image: $IMG"
+else
+  # Auto-pull image
+  echo "[INFO] No --image specified, will auto-pull if needed"
+  IMG="$(pull_img "$IMG_URL")"
+  echo "[INFO] Using image: $IMG"
+fi
+
+# Bind the image directory
+add_bind "$(dirname "$IMG")"
 
 echo "[INFO] Running GENCODE ORF mapper..."
 echo "[INFO] Project: $PROJECT"
