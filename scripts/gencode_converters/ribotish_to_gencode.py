@@ -31,15 +31,40 @@ def parse_ribotish_predict(predict_file, min_length=16):
     with open(predict_file, 'r') as f:
         header = f.readline().strip().split('\t')
 
-        # Find column indices
+        # Find column indices (support different Ribo-TISH versions)
         try:
             genomepos_idx = header.index('GenomePos')
             tid_idx = header.index('Tid')
-            tistype_idx = header.index('TisType')
-            tisgroup_idx = header.index('TisGroup')
-            tislen_idx = header.index('TisLen')
+
+            # Support both TisType and TISType
+            if 'TisType' in header:
+                tistype_idx = header.index('TisType')
+            elif 'TISType' in header:
+                tistype_idx = header.index('TISType')
+            else:
+                raise ValueError("'TisType' or 'TISType'")
+
+            # Support both TisGroup and TISGroup
+            if 'TisGroup' in header:
+                tisgroup_idx = header.index('TisGroup')
+            elif 'TISGroup' in header:
+                tisgroup_idx = header.index('TISGroup')
+            else:
+                raise ValueError("'TisGroup' or 'TISGroup'")
+
+            # Support both TisLen and AALen
+            if 'TisLen' in header:
+                tislen_idx = header.index('TisLen')
+                length_in_nt = True  # TisLen is in nucleotides
+            elif 'AALen' in header:
+                tislen_idx = header.index('AALen')
+                length_in_nt = False  # AALen is already in amino acids
+            else:
+                raise ValueError("'TisLen' or 'AALen'")
+
         except ValueError as e:
             print(f"Error: Required column not found in predict file: {e}", file=sys.stderr)
+            print(f"Available columns: {', '.join(header)}", file=sys.stderr)
             sys.exit(1)
 
         for line in f:
@@ -54,7 +79,17 @@ def parse_ribotish_predict(predict_file, min_length=16):
             tid = parts[tid_idx]
             tis_type = parts[tistype_idx]
             tis_group = parts[tisgroup_idx]
-            tis_len = int(parts[tislen_idx])
+            tis_len_raw = parts[tislen_idx]
+
+            # Handle 'None' or empty values
+            if tis_len_raw in ['None', '', 'NA', 'N/A']:
+                continue
+
+            try:
+                tis_len = int(tis_len_raw)
+            except ValueError:
+                print(f"Warning: Invalid length value '{tis_len_raw}' at {genome_pos}", file=sys.stderr)
+                continue
 
             # Parse genome position: chr:start-end:strand
             match = re.match(r'(.+):(\d+)-(\d+):([+-])', genome_pos)
@@ -66,8 +101,13 @@ def parse_ribotish_predict(predict_file, min_length=16):
             start = int(start)
             end = int(end)
 
-            # Calculate ORF length in amino acids (without stop codon)
-            orf_length_aa = tis_len // 3
+            # Calculate ORF length in amino acids
+            if length_in_nt:
+                # TisLen is in nucleotides, convert to amino acids
+                orf_length_aa = tis_len // 3
+            else:
+                # AALen is already in amino acids
+                orf_length_aa = tis_len
 
             # Filter by minimum length
             if orf_length_aa < min_length:
