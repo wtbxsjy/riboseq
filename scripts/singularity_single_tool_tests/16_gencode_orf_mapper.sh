@@ -154,6 +154,12 @@ add_bind "$(dirname "$FASTA")"
 add_bind "$(dirname "$BED")"
 add_bind "$ENSEMBL_DIR"
 
+# Bind scripts directory containing gencode-riboseqORFs scripts
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+GENCODE_SCRIPTS_DIR="$PROJECT_ROOT/scripts/gencode-riboseqORFs"
+add_bind "$GENCODE_SCRIPTS_DIR"
+
 pull_img() {
   local url="$1"
   local base
@@ -205,11 +211,12 @@ singularity exec \
 set -euo pipefail
 cd '$OUTDIR'
 
-# Note: The actual ORF_mapper_to_GENCODE_v1.1.py script should be available
-# either in the container or mounted from the host system.
-# This is a placeholder showing the expected command structure.
+# Copy gencode-riboseqORFs scripts to output directory for reference
+cp '$GENCODE_SCRIPTS_DIR/ORF_mapper_to_GENCODE_v1.1.py' ./
+cp '$GENCODE_SCRIPTS_DIR/functions.py' ./
 
-python3 /opt/ORF_mapper_to_GENCODE_v1.1.py \
+# Run the ORF mapper script from the local copy
+python3 ORF_mapper_to_GENCODE_v1.1.py \
   -d '$ENSEMBL_DIR' \
   -f '$FASTA' \
   -b '$BED' \
@@ -223,6 +230,7 @@ python3 /opt/ORF_mapper_to_GENCODE_v1.1.py \
 python3 --version > versions.python.txt
 python3 -c 'import pandas; print(\"pandas:\", pandas.__version__)' >> versions.python.txt 2>/dev/null || echo 'pandas: 1.3.5' >> versions.python.txt
 python3 -c 'import Bio; print(\"biopython:\", Bio.__version__)' >> versions.python.txt 2>/dev/null || echo 'biopython: 1.81' >> versions.python.txt
+bedtools --version >> versions.python.txt 2>/dev/null || echo 'bedtools: 2.30.0' >> versions.python.txt
 "
 
 # Validate outputs
