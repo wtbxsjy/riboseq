@@ -1,0 +1,48 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+%post
+    # Update package lists
+    apt-get update
+
+    # Install bedtools and other required tools
+    apt-get install -y \
+        bedtools \
+        wget \
+        curl \
+        git \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install Python packages
+    pip3 install --no-cache-dir \
+        biopython==1.81 \
+        pandas \
+        numpy
+
+    # Verify installations
+    python3 --version
+    bedtools --version
+    python3 -c "import Bio; print('Biopython version:', Bio.__version__)"
+
+%environment
+    export LC_ALL=C
+    export PATH=/usr/local/bin:/usr/bin:$PATH
+
+%runscript
+    python3 "$@"
+
+%labels
+    Author nf-core/riboseq
+    Version 1.1
+    Description Python 3.12 with Biopython 1.81 and bedtools 2.30
+
+%help
+    This container provides:
+    - Python 3.12
+    - Biopython 1.81
+    - bedtools 2.30
+    - pandas, numpy
+
+    Usage:
+        singularity exec biopython_1.81.sif python3 script.py
+        singularity exec biopython_1.81.sif bedtools --version
