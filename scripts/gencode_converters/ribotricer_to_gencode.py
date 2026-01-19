@@ -19,10 +19,14 @@ def parse_ribotricer_tsv(tsv_file, min_length=16, min_phase_score=0.5):
     """
     Parse Ribotricer translating_ORFs.tsv output
 
-    Expected columns (18 total):
+    Expected columns (varies by version):
     ORF_ID, ORF_type, status, phase_score, read_count, length, valid_codons,
     valid_codons_ratio, read_density, transcript_id, transcript_type, gene_id,
     gene_name, gene_type, chrom, strand, start_codon, profile
+
+    Note: 'start_codon' can be either:
+    - Genomic coordinate (integer) in older versions
+    - Codon sequence (e.g., 'ATG') in newer versions
     """
     orfs = []
 
@@ -35,11 +39,15 @@ def parse_ribotricer_tsv(tsv_file, min_length=16, min_phase_score=0.5):
 
             # Required columns
             required = ['ORF_ID', 'ORF_type', 'length', 'transcript_id',
-                       'gene_id', 'gene_name', 'chrom', 'strand', 'start_codon']
+                       'gene_id', 'gene_name', 'chrom', 'strand']
             for col in required:
                 if col not in col_map:
                     print(f"Error: Required column '{col}' not found in TSV", file=sys.stderr)
+                    print(f"Available columns: {', '.join(header)}", file=sys.stderr)
                     sys.exit(1)
+
+            # 'start_codon' is optional - format varies by version
+            has_start_codon = 'start_codon' in col_map
 
         except Exception as e:
             print(f"Error parsing header: {e}", file=sys.stderr)
@@ -65,7 +73,44 @@ def parse_ribotricer_tsv(tsv_file, min_length=16, min_phase_score=0.5):
                 gene_name = parts[col_map['gene_name']]
                 chrom = parts[col_map['chrom']]
                 strand = parts[col_map['strand']]
-                start_codon = int(parts[col_map['start_codon']])
+
+                # Parse start_codon column (format varies by version)
+                start_codon_value = None
+                if has_start_codon:
+                    start_codon_raw = parts[col_map['start_codon']]
+                    # Try to parse as integer (genomic position)
+                    try:
+                        start_codon_value = int(start_codon_raw)
+                    except ValueError:
+                        # It's a codon sequence (e.g., 'ATG'), need to parse from ORF_ID
+                        start_codon_value = None
+
+                # If start_codon is not a position, extract from ORF_ID
+                # ORF_ID format: TRANSCRIPT_ID_rank_start_stop or similar
+                if start_codon_value is None:
+                    # Try to extract coordinates from ORF_ID
+                    # Common formats:
+                    # - "ENST00000123456_1_100_200"
+                    # - "ENST00000123456:1-100"
+                    orf_id_match = re.search(r'_(\d+)_(\d+)$', orf_id)
+                    if not orf_id_match:
+                        orf_id_match = re.search(r':(\d+)-(\d+)$', orf_id)
+
+                    if orf_id_match:
+                        genomic_start = int(orf_id_match.group(1))
+                        genomic_end = int(orf_id_match.group(2))
+                    else:
+                        print(f"Warning: Cannot extract coordinates from ORF_ID '{orf_id}', skipping",
+                              file=sys.stderr)
+                        continue
+                else:
+                    # Use start_codon position to calculate coordinates
+                    if strand == '+':
+                        genomic_start = start_codon_value
+                        genomic_end = start_codon_value + length_nt
+                    else:  # strand == '-'
+                        genomic_end = start_codon_value
+                        genomic_start = start_codon_value - length_nt
 
                 # Optional columns with defaults
                 phase_score = float(parts[col_map['phase_score']]) if 'phase_score' in col_map else 1.0
@@ -81,16 +126,6 @@ def parse_ribotricer_tsv(tsv_file, min_length=16, min_phase_score=0.5):
                 # Filter by phase score (quality metric)
                 if phase_score < min_phase_score:
                     continue
-
-                # Calculate genomic end position
-                # start_codon is the genomic position of start codon
-                # length is in nucleotides
-                if strand == '+':
-                    genomic_start = start_codon
-                    genomic_end = start_codon + length_nt
-                else:  # strand == '-'
-                    genomic_end = start_codon
-                    genomic_start = start_codon - length_nt
 
                 orfs.append({
                     'orf_id': orf_id,
