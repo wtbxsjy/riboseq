@@ -85,23 +85,28 @@ echo ""
 echo "Output directory: $OUTDIR"
 echo ""
 
-# Image URL for biopython (used by both scripts 14 and 15)
-IMG_URL="https://depot.galaxyproject.org/singularity/biopython:1.81"
-IMG_NAME="biopython_1.81.sif"
-IMG_PATH="$OUTDIR/$IMG_NAME"
+# Image 1: Biopython for scripts 14 and 15
+IMG_URL_BIOPYTHON="https://depot.galaxyproject.org/singularity/biopython:1.81"
+IMG_NAME_BIOPYTHON="biopython_1.81.sif"
+IMG_PATH_BIOPYTHON="$OUTDIR/$IMG_NAME_BIOPYTHON"
 
+# Image 2: Mulled container for script 16 (includes biopython, pandas, bedtools, gffread)
+IMG_URL_GENCODE="https://depot.galaxyproject.org/singularity/mulled-v2-8849acf39a43cdd6c839a369a74c0adc823e2f91:ab110436faf952a33575c64dd74615a84011450b-0"
+IMG_NAME_GENCODE="gencode_orf_mapper_mulled.sif"
+IMG_PATH_GENCODE="$OUTDIR/$IMG_NAME_GENCODE"
+
+# Build Biopython image
 echo "------------------------------------------------------------------------"
-echo "Image: Biopython 1.81"
+echo "Image 1: Biopython 1.81"
 echo "------------------------------------------------------------------------"
-echo "URL: $IMG_URL"
-echo "Output: $IMG_PATH"
+echo "URL: $IMG_URL_BIOPYTHON"
+echo "Output: $IMG_PATH_BIOPYTHON"
 echo "Used by: 14_ribotish_to_gencode.sh, 15_ribotricer_to_gencode.sh"
 echo ""
 
-# Check if image already exists
-if [[ -f "$IMG_PATH" ]] && [[ "$FORCE" == "false" ]]; then
-  echo "[INFO] Image already exists: $IMG_PATH"
-  echo "[INFO] File size: $(du -h "$IMG_PATH" | cut -f1)"
+if [[ -f "$IMG_PATH_BIOPYTHON" ]] && [[ "$FORCE" == "false" ]]; then
+  echo "[INFO] Image already exists: $IMG_PATH_BIOPYTHON"
+  echo "[INFO] File size: $(du -h "$IMG_PATH_BIOPYTHON" | cut -f1)"
   echo "[INFO] Use --force to rebuild"
   echo ""
 else
@@ -109,34 +114,92 @@ else
   echo "[INFO] This may take several minutes depending on network speed..."
   echo ""
 
-  # Pull the image
-  singularity pull --force --disable-cache "$IMG_PATH" "$IMG_URL"
+  singularity pull --force --disable-cache "$IMG_PATH_BIOPYTHON" "$IMG_URL_BIOPYTHON"
 
   if [[ $? -eq 0 ]]; then
     echo ""
     echo "[OK] Image built successfully!"
-    echo "     Path: $IMG_PATH"
-    echo "     Size: $(du -h "$IMG_PATH" | cut -f1)"
+    echo "     Path: $IMG_PATH_BIOPYTHON"
+    echo "     Size: $(du -h "$IMG_PATH_BIOPYTHON" | cut -f1)"
     echo ""
   else
     echo ""
-    echo "[ERROR] Failed to build image from $IMG_URL"
+    echo "[ERROR] Failed to build image from $IMG_URL_BIOPYTHON"
+    exit 1
+  fi
+fi
+
+# Build GENCODE ORF mapper image
+echo "------------------------------------------------------------------------"
+echo "Image 2: GENCODE ORF Mapper (mulled container)"
+echo "------------------------------------------------------------------------"
+echo "URL: $IMG_URL_GENCODE"
+echo "Output: $IMG_PATH_GENCODE"
+echo "Used by: 16_gencode_orf_mapper.sh"
+echo "Contains: biopython, pandas, bedtools, gffread"
+echo ""
+
+if [[ -f "$IMG_PATH_GENCODE" ]] && [[ "$FORCE" == "false" ]]; then
+  echo "[INFO] Image already exists: $IMG_PATH_GENCODE"
+  echo "[INFO] File size: $(du -h "$IMG_PATH_GENCODE" | cut -f1)"
+  echo "[INFO] Use --force to rebuild"
+  echo ""
+else
+  echo "[INFO] Pulling image from Galaxy Depot..."
+  echo "[INFO] This may take several minutes depending on network speed..."
+  echo ""
+
+  singularity pull --force --disable-cache "$IMG_PATH_GENCODE" "$IMG_URL_GENCODE"
+
+  if [[ $? -eq 0 ]]; then
+    echo ""
+    echo "[OK] Image built successfully!"
+    echo "     Path: $IMG_PATH_GENCODE"
+    echo "     Size: $(du -h "$IMG_PATH_GENCODE" | cut -f1)"
+    echo ""
+  else
+    echo ""
+    echo "[ERROR] Failed to build image from $IMG_URL_GENCODE"
     exit 1
   fi
 fi
 
 # Verify image
 echo "------------------------------------------------------------------------"
-echo "Verifying image..."
+echo "Verifying images..."
 echo "------------------------------------------------------------------------"
 
-if ! singularity exec "$IMG_PATH" python3 --version; then
+echo ""
+echo "=== Image 1: Biopython ==="
+if ! singularity exec "$IMG_PATH_BIOPYTHON" python3 --version; then
   echo "[ERROR] Image verification failed: cannot run python3"
   exit 1
 fi
 
-if ! singularity exec "$IMG_PATH" python3 -c "import Bio; print('Biopython version:', Bio.__version__)"; then
+if ! singularity exec "$IMG_PATH_BIOPYTHON" python3 -c "import Bio; print('Biopython version:', Bio.__version__)"; then
   echo "[ERROR] Image verification failed: cannot import Biopython"
+  exit 1
+fi
+
+echo ""
+echo "=== Image 2: GENCODE ORF Mapper ==="
+if ! singularity exec "$IMG_PATH_GENCODE" python3 --version; then
+  echo "[ERROR] Image verification failed: cannot run python3"
+  exit 1
+fi
+
+if ! singularity exec "$IMG_PATH_GENCODE" python3 -c "import Bio; print('Biopython version:', Bio.__version__)"; then
+  echo "[ERROR] Image verification failed: cannot import Biopython"
+  exit 1
+fi
+
+if ! singularity exec "$IMG_PATH_GENCODE" python3 -c "import pandas; print('pandas version:', pandas.__version__)"; then
+  echo "[ERROR] Image verification failed: cannot import pandas"
+  exit 1
+fi
+
+if ! singularity exec "$IMG_PATH_GENCODE" bedtools --version; then
+  echo "[ERROR] Image verification failed: cannot run bedtools"
   exit 1
 fi
 
@@ -162,10 +225,19 @@ echo "   # On server:"
 echo "   tar -xzf gencode_converter_images.tar.gz -C /path/to/riboseq/containers/"
 echo ""
 echo "3. Verify on server:"
-echo "   singularity exec $IMG_PATH python3 --version"
+echo "   singularity exec biopython_1.81.sif python3 --version"
+echo "   singularity exec gencode_orf_mapper_mulled.sif python3 -c 'import pandas'"
 echo ""
 echo "4. Run the converter scripts:"
-echo "   bash 14_ribotish_to_gencode.sh --sample test --predict data.txt --fasta genome.fa"
-echo "   bash 15_ribotricer_to_gencode.sh --sample test --tsv orfs.tsv --fasta genome.fa"
+echo "   # Scripts 14 and 15 use biopython_1.81.sif"
+echo "   bash 14_ribotish_to_gencode.sh --sample test --predict data.txt --fasta genome.fa \\"
+echo "     --image /path/to/biopython_1.81.sif"
+echo ""
+echo "   bash 15_ribotricer_to_gencode.sh --sample test --tsv orfs.tsv --fasta genome.fa \\"
+echo "     --image /path/to/biopython_1.81.sif"
+echo ""
+echo "   # Script 16 uses gencode_orf_mapper_mulled.sif"
+echo "   bash 16_gencode_orf_mapper.sh --project test --fasta merged.fa --bed merged.bed \\"
+echo "     --ensembl-dir /path/to/ensembl --image /path/to/gencode_orf_mapper_mulled.sif"
 echo ""
 echo "========================================================================"
