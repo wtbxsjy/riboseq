@@ -505,7 +505,10 @@ def write_output(orfs_fa_file,orfs_bed_file,candidates,exc,variants,variants_nam
 	done = []
 	riboseq_orfs = {}
 	codes = {}
-	for line in open("list_riboseqs/list_riboseq_orfs.txt"):
+	# Modified to handle missing file (single-sample mode)
+	riboseq_list_file = "list_riboseqs/list_riboseq_orfs.txt"
+	if os.path.exists(riboseq_list_file):
+		for line in open(riboseq_list_file):
 		if "\tCDS\t" in line or "\tNMD\t" in line:
 			continue
 		if line.startswith("#"):
