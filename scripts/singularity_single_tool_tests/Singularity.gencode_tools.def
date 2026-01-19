@@ -1,0 +1,42 @@
+Bootstrap: docker
+From: python:3.9-slim
+
+%post
+    # Update and install dependencies
+    apt-get update && apt-get install -y \
+        bedtools \
+        wget \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install Python packages
+    pip3 install --no-cache-dir \
+        biopython==1.81 \
+        pandas \
+        numpy
+
+    # Install gffread
+    cd /tmp
+    wget http://ccb.jhu.edu/software/stringtie/dl/gffread-0.12.7.Linux_x86_64.tar.gz
+    tar -xzf gffread-0.12.7.Linux_x86_64.tar.gz
+    mv gffread-0.12.7.Linux_x86_64/gffread /usr/local/bin/
+    chmod +x /usr/local/bin/gffread
+    rm -rf /tmp/gffread*
+
+%environment
+    export LC_ALL=C
+    export PATH=/usr/local/bin:$PATH
+
+%runscript
+    python3 "$@"
+
+%labels
+    Author nf-core/riboseq
+    Version 1.0
+    Description GENCODE ORF Mapper dependencies
+
+%help
+    This container provides Python 3.9 with Biopython, pandas, bedtools, and gffread
+    for running gencode-riboseqORFs scripts.
+
+    Usage:
+        singularity exec gencode_tools.sif python3 script.py
