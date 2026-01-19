@@ -106,11 +106,25 @@ def main():
 		check_file(fgenomic)	
 
 	#Annotation files
-	transcriptome_fa_file = folder + "/Homo_sapiens.GRCh38.trans.fa" #include both mRNA and ncRNA, only transcript ID in header, e.g. cat Ens103/Homo_sapiens.GRCh38.cdna.all.fa Ens103/Homo_sapiens.GRCh38.ncrna.fa | cut -d"." -f1,1 > prueba; mv prueba Ens103/Homo_sapiens.GRCh38.trans.fa
-	transcriptome_gtf_file =  folder + "/Homo_sapiens.GRCh38.sorted.gtf" #sort -k1,1 -k4,4n -k5,5n Ens103/Homo_sapiens.GRCh38.gtf > Ens103/Homo_sapiens.GRCh38.sorted.gtf
-	psites_bed_file = folder + "/Homo_sapiens.GRCh38.sorted.gtf_psites.bed" #Run calculate_frame_bed.py on the sorted gtf
-	proteome_fa_file = folder + "/Homo_sapiens.GRCh38.pep.all.fa" #include both mRNA and ncRNA, only protein ID in header. e.g. cut -d"." -f1,1 Ens103/Homo_sapiens.GRCh38.pep.all.fa > prueba; mv prueba Ens103/Homo_sapiens.GRCh38.pep.all.fa
-	t_support = folder + "/ENST_support.txt" #Biomart: APPRIS and TSL annotation	
+	# Modified to support standardized filenames for any species
+	# Try standardized names first (created by prepare_ensembl_*_annotation.sh scripts)
+	transcriptome_fa_file = folder + "/TRANSCRIPTOME_FASTA"
+	transcriptome_gtf_file = folder + "/SORTED_TRANSCRIPTOME_GTF"
+	psites_bed_file = folder + "/PSITES_BED"
+	proteome_fa_file = folder + "/PROTEOME_FASTA"
+	t_support = folder + "/TRANSCRIPT_SUPPORT"
+
+	# Fall back to hardcoded human filenames for backward compatibility
+	if not os.path.exists(transcriptome_fa_file):
+		transcriptome_fa_file = folder + "/Homo_sapiens.GRCh38.trans.fa"
+	if not os.path.exists(transcriptome_gtf_file):
+		transcriptome_gtf_file = folder + "/Homo_sapiens.GRCh38.sorted.gtf"
+	if not os.path.exists(psites_bed_file):
+		psites_bed_file = folder + "/Homo_sapiens.GRCh38.sorted.gtf_psites.bed"
+	if not os.path.exists(proteome_fa_file):
+		proteome_fa_file = folder + "/Homo_sapiens.GRCh38.pep.all.fa"
+	if not os.path.exists(t_support):
+		t_support = folder + "/ENST_support.txt"	
 
 	check_file(transcriptome_fa_file)
 	check_file(transcriptome_gtf_file)
