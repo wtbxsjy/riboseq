@@ -9,7 +9,7 @@ IMG_URL="https://depot.galaxyproject.org/singularity/biopython:1.81"
 usage() {
   cat <<'EOF'
 Usage:
-  14_ribotish_to_gencode.sh --sample ID --predict ribotish_pred.txt --fasta genome.fa [--outdir DIR]
+  14_ribotish_to_gencode.sh --sample ID --predict ribotish_pred.txt --fasta genome.fa [OPTIONS]
 
 Required:
   --sample   sample ID (used as study_id in output)
@@ -18,6 +18,8 @@ Required:
 
 Options:
   --outdir      output directory (default: ./out_ribotish_to_gencode)
+  --image       path to biopython Singularity image (.sif file)
+                if not specified, will auto-pull to ./containers/biopython_1.81.sif
   --min-length  minimum ORF length in amino acids (default: 16)
   --args        extra args passed to ribotish_to_gencode.py (quoted string)
 
@@ -27,6 +29,14 @@ Env:
 Output:
   ${SAMPLE}.gencode.fa   - FASTA in gencode-riboseqORFs format
   ${SAMPLE}.gencode.bed  - BED (1-based) in gencode-riboseqORFs format
+
+Examples:
+  # Use pre-built image (recommended for HPC)
+  14_ribotish_to_gencode.sh --sample S1 --predict pred.txt --fasta genome.fa \
+    --image /path/to/containers/biopython_1.81.sif
+
+  # Auto-download image (first run only)
+  14_ribotish_to_gencode.sh --sample S1 --predict pred.txt --fasta genome.fa
 EOF
 }
 
@@ -34,6 +44,7 @@ SAMPLE=""
 PREDICT=""
 FASTA=""
 OUTDIR="./out_ribotish_to_gencode"
+IMAGE=""
 MIN_LENGTH=16
 EXTRA_ARGS=""
 
@@ -43,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --predict) PREDICT="$2"; shift 2;;
     --fasta) FASTA="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
+    --image) IMAGE="$2"; shift 2;;
     --min-length) MIN_LENGTH="$2"; shift 2;;
     --args) EXTRA_ARGS="$2"; shift 2;;
     -h|--help) usage; exit 0;;
@@ -111,12 +123,31 @@ pull_img() {
   base="${base//:/_}"
   local sif="$(pwd)/containers/${base}.sif"
   if [[ ! -f "$sif" ]]; then
+    echo "[INFO] Image not found at $sif, downloading..."
+    mkdir -p "$(dirname "$sif")"
     singularity pull --disable-cache --force "$sif" "$url"
   fi
   echo "$sif"
 }
 
-IMG="$(pull_img "$IMG_URL")"
+# Determine which image to use
+if [[ -n "$IMAGE" ]]; then
+  # User specified image path
+  if [[ ! -f "$IMAGE" ]]; then
+    echo "[ERROR] Specified image not found: $IMAGE" >&2
+    exit 2
+  fi
+  IMG="$(abspath "$IMAGE")"
+  echo "[INFO] Using user-specified image: $IMG"
+else
+  # Auto-pull image
+  echo "[INFO] No --image specified, will auto-pull if needed"
+  IMG="$(pull_img "$IMG_URL")"
+  echo "[INFO] Using image: $IMG"
+fi
+
+# Bind the image directory
+add_bind "$(dirname "$IMG")"
 
 echo "[INFO] Converting Ribo-TISH predictions to GENCODE format..."
 echo "[INFO] Sample: $SAMPLE"
