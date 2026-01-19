@@ -101,11 +101,11 @@ add_bind "$OUTDIR"
 add_bind "$(dirname "$TSV")"
 add_bind "$(dirname "$FASTA")"
 
-# Bind bin directory containing the script
+# Bind scripts directory containing the converter script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
-BIN_DIR="$PROJECT_ROOT/bin"
-add_bind "$BIN_DIR"
+CONVERTER_DIR="$PROJECT_ROOT/scripts/gencode_converters"
+add_bind "$CONVERTER_DIR"
 
 pull_img() {
   local url="$1"
@@ -137,7 +137,7 @@ set -euo pipefail
 cd '$OUTDIR'
 
 # Copy script to output directory for reference
-cp '$BIN_DIR/ribotricer_to_gencode.py' ./
+cp '$CONVERTER_DIR/ribotricer_to_gencode.py' ./
 
 python3 ribotricer_to_gencode.py \
   --tsv '$TSV' \
