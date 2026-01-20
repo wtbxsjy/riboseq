@@ -1,0 +1,14 @@
+name: ribotish_to_gencode
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.9
+  - biopython=1.81
+  - pyfaidx
+  - bedtools
+  - samtools
+  - pip
+  - pip:
+    - pyfaidx  # Ensure latest version via pip
