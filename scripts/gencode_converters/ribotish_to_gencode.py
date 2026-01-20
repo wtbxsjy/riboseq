@@ -161,11 +161,65 @@ def extract_sequences_from_genome(orfs, fasta_file):
 
     except ImportError:
         # Fallback: use bedtools getfasta
-        print("Warning: pyfaidx not available, using placeholder sequences", file=sys.stderr)
+        print("Warning: pyfaidx not available, using bedtools getfasta", file=sys.stderr)
 
-        for orf in orfs:
-            # Generate placeholder sequence
-            orf['sequence'] = 'M' * orf['length_aa'] + '*'
+        import tempfile
+        import os
+
+        # Create temporary BED file for bedtools
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.bed', delete=False) as tmp_bed:
+            bed_file = tmp_bed.name
+            for i, orf in enumerate(orfs):
+                # BED format: 0-based, half-open
+                bed_start = orf['start'] - 1  # Convert 1-based to 0-based
+                bed_end = orf['end']
+                tmp_bed.write(f"{orf['chrom']}\t{bed_start}\t{bed_end}\torf_{i}\t0\t{orf['strand']}\n")
+
+        # Run bedtools getfasta
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.fa', delete=False) as tmp_fa:
+            fa_file = tmp_fa.name
+
+        try:
+            cmd = ['bedtools', 'getfasta', '-fi', fasta_file, '-bed', bed_file, '-fo', fa_file, '-s', '-name']
+            subprocess.run(cmd, check=True, capture_output=True)
+
+            # Parse extracted sequences
+            seq_dict = {}
+            for record in SeqIO.parse(fa_file, 'fasta'):
+                orf_id = record.id.split('(')[0]  # Remove strand info
+                seq_dict[orf_id] = str(record.seq)
+
+            # Translate sequences
+            for i, orf in enumerate(orfs):
+                orf_id = f"orf_{i}"
+                if orf_id in seq_dict:
+                    seq_obj = Seq(seq_dict[orf_id])
+                    try:
+                        protein = str(seq_obj.translate())
+                        if not protein.endswith('*'):
+                            protein += '*'
+                        orf['sequence'] = protein
+                    except Exception as e:
+                        print(f"Warning: Could not translate ORF at {orf['genome_pos']}: {e}", file=sys.stderr)
+                        orf['sequence'] = 'M' * orf['length_aa'] + '*'
+                else:
+                    print(f"Warning: No sequence extracted for {orf['genome_pos']}", file=sys.stderr)
+                    orf['sequence'] = 'M' * orf['length_aa'] + '*'
+
+            # Cleanup
+            os.unlink(bed_file)
+            os.unlink(fa_file)
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error running bedtools getfasta: {e.stderr.decode()}", file=sys.stderr)
+            print("Falling back to placeholder sequences", file=sys.stderr)
+            for orf in orfs:
+                orf['sequence'] = 'M' * orf['length_aa'] + '*'
+        except Exception as e:
+            print(f"Error during sequence extraction: {e}", file=sys.stderr)
+            print("Falling back to placeholder sequences", file=sys.stderr)
+            for orf in orfs:
+                orf['sequence'] = 'M' * orf['length_aa'] + '*'
 
         return orfs
 
