@@ -181,21 +181,29 @@ def write_gencode_format(orfs, study_id, output_prefix):
 
     with open(fasta_output, 'w') as fa, open(bed_output, 'w') as bed:
         for orf in orfs:
-            # Create ORF name
+            # Create ORF name for FASTA (detailed format with coordinates)
             # Format: GENE_POSITION_LENGTHaa
             gene_name = orf['tid'].split('.')[0]  # Remove version
-            orf_name = f"{gene_name}_{orf['start']}_{orf['length_aa']}aa"
+            orf_name_fasta = f"{gene_name}_{orf['start']}_{orf['length_aa']}aa"
 
-            # Write FASTA
-            fa.write(f">{orf_name}--{study_id}\n")
+            # Create ORF name for BED (simple transcript ID only, matching GENCODE format)
+            # Use the original transcript ID without version for consistency with reference
+            orf_name_bed = orf['tid'].split('.')[0]  # Remove version, keep only base transcript ID
+
+            # Write FASTA (use detailed name)
+            fa.write(f">{orf_name_fasta}--{study_id}\n")
             fa.write(f"{orf['sequence']}\n")
 
-            # Write BED (convert to 1-based)
-            # Note: BED is 0-based half-open, we need 1-based closed
+            # Write BED in GENCODE-compatible format
+            # Format: chr start end transcript_id . strand
+            # Note: Use '.' for score field (column 5) to match reference format
             bed_start = orf['start']  # Already 1-based from Ribo-TISH
             bed_end = orf['end']      # Already 1-based from Ribo-TISH
 
-            bed.write(f"{orf['chrom']}\t{bed_start}\t{bed_end}\t{orf_name}\t{study_id}\t{orf['strand']}\n")
+            # Normalize chromosome name (remove 'chr' prefix if present to match reference)
+            chrom_normalized = orf['chrom'].replace('chr', '')
+
+            bed.write(f"{chrom_normalized}\t{bed_start}\t{bed_end}\t{orf_name_bed}\t.\t{orf['strand']}\n")
 
     return len(orfs)
 
