@@ -136,6 +136,10 @@ def extract_sequences_from_genome(orfs, fasta_file):
         from pyfaidx import Fasta
         genome = Fasta(fasta_file)
 
+        # Track trimming statistics
+        trimmed_count = 0
+        trim_details = []
+
         for orf in orfs:
             # Extract sequence
             seq = genome[orf['chrom']][orf['start']-1:orf['end']]
@@ -149,8 +153,9 @@ def extract_sequences_from_genome(orfs, fasta_file):
             # Trim sequence to multiple of 3 to avoid partial codon warning
             remainder = len(seq_str) % 3
             if remainder != 0:
+                trim_details.append(f"Trimmed {remainder} nt from {orf['genome_pos']}")
+                trimmed_count += 1
                 seq_str = seq_str[:-remainder]
-                print(f"Info: Trimmed {remainder} nt from ORF at {orf['genome_pos']} to avoid partial codon", file=sys.stderr)
 
             seq_obj = Seq(seq_str)
 
@@ -164,6 +169,15 @@ def extract_sequences_from_genome(orfs, fasta_file):
                 print(f"Warning: Could not translate ORF at {orf['genome_pos']}: {e}", file=sys.stderr)
                 orf['sequence'] = 'M' * orf['length_aa'] + '*'
 
+        # Write detailed trim log to file
+        if trim_details:
+            with open('sequence_trimming.log', 'w') as log:
+                log.write("# ORFs trimmed to avoid partial codon warnings\n")
+                log.write(f"# Total trimmed: {trimmed_count} out of {len(orfs)} ORFs\n\n")
+                for detail in trim_details:
+                    log.write(detail + '\n')
+            print(f"Trimmed {trimmed_count}/{len(orfs)} ORFs to remove partial codons (see sequence_trimming.log)")
+
         return orfs
 
     except ImportError:
@@ -172,6 +186,10 @@ def extract_sequences_from_genome(orfs, fasta_file):
 
         import tempfile
         import os
+
+        # Track trimming statistics
+        trimmed_count = 0
+        trim_details = []
 
         # Create temporary BED file for bedtools
         with tempfile.NamedTemporaryFile(mode='w', suffix='.bed', delete=False) as tmp_bed:
@@ -200,7 +218,16 @@ def extract_sequences_from_genome(orfs, fasta_file):
             for i, orf in enumerate(orfs):
                 orf_id = f"orf_{i}"
                 if orf_id in seq_dict:
-                    seq_obj = Seq(seq_dict[orf_id])
+                    seq_str = seq_dict[orf_id]
+
+                    # Trim sequence to multiple of 3 to avoid partial codon warning
+                    remainder = len(seq_str) % 3
+                    if remainder != 0:
+                        trim_details.append(f"Trimmed {remainder} nt from {orf['genome_pos']}")
+                        trimmed_count += 1
+                        seq_str = seq_str[:-remainder]
+
+                    seq_obj = Seq(seq_str)
                     try:
                         protein = str(seq_obj.translate())
                         if not protein.endswith('*'):
@@ -216,6 +243,15 @@ def extract_sequences_from_genome(orfs, fasta_file):
             # Cleanup
             os.unlink(bed_file)
             os.unlink(fa_file)
+
+            # Write detailed trim log to file
+            if trim_details:
+                with open('sequence_trimming.log', 'w') as log:
+                    log.write("# ORFs trimmed to avoid partial codon warnings (bedtools mode)\n")
+                    log.write(f"# Total trimmed: {trimmed_count} out of {len(orfs)} ORFs\n\n")
+                    for detail in trim_details:
+                        log.write(detail + '\n')
+                print(f"Trimmed {trimmed_count}/{len(orfs)} ORFs to remove partial codons (see sequence_trimming.log)")
 
         except subprocess.CalledProcessError as e:
             print(f"Error running bedtools getfasta: {e.stderr.decode()}", file=sys.stderr)
