@@ -145,6 +145,13 @@ def extract_sequences_from_genome(orfs, fasta_file):
 
             # Translate
             seq_str = str(seq)
+
+            # Trim sequence to multiple of 3 to avoid partial codon warning
+            remainder = len(seq_str) % 3
+            if remainder != 0:
+                seq_str = seq_str[:-remainder]
+                print(f"Info: Trimmed {remainder} nt from ORF at {orf['genome_pos']} to avoid partial codon", file=sys.stderr)
+
             seq_obj = Seq(seq_str)
 
             try:
