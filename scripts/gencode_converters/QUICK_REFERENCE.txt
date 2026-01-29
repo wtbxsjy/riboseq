@@ -1,0 +1,124 @@
+╔════════════════════════════════════════════════════════════════╗
+║          GENCODE Converter - Quick Reference Card              ║
+╚════════════════════════════════════════════════════════════════╝
+
+📦 SCRIPTS
+├─ ribotish_to_gencode.py     ✅ Ribo-TISH → GENCODE
+├─ ribotricer_to_gencode.py   ✅ Ribotricer → GENCODE
+├─ validate_output.py         🔍 Detailed validation
+└─ quick_check.sh            ⚡ Fast diagnostic
+
+═══════════════════════════════════════════════════════════════════
+
+🚀 QUICK START
+
+# 1. Convert
+python3 ribotish_to_gencode.py \
+  --predict ribotish_pred.txt \
+  --fasta genome.fa \
+  --study_id S1 \
+  --output_prefix S1
+
+# 2. Validate  
+bash quick_check.sh --bed S1.gencode.bed --fasta S1.gencode.fa
+
+# 3. Merge (if multiple samples/tools)
+cat *.gencode.fa > all.fa
+cat *.gencode.bed > all.bed
+
+# 4. Run GENCODE mapper
+python3 ORF_mapper_to_GENCODE_v1.1.py \
+  -d Ensembl_dir/ -f all.fa -b all.bed -o project
+
+═══════════════════════════════════════════════════════════════════
+
+📄 OUTPUT FORMAT
+
+FASTA:  >{GENE}_{START}_{LENGTH}aa--{STUDY_ID}
+        MXXXXXXX...XXX*
+
+BED:    chr  start  end  GENE_START_LENaa  STUDY_ID  strand
+        1    100    400  ENST123_100_100aa  S1        +
+
+⚠️  BED uses 1-based coordinates (GENCODE requirement)
+
+═══════════════════════════════════════════════════════════════════
+
+✅ VALIDATION CHECKLIST
+
+□ BED has 6 columns (tab-separated)
+□ ORF names follow GENE_START_LENaa format
+□ No duplicate ORF names in BED
+□ FASTA headers match BED column 4
+□ All sequences end with *
+□ Sequence length = declared length (in header)
+□ BED and FASTA have same number of ORFs
+
+═══════════════════════════════════════════════════════════════════
+
+🔧 COMMON PARAMETERS
+
+--study_id        Sample/study ID (e.g., S1, Experiment1)
+--output_prefix   Output file prefix (creates .gencode.fa/bed)
+--fasta          Genome FASTA (for sequence extraction)
+--min_length     Min ORF length in amino acids (default: 16)
+
+Ribo-TISH specific:
+--predict        Ribo-TISH *_pred.txt file
+
+Ribotricer specific:
+--tsv                  *_translating_ORFs.tsv file
+--min_phase_score      Min phase score (default: 0.5)
+
+═══════════════════════════════════════════════════════════════════
+
+🐛 TROUBLESHOOTING
+
+❌ Sequences are all 'M's
+   → Genome FASTA not found or chr names don't match
+   → Install: pip install pyfaidx
+
+❌ "Duplicate ORF name"
+   → Upstream tool has duplicate predictions
+   → Check input file for repeats
+
+❌ "Length mismatch"
+   → Fixed in v1.1 (automatic adjustment)
+   → Check logs: sequence_trimming.log
+
+❌ BED/FASTA count mismatch
+   → Some ORFs failed translation
+   → Run: python3 validate_output.py --bed x --fasta y
+
+═══════════════════════════════════════════════════════════════════
+
+📚 DOCUMENTATION
+
+Full docs:       scripts/gencode_converters/README.md
+Testing guide:   scripts/gencode_converters/TESTING_GUIDE.md
+Fix notes:       scripts/gencode_converters/FIX_NOTES.md
+
+═══════════════════════════════════════════════════════════════════
+
+🆕 RECENT FIXES (v1.2 - 2026-01-20)
+
+✅ BED now uses unique ORF names (GENE_START_LENaa)
+✅ Automatic sequence length adjustment
+✅ BED column 5 now shows study_id (not '.')
+✅ Added validation tools
+✅ **CRITICAL**: Fixed sequence extraction logic
+   - Now extracts based on ORF length, not genomic coordinates
+   - Handles multiple stop codons correctly
+   - Prevents over-extraction of sequences
+
+═══════════════════════════════════════════════════════════════════
+
+📞 NEED HELP?
+
+1. Check logs: sequence_trimming.log
+2. Run validation: python3 validate_output.py
+3. See examples: scripts/gencode_converters/TESTING_GUIDE.md
+4. Open issue on GitHub
+
+═══════════════════════════════════════════════════════════════════
+Last updated: 2026-01-20 | Version: 1.1

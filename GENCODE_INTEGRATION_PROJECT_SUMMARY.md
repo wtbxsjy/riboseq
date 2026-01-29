@@ -119,8 +119,10 @@ singularity exec gencode-orf-mapper_1.1.0.sif python3 --version
 - 解析 Ribo-TISH predict 输出
 - 提取 ORF 序列（从基因组或使用占位符）
 - 转换为 gencode-riboseqORFs 格式
-- 坐标系统转换（0-based → 1-based）
-- 标准化命名格式
+- 坐标系统转换（已确认：Ribo-TISH 使用 1-based，无需转换）
+- 标准化命名格式：`GENE_START_LENGTHaa`
+- **已修复**: BED 文件使用唯一 ORF 名称而非仅转录本 ID
+- **已修复**: 自动调整序列长度确保 FASTA 和 header 一致
 
 ### 5. 文档更新 📚
 
@@ -197,7 +199,56 @@ nf-core/riboseq/
 
 ---
 
-## 🚧 待完成工作
+## � 最近修复 (2026-01-20)
+
+### 问题 1: BED 文件缺少唯一 ORF 标注
+
+**症状**: 
+- BED 文件第 4 列只显示转录本 ID（如 `ENSMUST00000156816`）
+- 同一转录本上的不同 ORF 无法区分
+- 后续合并和比较时会产生冲突
+
+**修复**:
+- BED 第 4 列现在使用完整 ORF 名称：`GENE_START_LENGTHaa`
+- 第 5 列使用 `study_id` 而非 `.`
+- 与 FASTA header 保持一致
+
+**修复前**:
+```
+1  4846686  4855900  ENSMUST00000156816  .  -
+1  4846686  4846968  ENSMUST00000156816  .  -  # 无法区分
+```
+
+**修复后**:
+```
+1  4846686  4855900  ENSMUST00000156816_4846686_3071aa  S1  -
+1  4846686  4846968  ENSMUST00000156816_4846686_94aa   S1  -  # 可区分
+```
+
+### 问题 2: FASTA 序列长度与声明长度不一致
+
+**症状**:
+- FASTA header 声明 `100aa` 但实际序列只有 98 个氨基酸
+- 由于修剪不完整 codon 但未更新长度标注
+
+**修复**:
+- 序列提取后重新计算实际翻译长度
+- 自动更新 `length_aa` 字段
+- 在日志中警告长度调整
+- 生成 `sequence_trimming.log` 记录所有修改
+
+**验证工具**:
+- 新增 `validate_output.py` 脚本验证输出格式
+- 新增 `TESTING_GUIDE.md` 测试指南
+
+**影响的文件**:
+- ✅ `scripts/gencode_converters/ribotish_to_gencode.py`
+- ✅ `scripts/gencode_converters/validate_output.py` (新增)
+- ✅ `scripts/gencode_converters/TESTING_GUIDE.md` (新增)
+
+---
+
+## �🚧 待完成工作
 
 ### 高优先级 (需要完成才能集成)
 

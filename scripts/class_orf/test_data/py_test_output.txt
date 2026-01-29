@@ -1,0 +1,5 @@
+>>>PYTHON-EXEC-OUTPUT
+Loading gene-level CDS reference file: c:\Users\renzhe\OneDrive - BGI Hong Kong Tech Co., Limited\Polyu\2025s1\RiboSeq\scripts\test_data\test_cds.txt...
+Gene-level CDS data loaded for 3 genes.
+All classifications match between Python and R.
+<<<PYTHON-EXEC-OUTPUT

@@ -136,47 +136,86 @@ def extract_sequences_from_genome(orfs, fasta_file):
         from pyfaidx import Fasta
         genome = Fasta(fasta_file)
 
-        # Track trimming statistics
-        trimmed_count = 0
-        trim_details = []
+        # Track extraction statistics
+        adjusted_count = 0
+        extraction_details = []
 
         for orf in orfs:
-            # Extract sequence
-            seq = genome[orf['chrom']][orf['start']-1:orf['end']]
-
-            if orf['strand'] == '-':
+            # Calculate expected nucleotide length (ORF length * 3 + 3 for stop codon)
+            expected_nt_length = orf['length_aa'] * 3 + 3
+            
+            # Extract sequence from genome
+            # Use expected length instead of genomic coordinates to avoid over-extraction
+            if orf['strand'] == '+':
+                # For positive strand, extract from start
+                seq_end = orf['start'] - 1 + expected_nt_length
+                seq = genome[orf['chrom']][orf['start']-1:seq_end]
+            else:
+                # For negative strand, extract from end backwards
+                seq_start = orf['end'] - expected_nt_length
+                seq = genome[orf['chrom']][seq_start:orf['end']]
                 seq = seq.reverse.complement
 
-            # Translate
             seq_str = str(seq)
+            extracted_length = len(seq_str)
+            
+            # Verify extracted length is reasonable
+            if extracted_length < expected_nt_length - 3:
+                print(f"Warning: Extracted sequence too short at {orf['genome_pos']}: "
+                      f"expected ~{expected_nt_length}nt, got {extracted_length}nt", file=sys.stderr)
+            elif extracted_length > expected_nt_length + 10:
+                print(f"Warning: Extracted sequence too long at {orf['genome_pos']}: "
+                      f"expected ~{expected_nt_length}nt, got {extracted_length}nt", file=sys.stderr)
 
-            # Trim sequence to multiple of 3 to avoid partial codon warning
+            # Trim to multiple of 3
             remainder = len(seq_str) % 3
             if remainder != 0:
-                trim_details.append(f"Trimmed {remainder} nt from {orf['genome_pos']}")
-                trimmed_count += 1
                 seq_str = seq_str[:-remainder]
 
             seq_obj = Seq(seq_str)
 
             try:
-                protein = str(seq_obj.translate())
-                # Ensure stop codon
-                if not protein.endswith('*'):
-                    protein += '*'
+                # Translate and look for the first stop codon
+                full_protein = str(seq_obj.translate())
+                
+                # Find first stop codon position
+                first_stop = full_protein.find('*')
+                
+                if first_stop == -1:
+                    # No stop codon found, add one
+                    protein = full_protein + '*'
+                    print(f"Warning: No stop codon in sequence at {orf['genome_pos']}, added one", file=sys.stderr)
+                else:
+                    # Use sequence up to and including first stop codon
+                    protein = full_protein[:first_stop+1]
+                
+                # Calculate actual length (excluding stop codon)
+                actual_length = len(protein.rstrip('*'))
+                
+                # Check if length matches expected
+                if actual_length != orf['length_aa']:
+                    extraction_details.append(
+                        f"{orf['genome_pos']}: declared {orf['length_aa']}aa, "
+                        f"extracted {extracted_length}nt, translated to {actual_length}aa"
+                    )
+                    adjusted_count += 1
+                    orf['length_aa'] = actual_length
+                
                 orf['sequence'] = protein
+                    
             except Exception as e:
                 print(f"Warning: Could not translate ORF at {orf['genome_pos']}: {e}", file=sys.stderr)
                 orf['sequence'] = 'M' * orf['length_aa'] + '*'
 
-        # Write detailed trim log to file
-        if trim_details:
-            with open('sequence_trimming.log', 'w') as log:
-                log.write("# ORFs trimmed to avoid partial codon warnings\n")
-                log.write(f"# Total trimmed: {trimmed_count} out of {len(orfs)} ORFs\n\n")
-                for detail in trim_details:
+        # Write detailed extraction log to file
+        if extraction_details:
+            with open('sequence_extraction.log', 'w') as log:
+                log.write("# ORF sequence extraction adjustments\n")
+                log.write(f"# Total adjusted: {adjusted_count} out of {len(orfs)} ORFs\n")
+                log.write(f"# These ORFs had length differences between Ribo-TISH report and actual translation\n\n")
+                for detail in extraction_details:
                     log.write(detail + '\n')
-            print(f"Trimmed {trimmed_count}/{len(orfs)} ORFs to remove partial codons (see sequence_trimming.log)")
+            print(f"Adjusted {adjusted_count}/{len(orfs)} ORF lengths based on actual sequences (see sequence_extraction.log)")
 
         return orfs
 
@@ -187,17 +226,26 @@ def extract_sequences_from_genome(orfs, fasta_file):
         import tempfile
         import os
 
-        # Track trimming statistics
-        trimmed_count = 0
-        trim_details = []
+        # Track extraction statistics
+        adjusted_count = 0
+        extraction_details = []
 
         # Create temporary BED file for bedtools
         with tempfile.NamedTemporaryFile(mode='w', suffix='.bed', delete=False) as tmp_bed:
             bed_file = tmp_bed.name
             for i, orf in enumerate(orfs):
+                # Calculate expected nucleotide length
+                expected_nt_length = orf['length_aa'] * 3 + 3
+                
                 # BED format: 0-based, half-open
-                bed_start = orf['start'] - 1  # Convert 1-based to 0-based
-                bed_end = orf['end']
+                # Extract based on expected length, not full genomic coordinates
+                if orf['strand'] == '+':
+                    bed_start = orf['start'] - 1
+                    bed_end = bed_start + expected_nt_length
+                else:
+                    bed_end = orf['end']
+                    bed_start = bed_end - expected_nt_length
+                
                 tmp_bed.write(f"{orf['chrom']}\t{bed_start}\t{bed_end}\torf_{i}\t0\t{orf['strand']}\n")
 
         # Run bedtools getfasta
@@ -219,20 +267,38 @@ def extract_sequences_from_genome(orfs, fasta_file):
                 orf_id = f"orf_{i}"
                 if orf_id in seq_dict:
                     seq_str = seq_dict[orf_id]
+                    extracted_length = len(seq_str)
 
-                    # Trim sequence to multiple of 3 to avoid partial codon warning
+                    # Trim to multiple of 3
                     remainder = len(seq_str) % 3
                     if remainder != 0:
-                        trim_details.append(f"Trimmed {remainder} nt from {orf['genome_pos']}")
-                        trimmed_count += 1
                         seq_str = seq_str[:-remainder]
 
                     seq_obj = Seq(seq_str)
                     try:
-                        protein = str(seq_obj.translate())
-                        if not protein.endswith('*'):
-                            protein += '*'
+                        # Translate and find first stop codon
+                        full_protein = str(seq_obj.translate())
+                        
+                        first_stop = full_protein.find('*')
+                        if first_stop == -1:
+                            protein = full_protein + '*'
+                            print(f"Warning: No stop codon at {orf['genome_pos']}, added one", file=sys.stderr)
+                        else:
+                            protein = full_protein[:first_stop+1]
+                        
+                        # Calculate actual length
+                        actual_length = len(protein.rstrip('*'))
+                        
+                        if actual_length != orf['length_aa']:
+                            extraction_details.append(
+                                f"{orf['genome_pos']}: declared {orf['length_aa']}aa, "
+                                f"extracted {extracted_length}nt, translated to {actual_length}aa"
+                            )
+                            adjusted_count += 1
+                            orf['length_aa'] = actual_length
+                        
                         orf['sequence'] = protein
+                            
                     except Exception as e:
                         print(f"Warning: Could not translate ORF at {orf['genome_pos']}: {e}", file=sys.stderr)
                         orf['sequence'] = 'M' * orf['length_aa'] + '*'
@@ -244,14 +310,15 @@ def extract_sequences_from_genome(orfs, fasta_file):
             os.unlink(bed_file)
             os.unlink(fa_file)
 
-            # Write detailed trim log to file
-            if trim_details:
-                with open('sequence_trimming.log', 'w') as log:
-                    log.write("# ORFs trimmed to avoid partial codon warnings (bedtools mode)\n")
-                    log.write(f"# Total trimmed: {trimmed_count} out of {len(orfs)} ORFs\n\n")
-                    for detail in trim_details:
+            # Write detailed extraction log to file
+            if extraction_details:
+                with open('sequence_extraction.log', 'w') as log:
+                    log.write("# ORF sequence extraction adjustments (bedtools mode)\n")
+                    log.write(f"# Total adjusted: {adjusted_count} out of {len(orfs)} ORFs\n")
+                    log.write(f"# These ORFs had length differences between Ribo-TISH report and actual translation\n\n")
+                    for detail in extraction_details:
                         log.write(detail + '\n')
-                print(f"Trimmed {trimmed_count}/{len(orfs)} ORFs to remove partial codons (see sequence_trimming.log)")
+                print(f"Adjusted {adjusted_count}/{len(orfs)} ORF lengths based on actual sequences (see sequence_extraction.log)")
 
         except subprocess.CalledProcessError as e:
             print(f"Error running bedtools getfasta: {e.stderr.decode()}", file=sys.stderr)
@@ -278,29 +345,25 @@ def write_gencode_format(orfs, study_id, output_prefix):
 
     with open(fasta_output, 'w') as fa, open(bed_output, 'w') as bed:
         for orf in orfs:
-            # Create ORF name for FASTA (detailed format with coordinates)
-            # Format: GENE_POSITION_LENGTHaa
+            # Create ORF name with full details (gene + coordinates + length)
+            # Format: GENE_START_LENGTHaa
             gene_name = orf['tid'].split('.')[0]  # Remove version
-            orf_name_fasta = f"{gene_name}_{orf['start']}_{orf['length_aa']}aa"
+            orf_name = f"{gene_name}_{orf['start']}_{orf['length_aa']}aa"
 
-            # Create ORF name for BED (simple transcript ID only, matching GENCODE format)
-            # Use the original transcript ID without version for consistency with reference
-            orf_name_bed = orf['tid'].split('.')[0]  # Remove version, keep only base transcript ID
-
-            # Write FASTA (use detailed name)
-            fa.write(f">{orf_name_fasta}--{study_id}\n")
+            # Write FASTA
+            fa.write(f">{orf_name}--{study_id}\n")
             fa.write(f"{orf['sequence']}\n")
 
-            # Write BED in GENCODE-compatible format
-            # Format: chr start end transcript_id . strand
-            # Note: Use '.' for score field (column 5) to match reference format
+            # Write BED in gencode-riboseqORFs format
+            # Format: chr start end ORF_NAME STUDY_ID strand
+            # Use the same ORF_NAME for both FASTA and BED to enable matching
             bed_start = orf['start']  # Already 1-based from Ribo-TISH
             bed_end = orf['end']      # Already 1-based from Ribo-TISH
 
             # Normalize chromosome name (remove 'chr' prefix if present to match reference)
             chrom_normalized = orf['chrom'].replace('chr', '')
 
-            bed.write(f"{chrom_normalized}\t{bed_start}\t{bed_end}\t{orf_name_bed}\t.\t{orf['strand']}\n")
+            bed.write(f"{chrom_normalized}\t{bed_start}\t{bed_end}\t{orf_name}\t{study_id}\t{orf['strand']}\n")
 
     return len(orfs)
 

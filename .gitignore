@@ -1,17 +1,29 @@
 .nextflow*
+
+# Nextflow work/output
 work/
 data/
 results/
-.DS_Store
+results*
+tmp*
+null/
+
+# Tests & local test outputs
 testing/
 testing*
-*.pyc
-null/
+test_data/
+test_data*
+report_test_*.html
 .nf-test.log
 nf-test
 .nf-test*
 test.xml
-results*
-tmp*
+
+# Containers / patched binaries
 *.sif
 patched_packages
+
+# OS / tooling
+.DS_Store
+*.pyc
+.claude/
