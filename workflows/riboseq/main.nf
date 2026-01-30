@@ -307,7 +307,7 @@ workflow RIBOSEQ {
         }
 
     ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_genome_bam_index)
-    ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> [ [:], fasta, gtf ] }.first()
+    ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> [ [:], fasta, gtf ] }
 
     // Pre-filter QC runs should not overwrite post-filter outputs; suffix meta.id for QC-only runs
     ch_bams_for_qc_prefilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ id: "${meta.id}_prefilter" ], bam, bai ] }
@@ -346,14 +346,14 @@ workflow RIBOSEQ {
         // Pre-filter QC (QC only; does not feed prediction)
         RIBOTISH_QUALITY_RIBOSEQ_PREFILTER(
             ch_bams_for_qc_prefilter,
-            ch_gtf.map { [ [:], it ] }.first()
+            ch_gtf.map { [ [:], it ] }
         )
         ch_versions      = ch_versions.mix(RIBOTISH_QUALITY_RIBOSEQ_PREFILTER.out.versions)
 
         // Post-filter QC + offsets for prediction (prediction consumes filtered BAMs)
         RIBOTISH_QUALITY_RIBOSEQ(
             ch_bams_for_sorf_prediction,
-            ch_gtf.map { [ [:], it ] }.first()
+            ch_gtf.map { [ [:], it ] }
         )
         ch_versions      = ch_versions.mix(RIBOTISH_QUALITY_RIBOSEQ.out.versions)
 
@@ -526,8 +526,8 @@ workflow RIBOSEQ {
 
             UNIFY_ORF_PREDICTIONS(
                 ch_unify_inputs,
-                ch_gtf.first(),
-                ch_fasta.first(),
+                ch_gtf,
+                ch_fasta,
                 file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true)
             )
             ch_versions = ch_versions.mix(UNIFY_ORF_PREDICTIONS.out.versions)
@@ -571,7 +571,7 @@ workflow RIBOSEQ {
                 classify_prefix,
                 classify_wrapper,
                 class_orf_dir,
-                ch_gtf.first()
+                ch_gtf
             )
             ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
         } else if (classify_mode == 'orf_type') {
@@ -580,7 +580,7 @@ workflow RIBOSEQ {
                 classify_prefix,
                 classify_wrapper,
                 class_orf_dir,
-                ch_gtf.first()
+                ch_gtf
             )
             ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
         } else {
