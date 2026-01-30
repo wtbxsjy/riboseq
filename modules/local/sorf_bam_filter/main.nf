@@ -96,8 +96,8 @@ process SORF_BAM_FILTER {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-            samtools: \`samtools --version | head -n 1 | sed 's/samtools //'\`
-            awk: \`awk --version 2>/dev/null | head -n 1 || echo "unknown"\`
+      samtools: \$(samtools --version | head -n 1 | sed 's/samtools //')
+      awk: \$(awk --version 2>/dev/null | head -n 1 || echo "unknown")
     END_VERSIONS
     """
 
