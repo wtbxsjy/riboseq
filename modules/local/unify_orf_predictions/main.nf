@@ -35,19 +35,19 @@ process UNIFY_ORF_PREDICTIONS {
     """
     set -euo pipefail
 
-    export PYTHONUSERBASE="$PWD/.pylibs"
-    export PATH="$PYTHONUSERBASE/bin:$PATH"
+    export PYTHONUSERBASE="\$PWD/.pylibs"
+    export PATH="\$PYTHONUSERBASE/bin:\$PATH"
 
     pip install --user --quiet --no-warn-script-location biopython pyfaidx
 
-    python3 ${unify_script} \
-        --gtf ${gtf} \
-        --fasta ${fasta} \
-        --output ${prefix} \
-        --min_len ${min_len} \
-        ${ribotish_arg} \
-        ${ribotricer_arg} \
-        ${orfquant_arg} \
+    python3 ${unify_script} \\
+        --gtf ${gtf} \\
+        --fasta ${fasta} \\
+        --output ${prefix} \\
+        --min_len ${min_len} \\
+        ${ribotish_arg} \\
+        ${ribotricer_arg} \\
+        ${orfquant_arg} \\
         ${extra_args}
 
     cat <<-END_VERSIONS > versions.yml
