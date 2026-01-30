@@ -44,7 +44,7 @@ process CLASSIFY_ORFS_GENCODE {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        python: $(python3 --version | sed 's/Python //')
+        python: \$(python3 --version | sed 's/Python //')
     END_VERSIONS
     """
 
@@ -105,7 +105,7 @@ process CLASSIFY_ORFS_ORFQUANT {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        r-base: $(Rscript --version 2>&1 | sed -n '1p' | awk '{print $3}')
+        r-base: \$(Rscript --version 2>&1 | sed -n '1p' | awk '{print \$3}')
     END_VERSIONS
     """
 
@@ -165,7 +165,7 @@ process CLASSIFY_ORFS_ORF_TYPE {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        python: $(python3 --version | sed 's/Python //')
+        python: \$(python3 --version | sed 's/Python //')
     END_VERSIONS
     """
 
