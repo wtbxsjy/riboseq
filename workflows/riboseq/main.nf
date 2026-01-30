@@ -510,9 +510,12 @@ workflow RIBOSEQ {
         } else {
             def unify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
 
-            ch_ribotish_list = ch_ribotish_predictions.map { meta, file -> file }.collect().ifEmpty([])
-            ch_ribotricer_list = ch_ribotricer_orfs.map { meta, file -> file }.collect().ifEmpty([])
-            ch_orfquant_list = ch_orfquant_gtf.map { meta, file -> file }.collect().ifEmpty([])
+            ch_ribotish_list = (params.skip_ribotish ? Channel.value([]) : ch_ribotish_predictions.map { meta, file -> file }.collect())
+                .map { it ?: [] }
+            ch_ribotricer_list = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
+                .map { it ?: [] }
+            ch_orfquant_list = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
+                .map { it ?: [] }
 
             ch_unify_inputs = ch_ribotish_list
                 .combine(ch_ribotricer_list, ch_orfquant_list)
