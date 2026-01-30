@@ -528,7 +528,7 @@ workflow RIBOSEQ {
                 ch_unify_inputs,
                 ch_gtf.first(),
                 ch_fasta.first(),
-                file("${projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true)
+                file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true)
             )
             ch_versions = ch_versions.mix(UNIFY_ORF_PREDICTIONS.out.versions)
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
@@ -547,9 +547,9 @@ workflow RIBOSEQ {
 
         def classify_mode = (params.orf_classify_mode ?: 'orf_type').toLowerCase()
         def classify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-        def classify_wrapper = file("${projectDir}/scripts/classify_orfs_wrapper.py", checkIfExists: true)
-        def class_orf_dir = file("${projectDir}/scripts/class_orf", checkIfExists: true)
-        def gencode_orf_dir = file("${projectDir}/scripts/gencode-riboseqORFs", checkIfExists: true)
+        def classify_wrapper = file("${workflow.projectDir}/scripts/classify_orfs_wrapper.py", checkIfExists: true)
+        def class_orf_dir = file("${workflow.projectDir}/scripts/class_orf", checkIfExists: true)
+        def gencode_orf_dir = file("${workflow.projectDir}/scripts/gencode-riboseqORFs", checkIfExists: true)
 
         if (classify_mode == 'gencode') {
             if (!params.orf_classify_ensembl_dir) {
