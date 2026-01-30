@@ -528,7 +528,7 @@ workflow RIBOSEQ {
                 ch_unify_inputs,
                 ch_gtf.first(),
                 ch_fasta.first(),
-                Channel.value(file("${projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true))
+                file("${projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true)
             )
             ch_versions = ch_versions.mix(UNIFY_ORF_PREDICTIONS.out.versions)
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
@@ -547,9 +547,9 @@ workflow RIBOSEQ {
 
         def classify_mode = (params.orf_classify_mode ?: 'orf_type').toLowerCase()
         def classify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-        def classify_wrapper = Channel.value(file("${projectDir}/scripts/classify_orfs_wrapper.py", checkIfExists: true))
-        def class_orf_dir = Channel.value(file("${projectDir}/scripts/class_orf", checkIfExists: true))
-        def gencode_orf_dir = Channel.value(file("${projectDir}/scripts/gencode-riboseqORFs", checkIfExists: true))
+        def classify_wrapper = file("${projectDir}/scripts/classify_orfs_wrapper.py", checkIfExists: true)
+        def class_orf_dir = file("${projectDir}/scripts/class_orf", checkIfExists: true)
+        def gencode_orf_dir = file("${projectDir}/scripts/gencode-riboseqORFs", checkIfExists: true)
 
         if (classify_mode == 'gencode') {
             if (!params.orf_classify_ensembl_dir) {
@@ -558,17 +558,17 @@ workflow RIBOSEQ {
             CLASSIFY_ORFS_GENCODE(
                 ch_unify_bed,
                 ch_unify_metadata,
-                Channel.value(classify_prefix),
+                classify_prefix,
                 classify_wrapper,
                 class_orf_dir,
                 gencode_orf_dir,
-                Channel.value(file(params.orf_classify_ensembl_dir, checkIfExists: true))
+                file(params.orf_classify_ensembl_dir, checkIfExists: true)
             )
             ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE.out.versions)
         } else if (classify_mode == 'orfquant') {
             CLASSIFY_ORFS_ORFQUANT(
                 ch_unify_gtf,
-                Channel.value(classify_prefix),
+                classify_prefix,
                 classify_wrapper,
                 class_orf_dir,
                 ch_gtf.first()
@@ -577,7 +577,7 @@ workflow RIBOSEQ {
         } else if (classify_mode == 'orf_type') {
             CLASSIFY_ORFS_ORF_TYPE(
                 ch_unify_metadata,
-                Channel.value(classify_prefix),
+                classify_prefix,
                 classify_wrapper,
                 class_orf_dir,
                 ch_gtf.first()
