@@ -43,8 +43,8 @@ process SORF_BAM_FILTER {
     re='${re}'
 
     # Record excluded contigs based on the provided reference index (FAI)
-    if [[ -n "$re" ]]; then
-      awk -v re="$re" 'BEGIN{FS="\t"} \$1 ~ re {print \$1}' ${fai} | sort -u > ${prefix}.sorf.excluded_contigs.txt || true
+        if [[ -n "\$re" ]]; then
+          awk -v re="\$re" 'BEGIN{FS="\t"} \$1 ~ re {print \$1}' ${fai} | sort -u > ${prefix}.sorf.excluded_contigs.txt || true
     fi
 
     # Count primary mapped reads (unfiltered baseline)
@@ -53,7 +53,7 @@ process SORF_BAM_FILTER {
 
     # Filter: keep header lines; drop contigs matching regex; enforce read length; enforce unique mapping.
     samtools view -h -F 0xD04 ${bam} \
-      | awk -v mode="$mode" -v mapq="$mapq" -v rlmin="$rlmin" -v rlmax="$rlmax" -v re="$re" '
+      | awk -v mode="\$mode" -v mapq="\$mapq" -v rlmin="\$rlmin" -v rlmax="\$rlmax" -v re="\$re" '
           BEGIN{OFS="\t"}
           /^@/ {print; next}
           {
@@ -92,12 +92,12 @@ process SORF_BAM_FILTER {
     kept_primary_mapped=`samtools view -c -F 0xD04 ${prefix}.sorf.filtered.bam`
 
     printf "sample\ttotal_primary_mapped\tkept_primary_mapped\tpct_kept\n" > ${prefix}.sorf.filter_stats.tsv
-    awk -v s="${prefix}" -v t="$total_primary_mapped" -v k="$kept_primary_mapped" 'BEGIN{pct=(t>0)?(100.0*k/t):0; printf "%s\t%d\t%d\t%.2f\n", s, t, k, pct}' >> ${prefix}.sorf.filter_stats.tsv
+        awk -v s="${prefix}" -v t="\$total_primary_mapped" -v k="\$kept_primary_mapped" 'BEGIN{pct=(t>0)?(100.0*k/t):0; printf "%s\t%d\t%d\t%.2f\n", s, t, k, pct}' >> ${prefix}.sorf.filter_stats.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        samtools: `samtools --version | head -n 1 | sed 's/samtools //'`
-        awk: `awk --version 2>/dev/null | head -n 1 || echo "unknown"`
+            samtools: \`samtools --version | head -n 1 | sed 's/samtools //'\`
+            awk: \`awk --version 2>/dev/null | head -n 1 || echo "unknown"\`
     END_VERSIONS
     """
 
