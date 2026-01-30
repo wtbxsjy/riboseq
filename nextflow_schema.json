@@ -513,6 +513,63 @@
                 "extra_anota2seq_run_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to anota2seq in addition to defaults defined by the pipeline."
+                },
+                "skip_unify_orf_predictions": {
+                    "type": "boolean",
+                    "default": true,
+                    "fa_icon": "fas fa-fast-forward",
+                    "description": "Skip unified ORF predictions across tools."
+                },
+                "unify_orf_predictions_prefix": {
+                    "type": "string",
+                    "default": "unified_orfs",
+                    "fa_icon": "fas fa-file-signature",
+                    "description": "Output prefix for unified ORF predictions (base name only)."
+                },
+                "unify_orf_min_len": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "fa_icon": "fas fa-ruler",
+                    "description": "Minimum ORF length (amino acids) for unified predictions."
+                },
+                "extra_unify_orf_predictions_args": {
+                    "type": "string",
+                    "description": "Extra arguments to pass to unify_orf_predictions.py."
+                },
+                "skip_orf_classification": {
+                    "type": "boolean",
+                    "default": true,
+                    "fa_icon": "fas fa-fast-forward",
+                    "description": "Skip ORF classification step."
+                },
+                "orf_classify_mode": {
+                    "type": "string",
+                    "default": "orf_type",
+                    "fa_icon": "fas fa-tags",
+                    "description": "ORF classification mode.",
+                    "enum": [
+                        "gencode",
+                        "orfquant",
+                        "orf_type"
+                    ]
+                },
+                "orf_classify_output_dir": {
+                    "type": "string",
+                    "default": "orf_classification",
+                    "fa_icon": "fas fa-folder-open",
+                    "description": "Output directory name for ORF classification results (relative to results)."
+                },
+                "orf_classify_ensembl_dir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "exists": true,
+                    "fa_icon": "fas fa-folder-open",
+                    "description": "Ensembl annotation directory for gencode classification mode."
+                },
+                "extra_orf_classify_args": {
+                    "type": "string",
+                    "description": "Extra arguments to pass to classify_orfs_wrapper.py."
                 }
             }
         },

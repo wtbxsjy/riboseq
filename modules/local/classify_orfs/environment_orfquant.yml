@@ -1,0 +1,12 @@
+name: nf-core-riboseq-classify-orfs-orfquant
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base=4.0
+  - r-optparse
+  - bioconductor-genomicranges
+  - bioconductor-iranges
+  - bioconductor-s4vectors
+  - bioconductor-rtracklayer

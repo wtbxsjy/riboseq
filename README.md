@@ -149,6 +149,30 @@ flowchart TB
 > - Cross-sample merging/aggregation of per-sample predictions should be handled by downstream user scripts.
 > - The pipeline retains sufficient intermediate outputs (per-sample result files and shared reference artifacts like candidate ORFs) to facilitate post-hoc merging.
 
+### Unified ORF predictions and classification (experimental)
+
+本流程已集成单工具脚本中的 **ORF 预测合并** 与 **ORF 分类** 功能（对应脚本 17/18）。
+
+- **统一 ORF 预测**：调用 [scripts/unify_orf_predictions.py](scripts/unify_orf_predictions.py) 合并 Ribo-TISH/Ribotricer/ORFquant 的 ORF 结果，产出统一的 `.bed/.gtf/.metadata.tsv`。
+- **ORF 分类**：调用 [scripts/classify_orfs_wrapper.py](scripts/classify_orfs_wrapper.py) 进行三种模式的分类（`gencode` / `orfquant` / `orf_type`）。
+
+默认关闭（避免影响原有流程），需要显式开启：
+
+- `--skip_unify_orf_predictions false`
+- `--skip_orf_classification false`
+
+可用参数（节选）：
+
+- `--unify_orf_predictions_prefix`：统一 ORF 输出前缀（默认 `unified_orfs`）
+- `--unify_orf_min_len`：最小 ORF 长度（AA，默认 `10`）
+- `--orf_classify_mode`：分类模式（`gencode` / `orfquant` / `orf_type`，默认 `orf_type`）
+- `--orf_classify_ensembl_dir`：仅 `gencode` 模式需要，指向 Ensembl 注释目录
+
+输出位置：
+
+- `results/orf_unification/`：统一 ORF 结果（`.bed/.gtf/.metadata.tsv`）
+- `results/orf_classification/`：分类结果（按模式输出）
+
 ## Usage
 
 > [!NOTE]

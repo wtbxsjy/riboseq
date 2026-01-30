@@ -1,0 +1,43 @@
+name: classify_orfs
+description: Classify unified ORFs using gencode, orfquant, or ORF type rules
+keywords:
+  - riboseq
+  - orf
+  - classification
+
+input:
+  - unified_files:
+      type: file
+      description: Unified ORF prediction outputs (BED/GTF/metadata)
+  - input_prefix:
+      type: string
+      description: Prefix for unified ORF outputs
+  - classify_wrapper:
+      type: file
+      description: classify_orfs_wrapper.py script
+  - class_orf_dir:
+      type: directory
+      description: Directory containing ORF classification scripts
+  - gencode_orf_dir:
+      type: directory
+      description: Directory containing gencode-riboseqORFs scripts (gencode mode)
+  - ensembl_dir:
+      type: directory
+      description: Ensembl annotation directory (gencode mode)
+  - ref_gtf:
+      type: file
+      description: Reference GTF annotation (orfquant/orf_type modes)
+
+output:
+  - results:
+      type: file
+      description: Classification results
+  - versions:
+      type: file
+      description: Software versions
+      pattern: "versions.yml"
+
+authors:
+  - "@nf-core"
+maintainers:
+  - "@nf-core"

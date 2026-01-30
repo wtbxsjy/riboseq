@@ -1,0 +1,58 @@
+name: unify_orf_predictions
+description: Unify ORF predictions from multiple tools into a single BED/GTF/metadata set
+keywords:
+  - riboseq
+  - orf
+  - unify
+  - ribotish
+  - ribotricer
+  - orfquant
+
+input:
+  - ribotish_files:
+      type: file
+      description: List of Ribo-TISH prediction files (*_pred.txt)
+      pattern: "*.txt"
+  - ribotricer_files:
+      type: file
+      description: List of Ribotricer translating ORFs files (*_translating_ORFs.tsv)
+      pattern: "*.tsv"
+  - orfquant_files:
+      type: file
+      description: List of ORFquant GTF files (*_Detected_ORFs.gtf)
+      pattern: "*.gtf"
+  - gtf:
+      type: file
+      description: Reference GTF file for coordinate mapping
+      pattern: "*.gtf"
+  - fasta:
+      type: file
+      description: Genome FASTA file for sequence extraction
+      pattern: "*.fa"
+  - unify_script:
+      type: file
+      description: unify_orf_predictions.py script
+      pattern: "*.py"
+
+output:
+  - metadata:
+      type: file
+      description: Unified ORF metadata TSV
+      pattern: "*.metadata.tsv"
+  - bed:
+      type: file
+      description: Unified ORF BED12 file
+      pattern: "*.bed"
+  - gtf:
+      type: file
+      description: Unified ORF GTF file
+      pattern: "*.gtf"
+  - versions:
+      type: file
+      description: Software versions
+      pattern: "versions.yml"
+
+authors:
+  - "@nf-core"
+maintainers:
+  - "@nf-core"

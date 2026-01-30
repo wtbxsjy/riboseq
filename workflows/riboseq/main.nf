@@ -45,6 +45,8 @@ include { RIBOTRICER_PREPAREORFS                               } from '../../mod
 include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_PREFILTER_QC } from '../../modules/nf-core/ribotricer/detectorfs'
 include { RIBOTRICER_DETECTORFS                                } from '../../modules/nf-core/ribotricer/detectorfs'
 include { HISAT2_EXTRACTSPLICESITES                            } from '../../modules/nf-core/hisat2/extractsplicesites/main'
+include { UNIFY_ORF_PREDICTIONS                                } from '../../modules/local/unify_orf_predictions/main'
+include { CLASSIFY_ORFS_GENCODE; CLASSIFY_ORFS_ORFQUANT; CLASSIFY_ORFS_ORF_TYPE } from '../../modules/local/classify_orfs/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -313,6 +315,11 @@ workflow RIBOSEQ {
     // sORF prediction BAMs: filtered by default; used by ALL sORF predictors
     ch_bams_for_sorf_prediction = ch_bams_for_analysis
 
+    // ORF prediction outputs for unified post-processing
+    ch_ribotish_predictions = Channel.empty()
+    ch_ribotricer_orfs      = Channel.empty()
+    ch_orfquant_gtf         = Channel.empty()
+
     if (params.sorf_filter) {
         SORF_BAM_FILTER(
             ch_bams_for_analysis,
@@ -366,6 +373,7 @@ workflow RIBOSEQ {
             [[:],[]]
         )
         ch_versions = ch_versions.mix(RIBOTISH_PREDICT_INDIVIDUAL.out.versions)
+        ch_ribotish_predictions = RIBOTISH_PREDICT_INDIVIDUAL.out.predictions
 
         if (params.sorf_predict_pooled) {
             RIBOTISH_PREDICT_ALL(
@@ -400,6 +408,7 @@ workflow RIBOSEQ {
             RIBOTRICER_PREPAREORFS.out.candidate_orfs
         )
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS.out.versions)
+        ch_ribotricer_orfs = RIBOTRICER_DETECTORFS.out.orfs
     }
 
     if (!params.skip_rpbp){
@@ -481,8 +490,102 @@ workflow RIBOSEQ {
             ch_orfquant_pkg
         )
         ch_versions = ch_versions.mix(ORFQUANT.out.versions)
+        ch_orfquant_gtf = ORFQUANT.out.gtf
     } else if (!params.skip_orfquant && params.skip_riboseqc) {
         log.warn "ORFquant requires RiboseQC output. Skipping ORFquant because RiboseQC is skipped."
+    }
+
+    //
+    // Unified ORF predictions (scripts/unify_orf_predictions.py)
+    //
+    ch_unify_metadata = Channel.empty()
+    ch_unify_bed      = Channel.empty()
+    ch_unify_gtf      = Channel.empty()
+
+    def has_unify_inputs = (!params.skip_ribotish) || (!params.skip_ribotricer) || (!params.skip_orfquant && !params.skip_riboseqc)
+
+    if (!params.skip_unify_orf_predictions) {
+        if (!has_unify_inputs) {
+            log.warn "Unified ORF prediction is enabled but no ORF prediction tool ran; skipping."
+        } else {
+            def unify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+
+            ch_ribotish_list = ch_ribotish_predictions.map { meta, file -> file }.collect()
+            ch_ribotricer_list = ch_ribotricer_orfs.map { meta, file -> file }.collect()
+            ch_orfquant_list = ch_orfquant_gtf.map { meta, file -> file }.collect()
+
+            ch_unify_inputs = ch_ribotish_list
+                .combine(ch_ribotricer_list, ch_orfquant_list)
+                .map { ribotish_files, ribotricer_files, orfquant_files ->
+                    def all_files = []
+                    if (ribotish_files) { all_files.addAll(ribotish_files) }
+                    if (ribotricer_files) { all_files.addAll(ribotricer_files) }
+                    if (orfquant_files) { all_files.addAll(orfquant_files) }
+                    [ ribotish_files ?: [], ribotricer_files ?: [], orfquant_files ?: [], all_files ]
+                }
+
+            UNIFY_ORF_PREDICTIONS(
+                ch_unify_inputs,
+                ch_gtf.first(),
+                ch_fasta.first(),
+                Channel.value(file("${projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true))
+            )
+            ch_versions = ch_versions.mix(UNIFY_ORF_PREDICTIONS.out.versions)
+            ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
+            ch_unify_bed      = UNIFY_ORF_PREDICTIONS.out.bed
+            ch_unify_gtf      = UNIFY_ORF_PREDICTIONS.out.gtf
+        }
+    }
+
+    //
+    // ORF classification (scripts/classify_orfs_wrapper.py)
+    //
+    if (!params.skip_orf_classification) {
+        if (params.skip_unify_orf_predictions) {
+            error "ORF classification requires unified ORF predictions. Please disable --skip_unify_orf_predictions."
+        }
+
+        def classify_mode = (params.orf_classify_mode ?: 'orf_type').toLowerCase()
+        def classify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+        def classify_wrapper = Channel.value(file("${projectDir}/scripts/classify_orfs_wrapper.py", checkIfExists: true))
+        def class_orf_dir = Channel.value(file("${projectDir}/scripts/class_orf", checkIfExists: true))
+        def gencode_orf_dir = Channel.value(file("${projectDir}/scripts/gencode-riboseqORFs", checkIfExists: true))
+
+        if (classify_mode == 'gencode') {
+            if (!params.orf_classify_ensembl_dir) {
+                error "ORF classification mode 'gencode' requires --orf_classify_ensembl_dir."
+            }
+            CLASSIFY_ORFS_GENCODE(
+                ch_unify_bed,
+                ch_unify_metadata,
+                Channel.value(classify_prefix),
+                classify_wrapper,
+                class_orf_dir,
+                gencode_orf_dir,
+                Channel.value(file(params.orf_classify_ensembl_dir, checkIfExists: true))
+            )
+            ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE.out.versions)
+        } else if (classify_mode == 'orfquant') {
+            CLASSIFY_ORFS_ORFQUANT(
+                ch_unify_gtf,
+                Channel.value(classify_prefix),
+                classify_wrapper,
+                class_orf_dir,
+                ch_gtf.first()
+            )
+            ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
+        } else if (classify_mode == 'orf_type') {
+            CLASSIFY_ORFS_ORF_TYPE(
+                ch_unify_metadata,
+                Channel.value(classify_prefix),
+                classify_wrapper,
+                class_orf_dir,
+                ch_gtf.first()
+            )
+            ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
+        } else {
+            error "Unsupported orf_classify_mode: ${params.orf_classify_mode}. Use gencode, orfquant, or orf_type."
+        }
     }
 
     //

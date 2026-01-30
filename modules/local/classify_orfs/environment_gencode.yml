@@ -1,0 +1,8 @@
+name: nf-core-riboseq-classify-orfs-gencode
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.9
+  - biopython=1.81

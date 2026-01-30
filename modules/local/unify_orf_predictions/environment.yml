@@ -1,0 +1,9 @@
+name: nf-core-riboseq-unify-orf-predictions
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.9
+  - biopython=1.81
+  - pyfaidx=0.7.2.1
