@@ -453,9 +453,9 @@ workflow RIBOSEQ {
     ch_riboseqc_orfquant   = Channel.empty()
 
     if (!params.skip_riboseqc) {
-        // Pre-filter RiboseQC (used by ORFquant)
+        // Filtered RiboseQC (used by ORFquant)
         RIBOSEQC_PREFILTER(
-            ch_bams_for_analysis,
+            ch_bams_for_sorf_prediction,
             ch_gtf,
             ch_fasta
         )

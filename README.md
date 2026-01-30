@@ -124,12 +124,12 @@ flowchart TB
 >
 > The pipeline implements a strict separation between **QC** and **sORF prediction inputs**:
 >
-> - **RiboseQC is applied only to samples with `type=riboseq`.**
+> - **RiboseQC is applied only to samples with `type=riboseq`, and now uses filtered BAMs.**
 > - The pipeline runs the **QC suite twice** on `type=riboseq` samples:
->   - **Pre-filter QC** on *unfiltered* genome BAMs (for baseline QC and comparability).
->   - **Post-filter QC** on *filtered* genome BAMs (to assess the effect of filtering).
+>   - **Pre-filter QC** on *unfiltered* genome BAMs (Ribo-TISH Quality, Ribotricer QC) for baseline QC and comparability.
+>   - **Post-filter QC** on *filtered* genome BAMs (Ribo-TISH Quality, Ribotricer QC, RiboseQC) to assess the effect of filtering.
 > - All **sORF prediction tools** (Ribo-TISH predict, Ribotricer, RiboCode, rp-bp, ORFquant) consume **filtered BAMs only**, ensuring consistent inputs across tools.
-> - Unfiltered BAMs are retained for baseline QC and future quantification modules (e.g., CDS-based read counting and DE analysis).
+> - Unfiltered BAMs are retained for baseline QC and optional future quantification modules (e.g., CDS-based read counting and DE analysis).
 
 ### ORF Prediction Tools
 
@@ -173,6 +173,22 @@ flowchart TB
 - `results/orf_unification/`：统一 ORF 结果（`.bed/.gtf/.metadata.tsv`）
 - `results/orf_classification/`：分类结果（按模式输出）
 
+结果文件明细（基于默认 `--unify_orf_predictions_prefix unified_orfs`）：
+
+- `results/orf_unification/unified_orfs.metadata.tsv`：统一 ORF 元数据表（含 ORF ID、来源工具、序列等）
+- `results/orf_unification/unified_orfs.bed`：统一 ORF 坐标（BED12）
+- `results/orf_unification/unified_orfs.gtf`：统一 ORF 注释（GTF）
+
+分类模式输出：
+
+- `orf_classify_mode=gencode`：
+    - `results/orf_classification/gencode_results.orfs.out`
+    - `results/orf_classification/gencode_results.orfs.gtf`
+- `orf_classify_mode=orfquant`：
+    - `results/orf_classification/orfquant_classification.tsv`
+- `orf_classify_mode=orf_type`（默认）：
+    - `results/orf_classification/orftype_classification.tsv`
+
 ## Usage
 
 > [!NOTE]
@@ -212,9 +228,9 @@ CONTROL_REP2,/path/to/sample2.bam,,forward,riboseq
 > [!NOTE]
 > **sORF filtering + QC before/after behavior:**
 > - Genome BAMs are coordinate-sorted and indexed if required.
-> - For `type=riboseq` samples, the pipeline runs **RiboseQC and Ribo-TISH Quality** on the **unfiltered** BAM first (baseline QC).
-> - The pipeline then creates a **filtered BAM** (via `SORF_BAM_FILTER` module) used for **all sORF prediction tools**.
-> - For `type=riboseq` samples, the pipeline runs **RiboseQC and Ribotricer QC** again on the **filtered** BAM to assess filtering effects.
+> - For `type=riboseq` samples, the pipeline runs **Ribo-TISH Quality** on the **unfiltered** BAM first (baseline QC).
+> - The pipeline then creates a **filtered BAM** (via `SORF_BAM_FILTER` module) used for **all sORF prediction tools**, including ORFquant (via RiboseQC on filtered BAMs).
+> - For `type=riboseq` samples, the pipeline runs **RiboseQC and Ribotricer QC** on the **filtered** BAM to assess filtering effects.
 > - sORF filtering is controlled by `--sorf_filter` (default: `true`) and can be disabled if needed.
 
 Now, you can run the pipeline using:
