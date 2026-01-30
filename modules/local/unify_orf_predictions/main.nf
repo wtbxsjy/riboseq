@@ -36,10 +36,17 @@ process UNIFY_ORF_PREDICTIONS {
     """
     set -euo pipefail
 
+    # Setup user-local Python package directory to avoid permission issues
     export PYTHONUSERBASE="\$PWD/.pylibs"
     export PATH="\$PYTHONUSERBASE/bin:\$PATH"
+    export PIP_CACHE_DIR="\$PWD/.pip_cache"
+    mkdir -p "\$PYTHONUSERBASE" "\$PIP_CACHE_DIR"
 
-    pip install --user --quiet --no-warn-script-location biopython pyfaidx
+    # Install dependencies with explicit cache dir and error checking
+    pip install --user --quiet --no-warn-script-location --cache-dir "\$PIP_CACHE_DIR" biopython pyfaidx || {
+        echo "pip install failed, trying with --no-cache-dir..."
+        pip install --user --quiet --no-warn-script-location --no-cache-dir biopython pyfaidx
+    }
 
     python3 ${unify_script} \\
         --gtf ${gtf} \\
