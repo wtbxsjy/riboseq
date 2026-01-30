@@ -523,10 +523,15 @@ workflow RIBOSEQ {
                 .combine(ch_orfquant_list)
                 .map { ribotish_files, ribotricer_files, orfquant_files ->
                     def all_files = []
+                    // Extract file objects for staging
                     if (ribotish_files) { all_files.addAll(ribotish_files instanceof List ? ribotish_files : [ribotish_files]) }
                     if (ribotricer_files) { all_files.addAll(ribotricer_files instanceof List ? ribotricer_files : [ribotricer_files]) }
                     if (orfquant_files) { all_files.addAll(orfquant_files instanceof List ? orfquant_files : [orfquant_files]) }
-                    [ ribotish_files ?: [], ribotricer_files ?: [], orfquant_files ?: [], all_files ]
+                    // Extract filenames as strings for command line arguments
+                    def ribotish_names = ribotish_files ? (ribotish_files instanceof List ? ribotish_files.collect{ it.getName() } : [ribotish_files.getName()]) : []
+                    def ribotricer_names = ribotricer_files ? (ribotricer_files instanceof List ? ribotricer_files.collect{ it.getName() } : [ribotricer_files.getName()]) : []
+                    def orfquant_names = orfquant_files ? (orfquant_files instanceof List ? orfquant_files.collect{ it.getName() } : [orfquant_files.getName()]) : []
+                    [ ribotish_names, ribotricer_names, orfquant_names, all_files ]
                 }
 
             UNIFY_ORF_PREDICTIONS(

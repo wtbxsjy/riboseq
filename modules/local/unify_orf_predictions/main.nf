@@ -29,9 +29,10 @@ process UNIFY_ORF_PREDICTIONS {
     script:
     def min_len = params.unify_orf_min_len ?: 10
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
-    def ribotish_arg = (ribotish_files && ribotish_files.size() > 0) ? "--ribotish ${ribotish_files.collect{ it.getFileName().toString() }.join(' ')}" : ''
-    def ribotricer_arg = (ribotricer_files && ribotricer_files.size() > 0) ? "--ribotricer ${ribotricer_files.collect{ it.getFileName().toString() }.join(' ')}" : ''
-    def orfquant_arg = (orfquant_files && orfquant_files.size() > 0) ? "--orfquant ${orfquant_files.collect{ it.getFileName().toString() }.join(' ')}" : ''
+    // Files are already staged via all_inputs, just need filenames
+    def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ? "--ribotish ${ribotish_files.join(' ')}" : ''
+    def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ? "--ribotricer ${ribotricer_files.join(' ')}" : ''
+    def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ? "--orfquant ${orfquant_files.join(' ')}" : ''
     """
     set -euo pipefail
 
