@@ -156,10 +156,10 @@ flowchart TB
 - **统一 ORF 预测**：调用 [scripts/unify_orf_predictions.py](scripts/unify_orf_predictions.py) 合并 Ribo-TISH/Ribotricer/ORFquant 的 ORF 结果，产出统一的 `.bed/.gtf/.metadata.tsv`。
 - **ORF 分类**：调用 [scripts/classify_orfs_wrapper.py](scripts/classify_orfs_wrapper.py) 进行三种模式的分类（`gencode` / `orfquant` / `orf_type`）。
 
-默认关闭（避免影响原有流程），需要显式开启：
+默认开启。如需关闭：
 
-- `--skip_unify_orf_predictions false`
-- `--skip_orf_classification false`
+- `--skip_unify_orf_predictions true`
+- `--skip_orf_classification true`
 
 可用参数（节选）：
 

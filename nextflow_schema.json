@@ -516,7 +516,7 @@
                 },
                 "skip_unify_orf_predictions": {
                     "type": "boolean",
-                    "default": true,
+                    "default": false,
                     "fa_icon": "fas fa-fast-forward",
                     "description": "Skip unified ORF predictions across tools."
                 },
@@ -539,7 +539,7 @@
                 },
                 "skip_orf_classification": {
                     "type": "boolean",
-                    "default": true,
+                    "default": false,
                     "fa_icon": "fas fa-fast-forward",
                     "description": "Skip ORF classification step."
                 },
