@@ -52,9 +52,9 @@ process UNIFY_ORF_PREDICTIONS {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        python: $(python3 --version | sed 's/Python //')
-        biopython: $(python3 -c "import Bio; print(Bio.__version__)" 2>/dev/null || echo "unknown")
-        pyfaidx: $(python3 -c "import pyfaidx; print(pyfaidx.__version__)" 2>/dev/null || echo "unknown")
+        python: \$(python3 --version | sed 's/Python //')
+        biopython: \$(python3 -c "import Bio; print(Bio.__version__)" 2>/dev/null || echo "unknown")
+        pyfaidx: \$(python3 -c "import pyfaidx; print(pyfaidx.__version__)" 2>/dev/null || echo "unknown")
     END_VERSIONS
     """
 
