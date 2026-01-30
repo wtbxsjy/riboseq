@@ -3,7 +3,7 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
 
 %labels
     Author nf-core/riboseq
-    Description RiboseQC container with PATCHED ORFquant (fixes Position/combine conflicts)
+    Description RiboseQC container with PATCHED ORFquant 1.1 (fixes Position/combine conflicts and IRanges edge cases)
 
 %setup
     ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
@@ -15,22 +15,25 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
     mkdir -p "${ROOTFS}/opt/orfquant_patched"
 
 %files
-    # Copy the patched ORFquant source directory into the container
-    patched_packages/ORFquant-1.02 /opt/orfquant_patched/ORFquant-1.02
+    # Copy the patched ORFquant 1.1 source directory into the container
+    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
 
 %post
-    # Install patched ORFquant from local source
-    # The NAMESPACE file has been modified to use selective imports from ggplot2
-    # and gridExtra, avoiding the Position and combine conflicts with BiocGenerics.
+    # Install patched ORFquant 1.1 from local source
+    # Patches applied:
+    # 1. NAMESPACE: Import order fixed - BiocGenerics imported LAST
+    #    to ensure Position and combine don't get overridden by ggplot2/gridExtra
+    # 2. orfquant.R: IRanges empty data protection added at lines 160 and 973
+    #    to prevent "at least two out of start/end/width must be supplied" errors
     
     cat > /tmp/install_orfquant.R <<'RSCRIPT'
-pkg_dir <- "/opt/orfquant_patched/ORFquant-1.02"
+pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
 
 if (!dir.exists(pkg_dir)) {
     stop("Patched ORFquant source not found at: ", pkg_dir)
 }
 
-message("Installing patched ORFquant from: ", pkg_dir)
+message("Installing patched ORFquant 1.1 from: ", pkg_dir)
 cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
 message(cmd)
 status <- system(cmd)
@@ -49,13 +52,14 @@ RSCRIPT
     exec "$@"
 
 %help
-    This container includes RiboseQC and PATCHED ORFquant for Ribo-seq analysis.
+    This container includes RiboseQC and PATCHED ORFquant 1.1 for Ribo-seq analysis.
     
     PATCH DETAILS:
-    - ORFquant NAMESPACE modified to use selective imports from ggplot2/gridExtra
-    - Avoids importing ggplot2::Position which overrides BiocGenerics::Position
-    - Avoids importing gridExtra::combine which overrides BiocGenerics::combine
+    - ORFquant NAMESPACE modified to import BiocGenerics LAST
+    - Ensures BiocGenerics::Position and BiocGenerics::combine are not overridden
+    - IRanges edge case protection added to prevent errors on empty data
     - Fixes "attempt to apply non-function" error in parallel ORFquant runs
+    - Fixes "at least two out of start/end/width must be supplied" IRanges error
     
     Build:
         apptainer build --fakeroot -F orfquant_patched.sif containers/Singularity.orfquant.patched.def

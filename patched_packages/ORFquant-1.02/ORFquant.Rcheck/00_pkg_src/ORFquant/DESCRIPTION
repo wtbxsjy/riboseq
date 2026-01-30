@@ -1,0 +1,34 @@
+Package: ORFquant
+Title: Splice-Aware Translatome Annotation
+Version: 1.03.0
+Authors@R: 
+    c(person(given = "Lorenzo",
+             family = "Calviello",
+             role = c("aut", "cre"),
+             email = "calviello.l.bio@gmail.com"),
+      person(given = "Uwe",
+             family = "Ohler",
+             role = c("rev", "fnd"),
+             email = "Uwe.Ohler@mdc-berlin.de"),
+      person(given = "Dermott",
+             family = "Harnett",
+             role = "ctb",
+             email = "Dermot.Harnett@mdc-berlin.de"))
+Description: ORFquant is a method that annotates and quantifies
+    translation at the single ORF level using Ribo-seq data.
+License: GPL-3 or above
+Depends: R (>= 4.5.0), BiocGenerics, Biostrings, BSgenome, cowplot,
+        devtools, doFuture, dplyr, foreach, future, GenomicAlignments,
+        GenomicFeatures, GenomicFiles, GenomicRanges, ggplot2, grid,
+        gridExtra, Gviz, knitr, lemon, multitaper, reshape2, rmarkdown,
+        Rsamtools, rtracklayer, shiny
+biocViews: RiboSeq, GenomeAnnotation, Transcriptomics, Software
+Encoding: UTF-8
+Name: ORFquant
+RoxygenNote: 7.3.2
+NeedsCompilation: no
+Packaged: 2025-12-31 10:42:25 UTC; wtbxsjy
+Author: Lorenzo Calviello [aut, cre],
+  Uwe Ohler [rev, fnd],
+  Dermott Harnett [ctb]
+Maintainer: Lorenzo Calviello <calviello.l.bio@gmail.com>
