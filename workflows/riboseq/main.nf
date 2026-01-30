@@ -517,13 +517,15 @@ workflow RIBOSEQ {
             ch_orfquant_list = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
                 .map { it ?: [] }
 
+            // Combine three channels using chained combine operators
             ch_unify_inputs = ch_ribotish_list
-                .combine(ch_ribotricer_list, ch_orfquant_list)
+                .combine(ch_ribotricer_list)
+                .combine(ch_orfquant_list)
                 .map { ribotish_files, ribotricer_files, orfquant_files ->
                     def all_files = []
-                    if (ribotish_files) { all_files.addAll(ribotish_files) }
-                    if (ribotricer_files) { all_files.addAll(ribotricer_files) }
-                    if (orfquant_files) { all_files.addAll(orfquant_files) }
+                    if (ribotish_files) { all_files.addAll(ribotish_files instanceof List ? ribotish_files : [ribotish_files]) }
+                    if (ribotricer_files) { all_files.addAll(ribotricer_files instanceof List ? ribotricer_files : [ribotricer_files]) }
+                    if (orfquant_files) { all_files.addAll(orfquant_files instanceof List ? orfquant_files : [orfquant_files]) }
                     [ ribotish_files ?: [], ribotricer_files ?: [], orfquant_files ?: [], all_files ]
                 }
 
