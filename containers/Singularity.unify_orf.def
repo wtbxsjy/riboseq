@@ -1,0 +1,47 @@
+Bootstrap: docker
+From: python:3.9-slim
+
+%labels
+    Author nf-core/riboseq
+    Version 1.0.0
+    Description Unified container for ORF prediction unification and classification
+
+%post
+    # Update and install system dependencies
+    apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        zlib1g-dev \
+        libbz2-dev \
+        liblzma-dev \
+        libcurl4-openssl-dev \
+        procps \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install Python packages for:
+    # - unify_orf_predictions.py: biopython, pyfaidx
+    # - class_ORFtype.py: standard library only (csv, multiprocessing)
+    # - classify_orfs_wrapper.py: standard library only
+    pip install --no-cache-dir \
+        biopython>=1.79 \
+        pyfaidx>=0.7.0 \
+        pandas>=1.3.0 \
+        numpy>=1.20.0
+
+    # Verify installations
+    python3 -c "import Bio; print('Biopython:', Bio.__version__)"
+    python3 -c "import pyfaidx; print('pyfaidx:', pyfaidx.__version__)"
+    python3 -c "import pandas; print('pandas:', pandas.__version__)"
+    python3 -c "import numpy; print('numpy:', numpy.__version__)"
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    exec python3 "$@"
+
+%test
+    python3 -c "import Bio; import pyfaidx; import pandas; import numpy; print('All dependencies OK')"
+    python3 --version

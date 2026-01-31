@@ -130,9 +130,12 @@ process CLASSIFY_ORFS_ORF_TYPE {
     publishDir "${params.outdir}/orf_classification", mode: params.publish_dir_mode
 
     conda "${moduleDir}/environment_orf_type.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/python:3.9' :
-        'python:3.9' }"
+    // Use unified container if provided, otherwise use biopython container
+    container "${ params.unify_orf_container ?
+        params.unify_orf_container :
+        (workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+            'https://depot.galaxyproject.org/singularity/biopython:1.79' :
+            'quay.io/biocontainers/biopython:1.79') }"
 
     input:
     path unified_metadata
