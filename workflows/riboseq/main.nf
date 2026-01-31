@@ -357,8 +357,15 @@ workflow RIBOSEQ {
 
         // Prefilter: using unfiltered BAMs (optional, for QC comparison)
         if (params.run_prefilter_qc) {
-            ribotish_prefilter_inputs = ch_bams_for_prefilter
-                .join(RIBOTISH_QUALITY_RIBOSEQ.out.offset)
+            // Join by sample id only, not by full meta
+            ch_bams_prefilter_keyed = ch_bams_for_prefilter
+                .map { meta, bam, bai -> [ meta.id, meta, bam, bai ] }
+            ch_offset_keyed = RIBOTISH_QUALITY_RIBOSEQ.out.offset
+                .map { meta, offset -> [ meta.id, offset ] }
+            
+            ribotish_prefilter_inputs = ch_bams_prefilter_keyed
+                .join(ch_offset_keyed, by: 0)
+                .map { id, meta, bam, bai, offset -> [ meta, bam, bai, offset ] }
                 .multiMap{ meta, bam, bai, offset ->
                     bam: [ meta, bam, bai ]
                     offset: [ meta, offset ]
@@ -376,9 +383,16 @@ workflow RIBOSEQ {
         }
 
         // Postfilter: using filtered BAMs (MT removed)
-        // ch_bams_for_postfilter already has filter_status set
-        ribotish_postfilter_inputs = ch_bams_for_postfilter
-            .join(RIBOTISH_QUALITY_RIBOSEQ.out.offset)
+        // Join by sample id only, not by full meta (since meta may differ in filter_status)
+        // First, prepare channels with id as the join key
+        ch_bams_for_ribotish = ch_bams_for_postfilter
+            .map { meta, bam, bai -> [ meta.id, meta, bam, bai ] }
+        ch_offset_for_ribotish = RIBOTISH_QUALITY_RIBOSEQ.out.offset
+            .map { meta, offset -> [ meta.id, offset ] }
+        
+        ribotish_postfilter_inputs = ch_bams_for_ribotish
+            .join(ch_offset_for_ribotish, by: 0)
+            .map { id, meta, bam, bai, offset -> [ meta, bam, bai, offset ] }
             .multiMap{ meta, bam, bai, offset ->
                 bam: [ meta, bam, bai ]
                 offset: [ meta, offset ]
