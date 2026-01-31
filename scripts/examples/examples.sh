@@ -1,11 +1,33 @@
+#!/bin/bash
 # ============================================================
-# Human (人类)
+# Ribo-seq Workflow Preparation Examples
+# ============================================================
+# 支持的数据格式: FASTQ (.fastq.gz/.fq.gz) 或 SRA (.sra)
+# SRA 文件会自动转换为 FASTQ.gz
+# 不指定 -r 参考目录时会自动下载并解压参考序列
+# ============================================================
+
+# ============================================================
+# Human (人类) - FASTQ 输入
 # ============================================================
 python3 scripts/prepare_workflow.py \
     -w /path/to/human_workdir \
     -d /path/to/fastq_files \
     --species human \
     --genome GRCh38 \
+    --orfquant-container /path/to/orfquant_patched.sif \
+    --rpbp-container /path/to/rpbp.sif
+
+# ============================================================
+# Human (人类) - SRA 输入（自动转换）
+# ============================================================
+python3 scripts/prepare_workflow.py \
+    -w /path/to/human_workdir \
+    -d /path/to/sra_files \
+    --species human \
+    --genome GRCh38 \
+    --sra-threads 16 \
+    --pigz-threads 8 \
     --orfquant-container /path/to/orfquant_patched.sif \
     --rpbp-container /path/to/rpbp.sif
 
@@ -63,3 +85,25 @@ python3 scripts/prepare_workflow.py \
     --genome Glycine_max_v2.1 \
     --orfquant-container /path/to/orfquant_patched.sif \
     --rpbp-container /path/to/rpbp.sif
+
+# ============================================================
+# 使用 SRA 目录作为输入（通用模板）
+# ============================================================
+# python3 scripts/prepare_workflow.py \
+#     -w /path/to/workdir \
+#     -d /path/to/sra_directory \
+#     --species <species> \
+#     --genome <genome_name> \
+#     --sra-threads 16 \
+#     --pigz-threads 8 \
+#     --orfquant-container /path/to/orfquant_patched.sif \
+#     --rpbp-container /path/to/rpbp.sif
+
+# ============================================================
+# 最简配置（自动下载参考库）
+# ============================================================
+# python3 scripts/prepare_workflow.py \
+#     -w /path/to/workdir \
+#     -d /path/to/data \
+#     --species human \
+#     --genome GRCh38

@@ -12,7 +12,8 @@
 
 **核心特性**:
 - ✅ 创建标准化目录结构 (data, reference, containers, process, result, scripts)
-- ✅ FASTQ/SRA 兼容：SRA 自动转换为 FASTQ，仅保留 FASTQ
+- ✅ FASTQ/SRA 兼容：SRA 自动转换为 FASTQ.gz（使用 sra2fq.sh），仅保留 FASTQ
+- ✅ SRA 转换支持多线程：`--sra-threads` 和 `--pigz-threads`
 - ✅ 参考库可选：未指定 `-r` 时自动下载并解压到工作目录
 - ✅ 容器镜像直接指定并复制到工作目录
 - ✅ 自动生成样本表 (samplesheet.csv)
@@ -146,17 +147,23 @@ bash scripts/sra2fq.sh -t 16 -p 8 -o /output/dir *.sra
 ### 场景 1: 从原始数据开始（自动准备参考）
 
 ```bash
-# Step 1: （可选）从 SRA 下载数据
-bash scripts/sra2fq.sh -o ~/data/fastq SRR*.sra
-
-# Step 2: 准备工作流（自动准备参考库并解压）
+# 方式 A: 数据目录包含 FASTQ 文件
 python3 scripts/prepare_workflow.py \
     -w ~/riboseq_analysis \
     -d ~/data/fastq \
     --genome GRCh38 \
     --species human
 
-# Step 4: 运行分析
+# 方式 B: 数据目录包含 SRA 文件（自动转换为 FASTQ.gz）
+python3 scripts/prepare_workflow.py \
+    -w ~/riboseq_analysis \
+    -d ~/data/sra_files \
+    --genome GRCh38 \
+    --species human \
+    --sra-threads 16 \
+    --pigz-threads 8
+
+# Step 2: 运行分析
 cd ~/riboseq_analysis
 bash run_pipeline.sh
 ```
@@ -261,12 +268,14 @@ bash scripts/sra2fq.sh -t 16 -o output_dir *.sra
 
 | 脚本 | 关键参数 | 说明 |
 |------|---------|------|
-| prepare_workflow.py | `-w, -d` | 工作目录, 数据目录 (必需) |
+| prepare_workflow.py | `-w, -d` | 工作目录, 数据目录 (必需，支持 FASTQ/SRA) |
 | | `-r` | 参考目录 (可选，不指定则自动准备) |
 | | `--orfquant-container, --rpbp-container` | 直接指定镜像路径（推荐） |
 | | `-c` | 容器目录（兼容，已过时） |
 | | `--genome` | 基因组名称（如 GRCh38/GRCm39/IRGSP-1.0） |
-| | `--species` | 物种名称（human/mouse/rice/maize/wheat） |
+| | `--species` | 物种名称（human/mouse/rice/maize/wheat/soybean） |
+| | `--sra-threads` | SRA 转换 fasterq-dump 线程数（默认 8） |
+| | `--pigz-threads` | SRA 转换 pigz 压缩线程数（默认 8） |
 | | `--run-prefilter-qc` | 启用 prefilter QC |
 | get_sample_sheet.py | `-i, -o` | 输入目录, 输出文件 |
 | prepare_reference_db_v2.2.py | `--species` | 物种名称 |

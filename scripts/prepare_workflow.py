@@ -134,6 +134,12 @@ Examples:
     parser.add_argument('--profile', default='singularity',
                         help='Nextflow profile (default: singularity)')
     
+    # SRA conversion options
+    parser.add_argument('--sra-threads', type=int, default=8,
+                        help='Number of threads for fasterq-dump when converting SRA files (default: 8)')
+    parser.add_argument('--pigz-threads', type=int, default=8,
+                        help='Number of threads for pigz compression when converting SRA files (default: 8)')
+    
     # Script generation
     parser.add_argument('--script-name', default='run_pipeline.sh',
                         help='Name of generated execution script (default: run_pipeline.sh)')
@@ -214,8 +220,8 @@ def create_symlinks(source_dir, target_dir, patterns=None, dry_run=False):
     return linked_files
 
 
-def convert_sra_to_fastq(source_dir, target_dir, dry_run=False):
-    """Convert SRA files to FASTQ in target directory"""
+def convert_sra_to_fastq(source_dir, target_dir, dry_run=False, threads_dump=8, threads_pigz=8):
+    """Convert SRA files to FASTQ.gz using scripts/sra2fq.sh"""
     source_dir = Path(source_dir).resolve()
     target_dir = Path(target_dir).resolve()
 
@@ -223,31 +229,36 @@ def convert_sra_to_fastq(source_dir, target_dir, dry_run=False):
     if not sra_files:
         return []
 
-    if not shutil.which('fasterq-dump'):
-        logger.error("fasterq-dump not found in PATH. Please install sra-tools.")
+    # Find sra2fq.sh script
+    script_dir = Path(__file__).parent
+    sra2fq_script = script_dir / 'sra2fq.sh'
+
+    if not sra2fq_script.exists():
+        logger.error(f"sra2fq.sh not found at: {sra2fq_script}")
         return []
 
-    generated = []
-    for sra_file in sra_files:
-        cmd = [
-            'fasterq-dump',
-            '--split-files',
-            '-O', str(target_dir),
-            str(sra_file)
-        ]
-        if dry_run:
-            logger.info(f"[DRY RUN] Would convert SRA: {' '.join(cmd)}")
-            continue
+    # Build command: sra2fq.sh -t <threads> -p <pigz_threads> -o <output_dir> <sra_files...>
+    cmd = [
+        'bash',
+        str(sra2fq_script),
+        '-t', str(threads_dump),
+        '-p', str(threads_pigz),
+        '-o', str(target_dir)
+    ] + [str(f) for f in sra_files]
 
-        try:
-            logger.info(f"Converting SRA to FASTQ: {sra_file.name}")
-            subprocess.run(cmd, check=True)
-            generated.extend(list(target_dir.glob(f"{sra_file.stem}*.fastq")))
-            generated.extend(list(target_dir.glob(f"{sra_file.stem}*.fq")))
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to convert {sra_file}: {e}")
+    if dry_run:
+        logger.info(f"[DRY RUN] Would convert SRA: {' '.join(cmd)}")
+        return [target_dir / f"{f.stem}.fastq.gz" for f in sra_files]
 
-    return generated
+    try:
+        logger.info(f"Converting {len(sra_files)} SRA file(s) to FASTQ.gz...")
+        subprocess.run(cmd, check=True)
+        generated = list(target_dir.glob('*.fastq.gz')) + list(target_dir.glob('*.fq.gz'))
+        logger.info(f"Generated {len(generated)} FASTQ.gz file(s)")
+        return generated
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to convert SRA files: {e}")
+        return []
 
 
 def decompress_gzip_files(target_dir, dry_run=False):
@@ -321,7 +332,7 @@ def prepare_reference_db_if_missing(workdir, species, dry_run=False):
     }
 
 
-def setup_data_directory(workdir, data_dir, dry_run=False):
+def setup_data_directory(workdir, data_dir, dry_run=False, sra_threads=8, pigz_threads=8):
     """Setup data directory with symbolic links to FASTQ files"""
     logger.info("\n" + "=" * 60)
     logger.info("Setting up data directory")
@@ -329,10 +340,11 @@ def setup_data_directory(workdir, data_dir, dry_run=False):
     
     target_dir = Path(workdir) / 'data'
 
-    # Convert SRA files to FASTQ in workdir/data
-    sra_converted = convert_sra_to_fastq(data_dir, target_dir, dry_run)
+    # Convert SRA files to FASTQ.gz using sra2fq.sh
+    sra_converted = convert_sra_to_fastq(data_dir, target_dir, dry_run, 
+                                          threads_dump=sra_threads, threads_pigz=pigz_threads)
     if sra_converted:
-        logger.info(f"\nTotal FASTQ files converted from SRA: {len(sra_converted)}")
+        logger.info(f"\nTotal FASTQ.gz files converted from SRA: {len(sra_converted)}")
     
     # Link FASTQ files
     fastq_patterns = ['*.fastq.gz', '*.fq.gz', '*.fastq', '*.fq']
@@ -714,8 +726,9 @@ def main():
     # Step 1: Create directory structure
     create_directory_structure(workdir, args.dry_run)
     
-    # Step 2: Setup data directory
-    setup_data_directory(workdir, args.data_dir, args.dry_run)
+    # Step 2: Setup data directory (with SRA conversion support)
+    setup_data_directory(workdir, args.data_dir, args.dry_run,
+                         sra_threads=args.sra_threads, pigz_threads=args.pigz_threads)
     
     # Step 3: Setup reference directory
     reference_dirs = []
