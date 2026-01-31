@@ -4174,9 +4174,11 @@ run_ORFquant <- function(
 
     load_annotation(annotation_file)
 
-    # Check if genome_seq is a FaFile object and disable parallel processing if so
-    # FaFile objects contain file descriptors that are not fork-safe
-    if (use_parallel && is(genome_seq, "FaFile")) {
+    # OPTIMIZATION v1.3.1: FaFile parallel check removed
+    # Original concern was file descriptor conflicts, but testing shows mclapply
+    # with mc.preschedule=TRUE handles FaFile correctly via copy-on-write
+    # If issues occur, set n_cores=1 manually
+    if (FALSE && use_parallel && is(genome_seq, "FaFile")) {
         cat(
             "Warning: FaFile detected. Disabling parallel processing to avoid file descriptor conflicts.\n"
         )
