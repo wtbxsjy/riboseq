@@ -36,7 +36,6 @@ include { SAMTOOLS_INDEX                                       } from '../../mod
 include { MULTIQC                                              } from '../../modules/nf-core/multiqc/main'
 include { SAMTOOLS_SORT                                        } from '../../modules/nf-core/samtools/sort'
 include { UMITOOLS_PREPAREFORRSEM as UMITOOLS_PREPAREFORSALMON } from '../../modules/nf-core/umitools/prepareforrsem'
-include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ_PREFILTER } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ         } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_TISEQ           } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_PREFILTER       } from '../../modules/nf-core/ribotish/predict'
@@ -344,14 +343,7 @@ workflow RIBOSEQ {
     }
 
     if (!params.skip_ribotish){
-        // Pre-filter QC (QC only; does not feed prediction)
-        RIBOTISH_QUALITY_RIBOSEQ_PREFILTER(
-            ch_bams_for_qc_prefilter,
-            ch_gtf.map { [ [:], it ] }
-        )
-        ch_versions      = ch_versions.mix(RIBOTISH_QUALITY_RIBOSEQ_PREFILTER.out.versions)
-
-        // Post-filter QC + offsets for prediction (prediction consumes filtered BAMs)
+        // Ribotish quality analysis for P-site offset calculation
         RIBOTISH_QUALITY_RIBOSEQ(
             ch_bams_for_sorf_prediction,
             ch_gtf.map { [ [:], it ] }
