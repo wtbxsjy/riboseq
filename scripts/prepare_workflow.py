@@ -102,7 +102,8 @@ Examples:
                         help='Directory containing reference files (genome FASTA, GTF, etc.). '
                              'If not provided, prepare_reference_db_v2.2.py will be used to generate references.')
     parser.add_argument('-c', '--container-dir', default=None,
-                        help='Directory containing Singularity container images')
+                        help='(Deprecated) Directory containing Singularity container images. '
+                             'Prefer specifying containers directly with --orfquant-container and --rpbp-container.')
     
     # Reference genome settings
     parser.add_argument('--genome', default='GRCh38',
@@ -213,6 +214,42 @@ def create_symlinks(source_dir, target_dir, patterns=None, dry_run=False):
     return linked_files
 
 
+def convert_sra_to_fastq(source_dir, target_dir, dry_run=False):
+    """Convert SRA files to FASTQ in target directory"""
+    source_dir = Path(source_dir).resolve()
+    target_dir = Path(target_dir).resolve()
+
+    sra_files = list(source_dir.glob('*.sra'))
+    if not sra_files:
+        return []
+
+    if not shutil.which('fasterq-dump'):
+        logger.error("fasterq-dump not found in PATH. Please install sra-tools.")
+        return []
+
+    generated = []
+    for sra_file in sra_files:
+        cmd = [
+            'fasterq-dump',
+            '--split-files',
+            '-O', str(target_dir),
+            str(sra_file)
+        ]
+        if dry_run:
+            logger.info(f"[DRY RUN] Would convert SRA: {' '.join(cmd)}")
+            continue
+
+        try:
+            logger.info(f"Converting SRA to FASTQ: {sra_file.name}")
+            subprocess.run(cmd, check=True)
+            generated.extend(list(target_dir.glob(f"{sra_file.stem}*.fastq")))
+            generated.extend(list(target_dir.glob(f"{sra_file.stem}*.fq")))
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to convert {sra_file}: {e}")
+
+    return generated
+
+
 def decompress_gzip_files(target_dir, dry_run=False):
     """Decompress .gz files in target directory"""
     target_dir = Path(target_dir).resolve()
@@ -291,10 +328,22 @@ def setup_data_directory(workdir, data_dir, dry_run=False):
     logger.info("=" * 60)
     
     target_dir = Path(workdir) / 'data'
+
+    # Convert SRA files to FASTQ in workdir/data
+    sra_converted = convert_sra_to_fastq(data_dir, target_dir, dry_run)
+    if sra_converted:
+        logger.info(f"\nTotal FASTQ files converted from SRA: {len(sra_converted)}")
     
     # Link FASTQ files
     fastq_patterns = ['*.fastq.gz', '*.fq.gz', '*.fastq', '*.fq']
     linked = create_symlinks(data_dir, target_dir, fastq_patterns, dry_run)
+
+    # Keep only FASTQ files in workdir/data
+    if not dry_run:
+        for file_path in target_dir.iterdir():
+            if file_path.is_file() and not file_path.name.endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz')):
+                file_path.unlink()
+                logger.info(f"  Removed non-FASTQ file: {file_path.name}")
     
     logger.info(f"\nTotal FASTQ files linked: {len(linked)}")
     return linked
@@ -336,7 +385,7 @@ def setup_reference_directory(workdir, reference_dirs, dry_run=False):
 
 def setup_container_directory(workdir, container_dir, orfquant_container=None, 
                               rpbp_container=None, dry_run=False):
-    """Setup container directory with symbolic links"""
+    """Setup container directory by copying specified images into workdir"""
     logger.info("\n" + "=" * 60)
     logger.info("Setting up container directory")
     logger.info("=" * 60)
@@ -344,36 +393,49 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
     target_dir = Path(workdir) / 'containers'
     linked_containers = {}
     
-    # Link custom containers
+    # Copy specified containers
     if orfquant_container:
         orfquant_path = Path(orfquant_container).resolve()
         if orfquant_path.exists():
             link_path = target_dir / 'orfquant_patched.sif'
             if dry_run:
-                logger.info(f"[DRY RUN] Would link ORFquant: {orfquant_path} -> {link_path}")
+                logger.info(f"[DRY RUN] Would copy ORFquant: {orfquant_path} -> {link_path}")
             else:
                 if not link_path.exists():
-                    link_path.symlink_to(orfquant_path)
-                    logger.info(f"✓ Linked ORFquant container: {orfquant_path.name}")
-                    linked_containers['orfquant'] = link_path
+                    shutil.copy2(orfquant_path, link_path)
+                    logger.info(f"✓ Copied ORFquant container: {orfquant_path.name}")
+                linked_containers['orfquant'] = link_path
     
     if rpbp_container:
         rpbp_path = Path(rpbp_container).resolve()
         if rpbp_path.exists():
             link_path = target_dir / 'rpbp.sif'
             if dry_run:
-                logger.info(f"[DRY RUN] Would link RPBP: {rpbp_path} -> {link_path}")
+                logger.info(f"[DRY RUN] Would copy RPBP: {rpbp_path} -> {link_path}")
             else:
                 if not link_path.exists():
-                    link_path.symlink_to(rpbp_path)
-                    logger.info(f"✓ Linked RPBP container: {rpbp_path.name}")
-                    linked_containers['rpbp'] = link_path
+                    shutil.copy2(rpbp_path, link_path)
+                    logger.info(f"✓ Copied RPBP container: {rpbp_path.name}")
+                linked_containers['rpbp'] = link_path
     
-    # Link all containers from container_dir
+    # Backward-compatible: copy all containers from container_dir
     if container_dir:
+        logger.warning("container-dir is deprecated. Prefer specifying containers directly.")
         container_patterns = ['*.sif', '*.img']
-        files = create_symlinks(container_dir, target_dir, container_patterns, dry_run)
-        logger.info(f"\nTotal containers linked from directory: {len(files)}")
+        files = []
+        for pattern in container_patterns:
+            for file_path in Path(container_dir).resolve().glob(pattern):
+                if not file_path.is_file():
+                    continue
+                dest_path = target_dir / file_path.name
+                if dry_run:
+                    logger.info(f"[DRY RUN] Would copy container: {file_path} -> {dest_path}")
+                    files.append(dest_path)
+                    continue
+                if not dest_path.exists():
+                    shutil.copy2(file_path, dest_path)
+                files.append(dest_path)
+        logger.info(f"\nTotal containers copied from directory: {len(files)}")
         for f in files:
             linked_containers[f.stem] = f
     
