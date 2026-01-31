@@ -3101,7 +3101,22 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
         for_ORFquant_data<-get(load(for_ORFquant_file))
     }
 
-
+    # Empty data protection: Clean P_sites_all to remove invalid or empty ranges
+    if (!is.null(for_ORFquant_data$P_sites_all)) {
+        # If P_sites_all is a GRangesList, filter out empty elements
+        if (is(for_ORFquant_data$P_sites_all, "GRangesList")) {
+            valid_idx <- sapply(for_ORFquant_data$P_sites_all, function(gr) {
+                length(gr) > 0 && all(width(gr) > 0)
+            })
+            for_ORFquant_data$P_sites_all <- for_ORFquant_data$P_sites_all[valid_idx]
+        } else if (is(for_ORFquant_data$P_sites_all, "GRanges")) {
+            # If it's a GRanges, filter out invalid ranges
+            if (length(for_ORFquant_data$P_sites_all) > 0) {
+                valid_idx <- width(for_ORFquant_data$P_sites_all) > 0
+                for_ORFquant_data$P_sites_all <- for_ORFquant_data$P_sites_all[valid_idx]
+            }
+        }
+    }
 
     
     genes_red<-reduce(unlist(GTF_annotation$txs_gene))

@@ -3,7 +3,7 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
 
 %labels
     Author nf-core/riboseq
-    Description RiboseQC container with PATCHED ORFquant 1.1 (fixes Position/combine conflicts and IRanges edge cases)
+    Description RiboseQC container with PATCHED ORFquant 1.1 (fixes Position/combine conflicts, IRanges edge cases, and empty P-site data)
 
 %setup
     ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
@@ -25,6 +25,8 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
     #    to ensure Position and combine don't get overridden by ggplot2/gridExtra
     # 2. orfquant.R: IRanges empty data protection added at lines 160 and 973
     #    to prevent "at least two out of start/end/width must be supplied" errors
+    # 3. orfquant.R (line ~3105): P_sites_all empty data filter added
+    #    to handle filtered BAMs (MT removed) with missing P-site data for some read lengths
     
     cat > /tmp/install_orfquant.R <<'RSCRIPT'
 pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
@@ -57,9 +59,11 @@ RSCRIPT
     PATCH DETAILS:
     - ORFquant NAMESPACE modified to import BiocGenerics LAST
     - Ensures BiocGenerics::Position and BiocGenerics::combine are not overridden
-    - IRanges edge case protection added to prevent errors on empty data
+    - IRanges edge case protection added to prevent errors on empty data (2 locations)
+    - P_sites_all validation filter for GRangesList with empty/invalid elements
     - Fixes "attempt to apply non-function" error in parallel ORFquant runs
     - Fixes "at least two out of start/end/width must be supplied" IRanges error
+    - Handles filtered BAMs (MT removed) that may have missing P-sites for some read lengths
     
     Build:
         apptainer build --fakeroot -F orfquant_patched.sif containers/Singularity.orfquant.patched.def
