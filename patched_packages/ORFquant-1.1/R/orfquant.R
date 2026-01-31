@@ -3011,9 +3011,9 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
                      stn.orf_find.all_starts=T,stn.orf_find.nostarts=F,stn.orf_find.start_sel_cutoff = NA,
                      stn.orf_find.start_sel_cutoff_ave = .5,stn.orf_find.cutoff_fr_ave=.5,
                      stn.orf_quant.cutoff_cums = NA,stn.orf_quant.cutoff_pct = 2,stn.orf_quant.cutoff_P_sites=NA,unique_reads_only=F,canonical_start_only=T){    
-    # Parallel processing configuration
+    # Parallel processing configuration  
     # Use parallel::mclapply for Unix (fork-based, inherits parent environment)
-    # Use serial processing for Windows
+    # Use serial processing for Windows or when FaFile objects are detected
     use_parallel <- (n_cores > 1) && (.Platform$OS.type == "unix")
     
     if(FALSE){  # Legacy doMC code disabled
@@ -3030,6 +3030,14 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
     cat(paste("Loading annotation and Ribo-seq signal ... ",date(),"\n",sep = ""))
     
     load_annotation(annotation_file)
+    
+    # Check if genome_seq is a FaFile object and disable parallel processing if so
+    # FaFile objects contain file descriptors that are not fork-safe
+    if (use_parallel && is(genome_seq, "FaFile")) {
+        cat("Warning: FaFile detected. Disabling parallel processing to avoid file descriptor conflicts.\n")
+        use_parallel <- FALSE
+        n_cores <- 1
+    }
         
        ##If we have only one object specified, use that, otherwise combine them all
     message('loading p site data')
@@ -3191,40 +3199,56 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
     
     # Define the worker function that processes a single gene region
     # All required variables are captured in the closure
+    # Wrap in tryCatch to provide better error messages
     process_gene <- function(g) {
-        gen_region <- genes_red[g]
-        genetcd <- GTF_annotation$genetic_codes$genetic_code[
-            rownames(GTF_annotation$genetic_codes) == as.character(seqnames(gen_region))
-        ]
-        genetcd <- getGeneticCode(genetcd)
-        if(canonical_start_only){
-            attributes(genetcd)$alt_init_codons <- names(which(genetcd == "M"))
-        }
-        
-        ORFquant(region = gen_region, for_ORFquant = for_ORFquant_data, 
-                 genetic_code_region = genetcd,
-                 orf_find.all_starts = stn.orf_find.all_starts, 
-                 orf_find.nostarts = stn.orf_find.nostarts,
-                 orf_find.start_sel_cutoff = stn.orf_find.start_sel_cutoff, 
-                 orf_find.start_sel_cutoff_ave = stn.orf_find.start_sel_cutoff_ave,
-                 orf_find.cutoff_fr_ave = stn.orf_find.cutoff_fr_ave, 
-                 orf_quant.cutoff_cums = stn.orf_quant.cutoff_cums,
-                 orf_quant.cutoff_pct = stn.orf_quant.cutoff_pct, 
-                 orf_quant.cutoff_P_sites = stn.orf_quant.cutoff_P_sites, 
-                 unique_reads = unique_reads_only)
+        tryCatch({
+            gen_region <- genes_red[g]
+            genetcd <- GTF_annotation$genetic_codes$genetic_code[
+                rownames(GTF_annotation$genetic_codes) == as.character(seqnames(gen_region))
+            ]
+            genetcd <- getGeneticCode(genetcd)
+            if(canonical_start_only){
+                attributes(genetcd)$alt_init_codons <- names(which(genetcd == "M"))
+            }
+            
+            ORFquant(region = gen_region, for_ORFquant = for_ORFquant_data, 
+                     genetic_code_region = genetcd,
+                     orf_find.all_starts = stn.orf_find.all_starts, 
+                     orf_find.nostarts = stn.orf_find.nostarts,
+                     orf_find.start_sel_cutoff = stn.orf_find.start_sel_cutoff, 
+                     orf_find.start_sel_cutoff_ave = stn.orf_find.start_sel_cutoff_ave,
+                     orf_find.cutoff_fr_ave = stn.orf_find.cutoff_fr_ave, 
+                     orf_quant.cutoff_cums = stn.orf_quant.cutoff_cums,
+                     orf_quant.cutoff_pct = stn.orf_quant.cutoff_pct, 
+                     orf_quant.cutoff_P_sites = stn.orf_quant.cutoff_P_sites, 
+                     unique_reads = unique_reads_only)
+        }, error = function(e) {
+            # Return NULL on error to allow processing to continue
+            # Error details will be logged
+            message(paste("Error processing gene", g, ":", conditionMessage(e)))
+            return(NULL)
+        })
     }
     
     # Use parallel::mclapply for Unix (fork-based, inherits parent environment naturally)
     # Falls back to serial lapply on Windows
     if (use_parallel) {
+        cat(paste("Starting parallel processing with", n_cores, "cores ...\n"))
         ORFs_found <- parallel::mclapply(seq_along(genes_red), process_gene, 
                                          mc.cores = n_cores, 
                                          mc.preschedule = TRUE,
-                                         mc.silent = FALSE)
-        # Check for errors in parallel execution
-        errors <- sapply(ORFs_found, function(x) inherits(x, "try-error"))
-        if (any(errors)) {
-            warning(paste("Parallel processing encountered", sum(errors), "errors. Results may be incomplete."))
+                                         mc.silent = FALSE,
+                                         mc.cleanup = TRUE)
+        # Check for errors/NULL results in parallel execution and filter them out
+        is_error_or_null <- sapply(ORFs_found, function(x) {
+            inherits(x, "try-error") || is.null(x) || (is.list(x) && length(x) == 0)
+        })
+        if (any(is_error_or_null)) {
+            n_errors <- sum(is_error_or_null)
+            n_success <- sum(!is_error_or_null)
+            cat(paste("Parallel processing: ", n_success, " successful, ", n_errors, " failed\n", sep=""))
+            # Remove error objects before proceeding
+            ORFs_found <- ORFs_found[!is_error_or_null]
         }
     } else {
         ORFs_found <- lapply(seq_along(genes_red), process_gene)

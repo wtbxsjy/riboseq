@@ -1,0 +1,33 @@
+INFO:    Starting build...
+INFO:    Fetching OCI image...
+INFO:    Extracting OCI image...
+2026/01/31 17:01:50  warn rootless{dev/console} creating empty file in place of device 5:1
+INFO:    Inserting Apptainer configuration...
+INFO:    Running setup scriptlet
++ ROOTFS=/tmp/build-temp-919445783/rootfs
++ mkdir -p /tmp/build-temp-919445783/rootfs/etc
++ rm -f /tmp/build-temp-919445783/rootfs/etc/resolv.conf
++ :
++ mkdir -p /tmp/build-temp-919445783/rootfs/opt/orfquant_patched
+INFO:    Copying patched_packages/ORFquant-1.1 to /opt/orfquant_patched/ORFquant-1.1
+INFO:    Running post scriptlet
++ cat
++ R --vanilla -q -f /tmp/install_orfquant.R
+> pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
+> 
+> if (!dir.exists(pkg_dir)) {
++     stop("Patched ORFquant source not found at: ", pkg_dir)
++ }
+> 
+> message("Installing patched ORFquant 1.1 from: ", pkg_dir)
+Installing patched ORFquant 1.1 from: /opt/orfquant_patched/ORFquant-1.1
+> cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
+> message(cmd)
+R CMD INSTALL '/opt/orfquant_patched/ORFquant-1.1'
+> status <- system(cmd)
+* installing to library '/usr/local/lib/R/library'
+* installing *source* package 'ORFquant' ...
+** using staged installation
+** R
+** inst
+** byte-compile and prepare package for lazy loading
