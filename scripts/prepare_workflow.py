@@ -566,6 +566,9 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     if args.run_prefilter_qc:
         nf_cmd_parts.append("--run_prefilter_qc")
     
+    # Skip RPBP by default (not fully validated yet)
+    nf_cmd_parts.append("--skip_rpbp")
+    
     # ORF unification and classification options (default: run, so no need to set false)
     nf_cmd_parts.extend([
         f"--unify_orf_min_len {args.unify_orf_min_len}",
