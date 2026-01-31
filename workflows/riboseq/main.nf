@@ -39,11 +39,12 @@ include { UMITOOLS_PREPAREFORRSEM as UMITOOLS_PREPAREFORSALMON } from '../../mod
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ_PREFILTER } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ         } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_TISEQ           } from '../../modules/nf-core/ribotish/quality'
-include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_INDIVIDUAL      } from '../../modules/nf-core/ribotish/predict'
+include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_PREFILTER       } from '../../modules/nf-core/ribotish/predict'
+include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_POSTFILTER      } from '../../modules/nf-core/ribotish/predict'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_ALL             } from '../../modules/nf-core/ribotish/predict'
 include { RIBOTRICER_PREPAREORFS                               } from '../../modules/nf-core/ribotricer/prepareorfs'
-include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_PREFILTER_QC } from '../../modules/nf-core/ribotricer/detectorfs'
-include { RIBOTRICER_DETECTORFS                                } from '../../modules/nf-core/ribotricer/detectorfs'
+include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_PREFILTER } from '../../modules/nf-core/ribotricer/detectorfs'
+include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_POSTFILTER } from '../../modules/nf-core/ribotricer/detectorfs'
 include { HISAT2_EXTRACTSPLICESITES                            } from '../../modules/nf-core/hisat2/extractsplicesites/main'
 include { UNIFY_ORF_PREDICTIONS                                } from '../../modules/local/unify_orf_predictions/main'
 include { CLASSIFY_ORFS_GENCODE; CLASSIFY_ORFS_ORFQUANT; CLASSIFY_ORFS_ORF_TYPE } from '../../modules/local/classify_orfs/main'
@@ -309,11 +310,11 @@ workflow RIBOSEQ {
     ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_genome_bam_index)
     ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> [ [:], fasta, gtf ] }
 
-    // Pre-filter QC runs should not overwrite post-filter outputs; suffix meta.id for QC-only runs
-    ch_bams_for_qc_prefilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ id: "${meta.id}_prefilter" ], bam, bai ] }
+    // Pre-filter: using unfiltered BAMs (with MT reads) - suffix 'prefilter' for output organization
+    ch_bams_for_prefilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ filter_status: 'prefilter' ], bam, bai ] }
 
-    // sORF prediction BAMs: filtered by default; used by ALL sORF predictors
-    ch_bams_for_sorf_prediction = ch_bams_for_analysis
+    // Post-filter: using filtered BAMs (MT reads removed) - suffix 'postfilter' for output organization
+    ch_bams_for_postfilter = ch_bams_for_analysis
 
     // ORF prediction outputs for unified post-processing
     ch_ribotish_predictions = Channel.empty()
@@ -357,31 +358,52 @@ workflow RIBOSEQ {
         )
         ch_versions      = ch_versions.mix(RIBOTISH_QUALITY_RIBOSEQ.out.versions)
 
-        ribotish_predict_inputs = ch_bams_for_sorf_prediction
-            .join(RIBOTISH_QUALITY_RIBOSEQ.out.offset)
-            .multiMap{ meta, bam, bai, offset ->
-                bam: [ meta, bam, bai ]
-                offset: [ meta, offset ]
-            }
+        // Prefilter: using unfiltered BAMs (optional, for QC comparison)
+        if (params.run_prefilter_qc) {
+            ribotish_prefilter_inputs = ch_bams_for_prefilter
+                .join(RIBOTISH_QUALITY_RIBOSEQ.out.offset)
+                .multiMap{ meta, bam, bai, offset ->
+                    bam: [ meta, bam, bai ]
+                    offset: [ meta, offset ]
+                }
 
-        RIBOTISH_PREDICT_INDIVIDUAL(
-            ribotish_predict_inputs.bam,
-            [[:],[],[]],
-            ch_fasta_gtf,
-            [[:],[]],
-            ribotish_predict_inputs.offset,
-            [[:],[]]
-        )
-        ch_versions = ch_versions.mix(RIBOTISH_PREDICT_INDIVIDUAL.out.versions)
-        ch_ribotish_predictions = RIBOTISH_PREDICT_INDIVIDUAL.out.predictions
-
-        if (params.sorf_predict_pooled) {
-            RIBOTISH_PREDICT_ALL(
-                ribotish_predict_inputs.bam.map{meta, bam, bai -> [[id:'allsamples'], bam, bai]}.groupTuple(),
+            RIBOTISH_PREDICT_PREFILTER(
+                ribotish_prefilter_inputs.bam,
                 [[:],[],[]],
                 ch_fasta_gtf,
                 [[:],[]],
-                ribotish_predict_inputs.offset.map{meta, offset -> [[id:'allsamples'], offset]}.groupTuple(),
+                ribotish_prefilter_inputs.offset,
+                [[:],[]]
+            )
+            ch_versions = ch_versions.mix(RIBOTISH_PREDICT_PREFILTER.out.versions)
+        }
+
+        // Postfilter: using filtered BAMs (MT removed)
+        ribotish_postfilter_inputs = ch_bams_for_postfilter
+            .join(RIBOTISH_QUALITY_RIBOSEQ.out.offset)
+            .multiMap{ meta, bam, bai, offset ->
+                bam: [ meta + [ filter_status: 'postfilter' ], bam, bai ]
+                offset: [ meta, offset ]
+            }
+
+        RIBOTISH_PREDICT_POSTFILTER(
+            ribotish_postfilter_inputs.bam,
+            [[:],[],[]],
+            ch_fasta_gtf,
+            [[:],[]],
+            ribotish_postfilter_inputs.offset,
+            [[:],[]]
+        )
+        ch_versions = ch_versions.mix(RIBOTISH_PREDICT_POSTFILTER.out.versions)
+        ch_ribotish_predictions = RIBOTISH_PREDICT_POSTFILTER.out.predictions
+
+        if (params.sorf_predict_pooled) {
+            RIBOTISH_PREDICT_ALL(
+                ribotish_postfilter_inputs.bam.map{meta, bam, bai -> [[id:'allsamples', filter_status:'postfilter'], bam, bai]}.groupTuple(),
+                [[:],[],[]],
+                ch_fasta_gtf,
+                [[:],[]],
+                ribotish_postfilter_inputs.offset.map{meta, offset -> [[id:'allsamples'], offset]}.groupTuple(),
                 [[:],[]]
             )
             ch_versions = ch_versions.mix(RIBOTISH_PREDICT_ALL.out.versions)
@@ -396,19 +418,22 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOTRICER_PREPAREORFS.out.versions)
 
-        // Pre-filter run as QC-only (suffix meta.id to avoid output collisions)
-        RIBOTRICER_DETECTORFS_PREFILTER_QC(
-            ch_bams_for_qc_prefilter,
-            RIBOTRICER_PREPAREORFS.out.candidate_orfs
-        )
-        ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_PREFILTER_QC.out.versions)
+        // Prefilter: using unfiltered BAMs (with MT reads) - optional for QC comparison
+        if (params.run_prefilter_qc) {
+            RIBOTRICER_DETECTORFS_PREFILTER(
+                ch_bams_for_prefilter,
+                RIBOTRICER_PREPAREORFS.out.candidate_orfs
+            )
+            ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_PREFILTER.out.versions)
+        }
 
-        RIBOTRICER_DETECTORFS(
-            ch_bams_for_sorf_prediction,
+        // Postfilter: using filtered BAMs (MT removed)
+        RIBOTRICER_DETECTORFS_POSTFILTER(
+            ch_bams_for_postfilter.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] },
             RIBOTRICER_PREPAREORFS.out.candidate_orfs
         )
-        ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS.out.versions)
-        ch_ribotricer_orfs = RIBOTRICER_DETECTORFS.out.orfs
+        ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_POSTFILTER.out.versions)
+        ch_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs
     }
 
     if (!params.skip_rpbp){
@@ -453,26 +478,27 @@ workflow RIBOSEQ {
     ch_riboseqc_orfquant   = Channel.empty()
 
     if (!params.skip_riboseqc) {
-        // Filtered RiboseQC (used by ORFquant)
-        RIBOSEQC_PREFILTER(
-            ch_bams_for_sorf_prediction,
-            ch_gtf,
-            ch_fasta
-        )
-        ch_versions = ch_versions.mix(RIBOSEQC_PREFILTER.out.versions)
+        // Prefilter: using unfiltered BAMs (with MT reads) - optional for QC comparison
+        if (params.run_prefilter_qc) {
+            RIBOSEQC_PREFILTER(
+                ch_bams_for_prefilter,
+                ch_gtf,
+                ch_fasta
+            )
+            ch_versions = ch_versions.mix(RIBOSEQC_PREFILTER.out.versions)
+        }
 
-        // Store RiboseQC outputs for ORFquant
-        ch_riboseqc_annotation = RIBOSEQC_PREFILTER.out.annotation
-        ch_riboseqc_orfquant   = RIBOSEQC_PREFILTER.out.orfquant
-
-        // Post-filter RiboseQC (QC-only; suffix meta.id to avoid output collisions)
-        ch_bams_for_qc_postfilter = ch_bams_for_sorf_prediction.map { meta, bam, bai -> [ meta + [ id: "${meta.id}_postfilter" ], bam, bai ] }
+        // Postfilter: using filtered BAMs (MT removed) - used by ORFquant
         RIBOSEQC_POSTFILTER(
-            ch_bams_for_qc_postfilter,
+            ch_bams_for_postfilter.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] },
             ch_gtf,
             ch_fasta
         )
         ch_versions = ch_versions.mix(RIBOSEQC_POSTFILTER.out.versions)
+
+        // Store RiboseQC postfilter outputs for ORFquant
+        ch_riboseqc_annotation = RIBOSEQC_POSTFILTER.out.annotation
+        ch_riboseqc_orfquant   = RIBOSEQC_POSTFILTER.out.orfquant
     }
 
     //

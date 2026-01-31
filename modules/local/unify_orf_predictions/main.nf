@@ -29,24 +29,26 @@ process UNIFY_ORF_PREDICTIONS {
     script:
     def min_len = params.unify_orf_min_len ?: 10
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
-    // Files are already staged via all_inputs, just need filenames
-    def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ? "--ribotish ${ribotish_files.join(' ')}" : ''
-    def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ? "--ribotricer ${ribotricer_files.join(' ')}" : ''
-    def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ? "--orfquant ${orfquant_files.join(' ')}" : ''
+    // Files are already staged via all_inputs, just need filenames properly quoted
+    def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ? 
+        "--ribotish ${ribotish_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ? 
+        "--ribotricer ${ribotricer_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ? 
+        "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     """
     set -euo pipefail
 
     # Setup user-local Python package directory to avoid permission issues
     export PYTHONUSERBASE="\$PWD/.pylibs"
     export PATH="\$PYTHONUSERBASE/bin:\$PATH"
-    export PIP_CACHE_DIR="\$PWD/.pip_cache"
-    mkdir -p "\$PYTHONUSERBASE" "\$PIP_CACHE_DIR"
+    # Disable pip cache entirely to avoid permission issues in containers
+    export PIP_NO_CACHE_DIR=1
+    mkdir -p "\$PYTHONUSERBASE"
 
-    # Install dependencies with explicit cache dir and error checking
-    pip install --user --quiet --no-warn-script-location --cache-dir "\$PIP_CACHE_DIR" biopython pyfaidx || {
-        echo "pip install failed, trying with --no-cache-dir..."
-        pip install --user --quiet --no-warn-script-location --no-cache-dir biopython pyfaidx
-    }
+    # Install dependencies without cache (most reliable in containers)
+    echo "Installing Python dependencies..."
+    pip install --user --no-cache-dir --quiet --no-warn-script-location biopython pyfaidx
 
     python3 ${unify_script} \\
         --gtf ${gtf} \\

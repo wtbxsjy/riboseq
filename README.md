@@ -285,6 +285,18 @@ To skip specific default tools:
 --skip_rpbp        # rp-bp is skipped by default
 ```
 
+To enable optional prefilter QC analysis (comparison of unfiltered vs filtered BAMs):
+
+```bash
+--run_prefilter_qc  # Run QC on unfiltered BAMs (with MT reads) for comparison - increases runtime and storage
+```
+
+> [!NOTE]
+> **Prefilter vs Postfilter:**
+> - **Postfilter** (default): QC and ORF calling on filtered BAMs (MT reads removed, read length 28-30, unique mapping)
+> - **Prefilter** (optional with `--run_prefilter_qc`): QC on unfiltered BAMs for comparison purposes
+> - ORFquant always uses postfilter results for accurate ORF detection
+
 > [!NOTE]
 > **ORFquant** uses the P-site analysis output from **RiboseQC** (`*_for_ORFquant` files). If you skip RiboseQC, ORFquant will also be automatically skipped.
 

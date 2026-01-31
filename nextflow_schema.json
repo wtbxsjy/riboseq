@@ -714,6 +714,13 @@
                     "type": "string",
                     "description": "Extra arguments to pass to ORFquant (e.g., 'plot_results=TRUE' to generate plots).",
                     "fa_icon": "fas fa-plus"
+                },
+                "run_prefilter_qc": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Run QC analysis on unfiltered BAMs (with MT reads) for comparison with postfilter results. Increases runtime and storage requirements.",
+                    "fa_icon": "fas fa-filter",
+                    "help_text": "By default, only postfilter QC (MT-removed BAMs) is performed. Enable this to also run prefilter QC for comparison purposes."
                 }
             }
         },

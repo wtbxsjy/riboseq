@@ -293,7 +293,7 @@ Read distribution metrics around annotated protein coding regions or based on al
 
 ### RiboseQC
 
-[RiboseQC](https://github.com/ohlerlab/RiboseQC) is a comprehensive quality control tool for Ribo-seq data that provides detailed analysis of ribosome profiling experiments. It generates P-site offset calculations, coverage profiles, and various QC metrics.
+[RiboseQC](https://github.com/ohlerlab/RiboseQC) is a comprehensive quality control tool for Ribo-seq data that provides detailed analysis of ribosome profiling experiments. It generates P-site offset calculations, coverage profiles, and various QC metrics. Results are organized by filter status:
 
 <details markdown="1">
 <summary>Output files</summary>
@@ -301,22 +301,29 @@ Read distribution metrics around annotated protein coding regions or based on al
 - `riboseq_qc/annotation/`
   - `*_Rannot`: RiboseQC annotation file generated from GTF and genome FASTA, used for all samples.
 
-- `riboseq_qc/riboseqc/`
-  - `*_results_RiboseQC`: Core QC results containing summary statistics and P-site offset information.
+- `riboseq_qc/riboseqc/prefilter/`
+  - `*_results_RiboseQC`: Core QC results (using unfiltered BAMs with MT reads).
   - `*_results_RiboseQC_all`: Complete results file with detailed analysis data.
-  - `*_for_ORFquant`: ORFquant-compatible output file for downstream ORF quantification.
-  - `*_coverage_plus.bedgraph`: Read coverage on plus strand.
-  - `*_coverage_minus.bedgraph`: Read coverage on minus strand.
-  - `*_coverage_uniq_plus.bedgraph`: Uniquely mapped read coverage on plus strand.
-  - `*_coverage_uniq_minus.bedgraph`: Uniquely mapped read coverage on minus strand.
-  - `*_P_sites_plus.bedgraph`: P-site positions on plus strand.
-  - `*_P_sites_minus.bedgraph`: P-site positions on minus strand.
-  - `*_P_sites_uniq_plus.bedgraph`: Uniquely mapped P-site positions on plus strand.
-  - `*_P_sites_uniq_minus.bedgraph`: Uniquely mapped P-site positions on minus strand.
+  - `*_for_ORFquant`: ORFquant-compatible output file.
+  - `*_coverage_*.bedgraph`: Read coverage files (plus/minus strands, unique/all reads).
+  - `*_P_sites_*.bedgraph`: P-site position files (plus/minus strands, unique/all reads).
+  - `*_P_sites_calcs`: P-site offset calculations for different read lengths.
+  - `*_junctions`: Splice junction information from ribosome footprints.
+
+- `riboseq_qc/riboseqc/postfilter/`
+  - `*_results_RiboseQC`: Core QC results (using filtered BAMs, MT reads removed).
+  - `*_results_RiboseQC_all`: Complete results file with detailed analysis data.
+  - `*_for_ORFquant`: ORFquant-compatible output file (used by ORFquant for ORF detection).
+  - `*_coverage_*.bedgraph`: Read coverage files (plus/minus strands, unique/all reads).
+  - `*_P_sites_*.bedgraph`: P-site position files (plus/minus strands, unique/all reads).
   - `*_P_sites_calcs`: P-site offset calculations for different read lengths.
   - `*_junctions`: Splice junction information from ribosome footprints.
 
 </details>
+
+**Filter Status:**
+- **prefilter/**: Results from unfiltered BAMs (includes MT/chrM reads, used for QC comparison)
+- **postfilter/**: Results from filtered BAMs (MT reads removed, read length 28-30, unique mapping only) - **used for ORFquant**
 
 > **Note**: HTML report generation is currently disabled due to compatibility issues with the containerized RiboseQC environment. The core QC results in `*_results_RiboseQC` files contain all essential quality metrics.
 
@@ -337,28 +344,65 @@ Read distribution metrics around annotated protein coding regions or based on al
 
 ### Ribo-TISH predict
 
+Ribo-TISH (Translating Initiation Site Hunter) predicts translation initiation sites (TIS) and ORFs from ribosome profiling data. Results are organized by filter status:
+
 <details markdown="1">
 <summary>Output files</summary>
 
-- `orf_predictions/ribotish/`
-  - `*_pred.txt` thresholded ORF predictions from Ribo-TISH
-  - `*_all.txt` unthresholded ORF predictions from Ribo-TISH
-  - `*_transprofile.py` RPF P-site profile for each transcript from Ribo-TISH
-- `orf_predictions/ribotish_all/`
-  - `allsamples_pred.txt` thresholded ORF predictions from Ribo-TISH ran over all samples at once
+- `orf_predictions/ribotish/prefilter/`
+  - `*_pred.txt` thresholded ORF predictions (using unfiltered BAMs with MT reads)
+  - `*_all.txt` unthresholded ORF predictions (using unfiltered BAMs with MT reads)
+  - `*_transprofile.py` RPF P-site profile for each transcript
+- `orf_predictions/ribotish/postfilter/`
+  - `*_pred.txt` thresholded ORF predictions (using filtered BAMs, MT reads removed)
+  - `*_all.txt` unthresholded ORF predictions (using filtered BAMs, MT reads removed)
+  - `*_transprofile.py` RPF P-site profile for each transcript
+- `orf_predictions/ribotish_all/postfilter/`
+  - `allsamples_pred.txt` thresholded ORF predictions from Ribo-TISH ran over all samples at once (using filtered BAMs)
   - `allsamples_all.txt` unthresholded ORF predictions from Ribo-TISH ran over all samples at once
-  - `allsamples_transprofile.py` RPF P-site profile for each transcript from Ribo-TISH ran over all samples at once
+  - `allsamples_transprofile.py` RPF P-site profile for each transcript ran over all samples at once
   </details>
+
+**Filter Status:**
+- **prefilter/**: Results from unfiltered BAMs (includes MT/chrM reads, used for QC comparison)
+- **postfilter/**: Results from filtered BAMs (MT reads removed, read length 28-30, unique mapping only) - **recommended for ORF calling**
+
+> **Note**: By default, only **postfilter** analysis is performed to save computational resources. To also generate **prefilter** QC results for comparison purposes, run with `--run_prefilter_qc` flag.
 
 ### Ribotricer detect-orfs
 
+Ribotricer detects actively translating ORFs using ribosome profiling data. Results are organized by filter status:
+
 <details markdown="1">
 <summary>Output files</summary>
 
-- `orf_predictions/ribotricer/`
-  - `*_translating_ORFs.tsv` TSV with ORFs assessed as translating in the assocciated BAM file
-  - `*_psite_offsets.txt`: If the P-site offsets are not provided, txt file containing the derived relative offsets.
+- `orf_predictions/ribotricer/prefilter/`
+  - `*_translating_ORFs.tsv` TSV with ORFs assessed as translating (using unfiltered BAMs with MT reads)
+  - `*_psite_offsets.txt` Derived relative P-site offsets (if not provided)
+- `orf_predictions/ribotricer/postfilter/`
+  - `*_translating_ORFs.tsv` TSV with ORFs assessed as translating (using filtered BAMs, MT reads removed)
+  - `*_psite_offsets.txt` Derived relative P-site offsets (if not provided)
   </details>
+
+**Filter Status:**
+- **prefilter/**: Results from unfiltered BAMs (includes MT/chrM reads, used for QC comparison)
+- **postfilter/**: Results from filtered BAMs (MT reads removed, read length 28-30, unique mapping only) - **recommended for ORF calling**
+
+### ORFquant
+
+ORFquant is a splice-aware ORF detection tool that integrates RiboseQC analysis results. It only runs on postfilter (MT-removed) BAMs for accurate ORF calling.
+
+<details markdown="1">
+<summary>Output files</summary>
+
+- `orf_predictions/orfquant/postfilter/`
+  - `*.gtf`: GTF file with detected ORF annotations (using filtered BAMs, MT reads removed)
+  - `*_results.txt`: Detailed ORF quantification results including expression levels
+  - `*_summary.txt`: Summary statistics of ORF detection
+
+</details>
+
+**Note**: ORFquant only runs on postfilter BAMs as it requires high-quality, MT-removed reads for accurate splice-aware ORF detection. It uses the `*_for_ORFquant` files from RiboseQC postfilter analysis.
 
 ### Unified ORF predictions (experimental)
 
@@ -372,7 +416,7 @@ Read distribution metrics around annotated protein coding regions or based on al
 
 </details>
 
-The unified ORF predictions are generated by merging Ribo-TISH / Ribotricer / ORFquant outputs and de-duplicating ORFs by genomic coordinates.
+The unified ORF predictions are generated by merging Ribo-TISH / Ribotricer / ORFquant postfilter outputs and de-duplicating ORFs by genomic coordinates.
 
 ### ORF classification (experimental)
 
