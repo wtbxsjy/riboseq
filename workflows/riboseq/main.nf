@@ -338,7 +338,8 @@ workflow RIBOSEQ {
         def ch_filtered_index = params.bam_csi_index ? SAMTOOLS_INDEX.out.csi : SAMTOOLS_INDEX.out.bai
         ch_bams_for_sorf_prediction = SORF_BAM_FILTER.out.bam.join(ch_filtered_index)
         
-        // Post-filter: using filtered BAMs (MT reads removed) - suffix 'postfilter' for output organization
+        // Post-filter: using filtered BAMs (MT reads removed) for RiboseQC/ORFquant
+        // When sorf_filter is enabled, RiboseQC and ORFquant should use the same filtered BAMs
         ch_bams_for_postfilter = ch_bams_for_sorf_prediction.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] }
     } else {
         // If sorf_filter is disabled, use original BAMs for all downstream analysis
@@ -375,10 +376,11 @@ workflow RIBOSEQ {
         }
 
         // Postfilter: using filtered BAMs (MT removed)
+        // ch_bams_for_postfilter already has filter_status set
         ribotish_postfilter_inputs = ch_bams_for_postfilter
             .join(RIBOTISH_QUALITY_RIBOSEQ.out.offset)
             .multiMap{ meta, bam, bai, offset ->
-                bam: [ meta + [ filter_status: 'postfilter' ], bam, bai ]
+                bam: [ meta, bam, bai ]
                 offset: [ meta, offset ]
             }
 
@@ -424,8 +426,9 @@ workflow RIBOSEQ {
         }
 
         // Postfilter: using filtered BAMs (MT removed)
+        // ch_bams_for_postfilter already has filter_status set
         RIBOTRICER_DETECTORFS_POSTFILTER(
-            ch_bams_for_postfilter.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] },
+            ch_bams_for_postfilter,
             RIBOTRICER_PREPAREORFS.out.candidate_orfs
         )
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_POSTFILTER.out.versions)
@@ -484,9 +487,10 @@ workflow RIBOSEQ {
             ch_versions = ch_versions.mix(RIBOSEQC_PREFILTER.out.versions)
         }
 
-        // Postfilter: using filtered BAMs (MT removed) - used by ORFquant
+        // Postfilter: RiboseQC uses filtered BAMs when sorf_filter is enabled
+        // Data consistency: RiboseQC and ORFquant must use the same BAM source
         RIBOSEQC_POSTFILTER(
-            ch_bams_for_postfilter.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] },
+            ch_bams_for_postfilter,
             ch_gtf,
             ch_fasta
         )
