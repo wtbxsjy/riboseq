@@ -7,9 +7,10 @@ process UNIFY_ORF_PREDICTIONS {
     publishDir "${params.outdir}/orf_unification", mode: params.publish_dir_mode
 
     conda "${moduleDir}/environment.yml"
+    // Use biopython container which includes pip and allows installing pyfaidx
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/python:3.9' :
-        'python:3.9' }"
+        'https://depot.galaxyproject.org/singularity/biopython:1.79' :
+        'quay.io/biocontainers/biopython:1.79' }"
 
     input:
     tuple val(ribotish_files), val(ribotricer_files), val(orfquant_files), path(all_inputs)
@@ -42,13 +43,27 @@ process UNIFY_ORF_PREDICTIONS {
     # Setup user-local Python package directory to avoid permission issues
     export PYTHONUSERBASE="\$PWD/.pylibs"
     export PATH="\$PYTHONUSERBASE/bin:\$PATH"
+    export PYTHONPATH="\$PYTHONUSERBASE/lib/python3.9/site-packages:\${PYTHONPATH:-}"
     # Disable pip cache entirely to avoid permission issues in containers
     export PIP_NO_CACHE_DIR=1
     mkdir -p "\$PYTHONUSERBASE"
 
-    # Install dependencies without cache (most reliable in containers)
+    # Install pyfaidx (biopython should be in container)
     echo "Installing Python dependencies..."
-    pip install --user --no-cache-dir --quiet --no-warn-script-location biopython pyfaidx
+    pip install --user --no-cache-dir --no-warn-script-location pyfaidx 2>&1 || {
+        echo "pip install failed, trying with python -m pip..."
+        python3 -m pip install --user --no-cache-dir pyfaidx 2>&1 || true
+    }
+    
+    # If biopython is not in container, install it too
+    python3 -c "import Bio" 2>/dev/null || {
+        echo "Installing biopython..."
+        pip install --user --no-cache-dir --no-warn-script-location biopython 2>&1 || python3 -m pip install --user --no-cache-dir biopython
+    }
+    
+    # Verify installation
+    echo "Verifying dependencies..."
+    python3 -c "import Bio; import pyfaidx; print('Dependencies OK: Bio=' + Bio.__version__ + ', pyfaidx=' + pyfaidx.__version__)"
 
     python3 ${unify_script} \\
         --gtf ${gtf} \\
