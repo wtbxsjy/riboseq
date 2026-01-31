@@ -221,7 +221,8 @@ workdir/
 │
 ├── containers/              # 容器镜像（复制到工作目录）
 │   ├── orfquant_patched.sif
-│   └── rpbp.sif
+│   ├── rpbp.sif
+│   └── unify_orf.sif
 │
 ├── process/                 # Nextflow 工作目录
 │   └── work/               # (运行时创建)
@@ -271,6 +272,7 @@ bash scripts/sra2fq.sh -t 16 -o output_dir *.sra
 | prepare_workflow.py | `-w, -d` | 工作目录, 数据目录 (必需，支持 FASTQ/SRA) |
 | | `-r` | 参考目录 (可选，不指定则自动准备) |
 | | `--orfquant-container, --rpbp-container` | 直接指定镜像路径（推荐） |
+| | `--unify-orf-container` | ORF统一与分类容器路径（Python/biopython） |
 | | `-c` | 容器目录（兼容，已过时） |
 | | `--genome` | 基因组名称（如 GRCh38/GRCm39/IRGSP-1.0） |
 | | `--species` | 物种名称（human/mouse/rice/maize/wheat/soybean） |

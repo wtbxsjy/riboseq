@@ -123,6 +123,8 @@ Examples:
                         help='Path to ORFquant patched container')
     parser.add_argument('--rpbp-container', default=None,
                         help='Path to RPBP container')
+    parser.add_argument('--unify-orf-container', default=None,
+                        help='Path to container for unify_orf_predictions and classify_orfs (Python/biopython)')
     
     # Pipeline options
     parser.add_argument('--skip-prefilter-qc', action='store_true',
@@ -396,7 +398,7 @@ def setup_reference_directory(workdir, reference_dirs, dry_run=False):
 
 
 def setup_container_directory(workdir, container_dir, orfquant_container=None, 
-                              rpbp_container=None, dry_run=False):
+                              rpbp_container=None, unify_orf_container=None, dry_run=False):
     """Setup container directory by copying specified images into workdir"""
     logger.info("\n" + "=" * 60)
     logger.info("Setting up container directory")
@@ -429,6 +431,18 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                     shutil.copy2(rpbp_path, link_path)
                     logger.info(f"✓ Copied RPBP container: {rpbp_path.name}")
                 linked_containers['rpbp'] = link_path
+    
+    if unify_orf_container:
+        unify_path = Path(unify_orf_container).resolve()
+        if unify_path.exists():
+            link_path = target_dir / 'unify_orf.sif'
+            if dry_run:
+                logger.info(f"[DRY RUN] Would copy Unify ORF: {unify_path} -> {link_path}")
+            else:
+                if not link_path.exists():
+                    shutil.copy2(unify_path, link_path)
+                    logger.info(f"✓ Copied Unify ORF container: {unify_path.name}")
+                linked_containers['unify_orf'] = link_path
     
     # Backward-compatible: copy all containers from container_dir
     if container_dir:
@@ -525,6 +539,9 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     if 'rpbp' in containers:
         nf_cmd_parts.append(f"--rpbp_container {containers['rpbp']}")
     
+    if 'unify_orf' in containers:
+        nf_cmd_parts.append(f"--unify_orf_container {containers['unify_orf']}")
+    
     def prefer_uncompressed(path_obj):
         path_obj = Path(path_obj)
         if path_obj.suffix == '.gz':
@@ -549,9 +566,8 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     if args.run_prefilter_qc:
         nf_cmd_parts.append("--run_prefilter_qc")
     
+    # ORF unification and classification options (default: run, so no need to set false)
     nf_cmd_parts.extend([
-        "--skip_unify_orf_predictions false",
-        "--skip_orf_classification false",
         f"--unify_orf_min_len {args.unify_orf_min_len}",
         "--orf_classify_mode orf_type",
     ])
@@ -654,7 +670,8 @@ def create_config_summary(workdir, args, sample_sheet, containers,
         'containers': {
             'source_directory': args.container_dir,
             'orfquant': str(containers.get('orfquant', '')),
-            'rpbp': str(containers.get('rpbp', ''))
+            'rpbp': str(containers.get('rpbp', '')),
+            'unify_orf': str(containers.get('unify_orf', ''))
         },
         'pipeline_options': {
             'run_prefilter_qc': args.run_prefilter_qc,
@@ -755,6 +772,7 @@ def main():
         args.container_dir,
         args.orfquant_container,
         args.rpbp_container,
+        args.unify_orf_container,
         args.dry_run
     )
     
