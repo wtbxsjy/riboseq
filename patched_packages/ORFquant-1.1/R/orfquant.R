@@ -492,91 +492,121 @@ calc_orf_pval <- function(
     tapers = 24,
     bw = 12
 ) {
-    ORFs$pval <- NA
-    ORFs$pval_uniq <- NA
-    ORFs$P_sites_raw <- NA
-    ORFs$P_sites_raw_uniq <- NA
-    ORFs$P_sites_raw_uniq_mm <- NA
-    ORFs$pct_fr <- NA
+    # ==========================================================================
+    # OPTIMIZATION v1.3: Vectorized, early-filtered, pre-allocated version
+    # ==========================================================================
 
-    for (i in 1:length(ORFs)) {
-        psit <- as.vector(P_sites_rle[ORFs[i]@ranges])
-        psit_uniq <- as.vector(P_sites_uniq_rle[ORFs[i]@ranges])
-        psit_uniq_mm <- as.vector(P_sites_uniq_mm_rle[ORFs[i]@ranges])
-        ORFs$P_sites_raw[i] <- sum(psit)
-        ps_unq <- round(sum(psit_uniq) / sum(psit) * 100, digits = 2)
-        if (is.na(ps_unq)) {
-            ps_unq <- 0
-        }
-        ORFs$P_sites_raw_uniq[i] <- sum(psit_uniq)
+    n_orfs <- length(ORFs)
+    if (n_orfs == 0) {
+        return(ORFs)
+    }
 
-        ps_unq <- round(
-            (sum(psit_uniq) - sum(psit_uniq_mm)) / sum(psit) * 100,
-            digits = 2
-        )
-        if (is.na(ps_unq)) {
-            ps_unq <- 0
-        }
+    # Phase 5: Pre-allocate all result columns
+    ORFs$pval <- rep(NA_real_, n_orfs)
+    ORFs$pval_uniq <- rep(NA_real_, n_orfs)
+    ORFs$P_sites_raw <- rep(NA_real_, n_orfs)
+    ORFs$P_sites_raw_uniq <- rep(NA_real_, n_orfs)
+    ORFs$P_sites_raw_uniq_mm <- rep(NA_real_, n_orfs)
+    ORFs$pct_fr <- rep(NA_real_, n_orfs)
+    ORFs$ORF_id_tr <- rep(NA_character_, n_orfs)
 
-        ORFs$P_sites_raw_uniq_mm[i] <- sum(psit_uniq_mm)
-        ORFs$ORF_id_tr[i] <- paste(
-            as.character(seqnames(ORFs[i])[1]),
-            start(ORFs[i]),
-            end(ORFs[i]),
-            sep = "_"
-        )
-        if (sum(psit) > 0) {
-            infr <- round(
-                sum(psit[seq(1, length(psit), by = 3)]) / sum(psit),
+    # Phase 2: Vectorized ORF ID generation
+    ORFs$ORF_id_tr <- paste(
+        as.character(seqnames(ORFs)),
+        start(ORFs),
+        end(ORFs),
+        sep = "_"
+    )
+
+    # Phase 2: Batch extract coverages for vectorized stats
+    all_psit <- lapply(seq_len(n_orfs), function(i) {
+        as.vector(P_sites_rle[ORFs[i]@ranges])
+    })
+    all_psit_uniq <- lapply(seq_len(n_orfs), function(i) {
+        as.vector(P_sites_uniq_rle[ORFs[i]@ranges])
+    })
+    all_psit_uniq_mm <- lapply(seq_len(n_orfs), function(i) {
+        as.vector(P_sites_uniq_mm_rle[ORFs[i]@ranges])
+    })
+
+    # Phase 2: Vectorized basic statistics
+    ORFs$P_sites_raw <- vapply(all_psit, sum, numeric(1L))
+    ORFs$P_sites_raw_uniq <- vapply(all_psit_uniq, sum, numeric(1L))
+    ORFs$P_sites_raw_uniq_mm <- vapply(all_psit_uniq_mm, sum, numeric(1L))
+
+    # Phase 2: Vectorized frame percentage calculation
+    ORFs$pct_fr <- vapply(
+        all_psit,
+        function(psit) {
+            if (sum(psit) == 0) {
+                return(NA_real_)
+            }
+            round(
+                sum(psit[seq(1L, length(psit), by = 3L)]) / sum(psit),
                 digits = 4
             )
-            ORFs$pct_fr[i] <- infr
+        },
+        numeric(1L)
+    )
+
+    # Phase 4: Early filtering - only process ORFs that might pass
+    # Conditions: has P-sites (>0), has >2 positions with signal, and infr > cutoff
+    valid_for_spectral <- which(
+        ORFs$P_sites_raw > 0 &
+            vapply(all_psit, function(x) sum(x > 0) > 2, logical(1L)) &
+            !is.na(ORFs$pct_fr) &
+            ORFs$pct_fr > cutoff
+    )
+
+    # Process only qualifying ORFs for spectral analysis
+    for (i in valid_for_spectral) {
+        psit <- all_psit[[i]]
+        psit_uniq <- all_psit_uniq[[i]]
+
+        # Use cached DPSS (Phase 1 optimization already applied)
+        if (length(psit) < 25) {
+            slepians <- get_cached_dpss(
+                n = length(psit) + (50 - length(psit)),
+                k = tapers,
+                nw = bw
+            )
+        } else {
+            slepians <- get_cached_dpss(
+                n = length(psit),
+                k = tapers,
+                nw = bw
+            )
         }
-        if (sum(psit > 0) > 2) {
-            if (infr > cutoff) {
-                if (length(psit) < 25) {
-                    # OPTIMIZATION v1.3: Use cached DPSS computation
-                    slepians <- get_cached_dpss(
-                        n = length(psit) + (50 - length(psit)),
-                        k = tapers,
-                        nw = bw
-                    )
-                }
-                if (length(psit) >= 25) {
-                    # OPTIMIZATION v1.3: Use cached DPSS computation
-                    slepians <- get_cached_dpss(
-                        n = length(psit),
-                        k = tapers,
-                        nw = bw
-                    )
-                }
-                vals <- take_Fvals_spect(
-                    x = psit,
-                    n_tapers = tapers,
-                    time_bw = bw,
-                    slepians_values = slepians
-                )
-                ORFs$pval[i] <- pf(
-                    q = vals[1],
-                    df1 = 2,
-                    df2 = (2 * 24) - 2,
-                    lower.tail = F
-                )
-                vals <- take_Fvals_spect(
-                    x = psit_uniq,
-                    n_tapers = tapers,
-                    time_bw = bw,
-                    slepians_values = slepians
-                )
-                ORFs$pval_uniq[i] <- pf(
-                    q = vals[1],
-                    df1 = 2,
-                    df2 = (2 * 24) - 2,
-                    lower.tail = F
-                )
-            }
-        }
+
+        # Spectral analysis for all P-sites
+        vals <- take_Fvals_spect(
+            x = psit,
+            n_tapers = tapers,
+            time_bw = bw,
+            slepians_values = slepians
+        )
+        ORFs$pval[i] <- pf(
+            q = vals[1],
+            df1 = 2,
+            df2 = (2 * tapers) - 2,
+            lower.tail = FALSE
+        )
+
+        # Spectral analysis for unique P-sites
+        vals <- take_Fvals_spect(
+            x = psit_uniq,
+            n_tapers = tapers,
+            time_bw = bw,
+            slepians_values = slepians
+        )
+        ORFs$pval_uniq[i] <- pf(
+            q = vals[1],
+            df1 = 2,
+            df2 = (2 * tapers) - 2,
+            lower.tail = FALSE
+        )
     }
+
     return(ORFs)
 }
 
@@ -1021,12 +1051,11 @@ select_txs <- function(
     #first round
     txs_sofar <- txs_gene
 
-    mat <- matrix(data = 0, nrow = length(d), ncol = length(txs_sofar))
+    # OPTIMIZATION v1.3: Use vapply with type specification for faster matrix construction
+    mat <- matrix(data = 0L, nrow = length(d), ncol = length(txs_sofar))
     colnames(mat) <- txs_sofar
-    for (i in 1:length(txs_sofar)) {
-        mat[, i] <- sapply(a, function(x) {
-            sum(x == txs_sofar[i])
-        })
+    for (i in seq_along(txs_sofar)) {
+        mat[, i] <- vapply(a, function(x) sum(x == txs_sofar[i]), integer(1L))
     }
 
     nest <- c()
@@ -1062,12 +1091,15 @@ select_txs <- function(
     change <- 1
 
     while (change > 0) {
-        mat <- matrix(data = 0, nrow = length(d), ncol = length(txs_sofar))
+        # OPTIMIZATION v1.3: Use vapply for faster matrix construction
+        mat <- matrix(data = 0L, nrow = length(d), ncol = length(txs_sofar))
         colnames(mat) <- txs_sofar
-        for (i in 1:length(txs_sofar)) {
-            mat[, i] <- sapply(a, function(x) {
-                sum(x == txs_sofar[i])
-            })
+        for (i in seq_along(txs_sofar)) {
+            mat[, i] <- vapply(
+                a,
+                function(x) sum(x == txs_sofar[i]),
+                integer(1L)
+            )
         }
 
         mat_orig <- mat
