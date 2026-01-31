@@ -22,6 +22,7 @@ export(select_quantify_ORFs)
 export(select_start)
 export(select_txs)
 export(take_Fvals_spect)
+export(clear_dpss_cache)
 
 import(Biostrings)
 import(GenomicAlignments)
