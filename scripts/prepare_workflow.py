@@ -107,10 +107,10 @@ Examples:
     
     # Reference genome settings
     parser.add_argument('--genome', default='GRCh38',
-                        help='Genome name (default: GRCh38)')
+                        help='Genome name (default: GRCh38). Example: GRCh38/GRCm39/IRGSP-1.0')
     parser.add_argument('--species', default='human',
                         choices=['human', 'mouse', 'rice', 'maize', 'wheat'],
-                        help='Species name (default: human)')
+                        help='Species name (default: human). Choices: human, mouse, rice, maize, wheat')
     
     # Sample sheet options
     parser.add_argument('--strandedness', default='auto',

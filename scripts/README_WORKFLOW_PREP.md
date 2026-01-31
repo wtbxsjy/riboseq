@@ -12,7 +12,9 @@
 
 **核心特性**:
 - ✅ 创建标准化目录结构 (data, reference, containers, process, result, scripts)
-- ✅ 智能符号链接管理（避免数据复制）
+- ✅ FASTQ/SRA 兼容：SRA 自动转换为 FASTQ，仅保留 FASTQ
+- ✅ 参考库可选：未指定 `-r` 时自动下载并解压到工作目录
+- ✅ 容器镜像直接指定并复制到工作目录
 - ✅ 自动生成样本表 (samplesheet.csv)
 - ✅ 生成可执行的 Nextflow 脚本
 - ✅ 保存配置摘要 (JSON)
@@ -25,16 +27,23 @@ python3 scripts/prepare_workflow.py \
     -w /path/to/workdir \
     -d /path/to/fastq_files
 
-# 完整配置
+# 完整配置（推荐直接指定镜像）
 python3 scripts/prepare_workflow.py \
     -w ~/riboseq_project \
     -d /data/fastq \
     -r /data/reference \
-    -c /data/containers \
     --genome GRCh38 \
     --species human \
     --orfquant-container /path/to/orfquant_patched.sif \
+    --rpbp-container /path/to/rpbp.sif \
     --run-prefilter-qc
+
+# 不指定参考目录（自动准备参考库并解压）
+python3 scripts/prepare_workflow.py \
+    -w ~/riboseq_project \
+    -d /data/fastq \
+    --species human \
+    --genome GRCh38
 ```
 
 **详细文档**: 查看 [PREPARE_WORKFLOW_GUIDE.md](PREPARE_WORKFLOW_GUIDE.md)
@@ -134,22 +143,16 @@ bash scripts/sra2fq.sh -t 16 -p 8 -o /output/dir *.sra
 
 ## 完整工作流示例
 
-### 场景 1: 从原始数据开始
+### 场景 1: 从原始数据开始（自动准备参考）
 
 ```bash
-# Step 1: 准备参考数据库
-python3 scripts/prepare_reference_db_v2.2.py \
-    --species human \
-    --output-dir ~/references/human_gencode_v49
-
-# Step 2: （可选）从 SRA 下载数据
+# Step 1: （可选）从 SRA 下载数据
 bash scripts/sra2fq.sh -o ~/data/fastq SRR*.sra
 
-# Step 3: 准备工作流
+# Step 2: 准备工作流（自动准备参考库并解压）
 python3 scripts/prepare_workflow.py \
     -w ~/riboseq_analysis \
     -d ~/data/fastq \
-    -r ~/references/human_gencode_v49 \
     --genome GRCh38 \
     --species human
 
@@ -166,9 +169,9 @@ python3 scripts/prepare_workflow.py \
     -w /work/my_project \
     -d /data/existing_fastq \
     -r /data/existing_reference \
-    -c /data/containers \
     --genome GRCh38 \
     --orfquant-container /data/containers/orfquant_patched.sif \
+    --rpbp-container /data/containers/rpbp.sif \
     --run-prefilter-qc \
     --unify-orf-min-len 24
 
@@ -204,14 +207,14 @@ workdir/
 │   ├── sample1_R1.fastq.gz -> /original/path/sample1_R1.fastq.gz
 │   └── sample1_R2.fastq.gz -> /original/path/sample1_R2.fastq.gz
 │
-├── reference/               # 参考文件（符号链接或实际文件）
-│   ├── genome.fa.gz
-│   ├── annotation.gtf.gz
-│   └── contaminant.fa
+├── reference/               # 参考文件（自动解压）
+│   ├── genome.fa
+│   ├── annotation.gtf
+│   └── contaminant.fasta
 │
-├── containers/              # 容器镜像（符号链接）
-│   ├── orfquant_patched.sif -> /containers/orfquant_patched.sif
-│   └── rpbp.sif -> /containers/rpbp.sif
+├── containers/              # 容器镜像（复制到工作目录）
+│   ├── orfquant_patched.sif
+│   └── rpbp.sif
 │
 ├── process/                 # Nextflow 工作目录
 │   └── work/               # (运行时创建)
@@ -239,7 +242,9 @@ python3 scripts/prepare_workflow.py -w workdir -d fastq_dir
 
 # 2. 准备工作流（完整配置）
 python3 scripts/prepare_workflow.py \
-    -w workdir -d fastq_dir -r ref_dir -c container_dir \
+    -w workdir -d fastq_dir -r ref_dir \
+    --orfquant-container /path/orfquant_patched.sif \
+    --rpbp-container /path/rpbp.sif \
     --genome GRCh38 --run-prefilter-qc
 
 # 3. 生成样本表
@@ -257,8 +262,11 @@ bash scripts/sra2fq.sh -t 16 -o output_dir *.sra
 | 脚本 | 关键参数 | 说明 |
 |------|---------|------|
 | prepare_workflow.py | `-w, -d` | 工作目录, 数据目录 (必需) |
-| | `-r, -c` | 参考目录, 容器目录 (可选) |
-| | `--genome` | 基因组名称 |
+| | `-r` | 参考目录 (可选，不指定则自动准备) |
+| | `--orfquant-container, --rpbp-container` | 直接指定镜像路径（推荐） |
+| | `-c` | 容器目录（兼容，已过时） |
+| | `--genome` | 基因组名称（如 GRCh38/GRCm39/IRGSP-1.0） |
+| | `--species` | 物种名称（human/mouse/rice/maize/wheat） |
 | | `--run-prefilter-qc` | 启用 prefilter QC |
 | get_sample_sheet.py | `-i, -o` | 输入目录, 输出文件 |
 | prepare_reference_db_v2.2.py | `--species` | 物种名称 |
@@ -274,6 +282,14 @@ bash scripts/sra2fq.sh -t 16 -o output_dir *.sra
 ls -lh /path/to/fastq_dir/*.fastq.gz
 
 # 确保文件扩展名正确 (.fastq.gz 或 .fq.gz)
+```
+
+### 问题 1.1: 数据是 SRA 文件
+```bash
+# 需要安装 sra-tools（fasterq-dump）
+fasterq-dump --version
+
+# prepare_workflow.py 会自动将 .sra 转为 FASTQ 并仅保留 FASTQ
 ```
 
 ### 问题 2: 符号链接失败
@@ -301,6 +317,14 @@ ls -lh /path/to/orfquant_patched.sif
 
 # 使用绝对路径
 --orfquant-container $(realpath /path/to/orfquant_patched.sif)
+```
+
+### 问题 4.1: 容器太大导致复制慢
+```bash
+# 可用 --dry-run 先检查路径
+python3 scripts/prepare_workflow.py -w workdir -d data --dry-run
+
+# 建议将镜像放在本地磁盘以加速复制
 ```
 
 ---
