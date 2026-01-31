@@ -61,7 +61,7 @@ REFERENCE_FILES = {
     'genome_fasta': ['*.fa', '*.fasta', '*.fa.gz', '*.fasta.gz'],
     'gtf': ['*.gtf', '*.gtf.gz'],
     'transcripts': ['*transcripts*.fa', '*transcripts*.fa.gz'],
-    'contaminant': ['contaminant*.fa', 'rrna*.fa']
+    'contaminant': ['*contamination*.fa*', '*contaminant*.fa*', '*rrna*.fa*', '*rRNA*.fa*']
 }
 
 
@@ -99,7 +99,8 @@ Examples:
     
     # Optional data sources
     parser.add_argument('-r', '--reference-dir', default=None,
-                        help='Directory containing reference files (genome FASTA, GTF, etc.)')
+                        help='Directory containing reference files (genome FASTA, GTF, etc.). '
+                             'If not provided, prepare_reference_db_v2.2.py will be used to generate references.')
     parser.add_argument('-c', '--container-dir', default=None,
                         help='Directory containing Singularity container images')
     
@@ -212,6 +213,77 @@ def create_symlinks(source_dir, target_dir, patterns=None, dry_run=False):
     return linked_files
 
 
+def decompress_gzip_files(target_dir, dry_run=False):
+    """Decompress .gz files in target directory"""
+    target_dir = Path(target_dir).resolve()
+    if not target_dir.exists():
+        return []
+
+    decompressed = []
+    for gz_path in target_dir.glob('*.gz'):
+        out_path = gz_path.with_suffix('')
+        if out_path.exists() and out_path.stat().st_size > 0:
+            logger.info(f"  Skipping (already decompressed): {out_path.name}")
+            continue
+
+        if dry_run:
+            logger.info(f"[DRY RUN] Would decompress: {gz_path} -> {out_path}")
+            decompressed.append(out_path)
+            continue
+
+        try:
+            import gzip
+            with gzip.open(gz_path, 'rb') as f_in, open(out_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            logger.info(f"✓ Decompressed: {out_path.name}")
+            decompressed.append(out_path)
+        except Exception as e:
+            logger.error(f"Failed to decompress {gz_path}: {e}")
+
+    return decompressed
+
+
+def prepare_reference_db_if_missing(workdir, species, dry_run=False):
+    """Prepare reference database using prepare_reference_db_v2.2.py when not provided"""
+    script_dir = Path(__file__).parent
+    prep_script = script_dir / 'prepare_reference_db_v2.2.py'
+    if not prep_script.exists():
+        logger.error(f"prepare_reference_db_v2.2.py not found at: {prep_script}")
+        return None
+
+    base_dir = Path(workdir).resolve() / 'reference_data_project'
+    reference_dir = base_dir / 'reference'
+    contaminant_dir = base_dir / 'contamination_indices'
+
+    cmd = [
+        'python3',
+        str(prep_script),
+        '-o', str(base_dir),
+        '-s', str(species)
+    ]
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would execute: {' '.join(cmd)}")
+        return {
+            'base_dir': base_dir,
+            'reference_dir': reference_dir,
+            'contaminant_dir': contaminant_dir
+        }
+
+    try:
+        logger.info(f"Executing: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to prepare reference DB: {e}")
+        return None
+
+    return {
+        'base_dir': base_dir,
+        'reference_dir': reference_dir,
+        'contaminant_dir': contaminant_dir
+    }
+
+
 def setup_data_directory(workdir, data_dir, dry_run=False):
     """Setup data directory with symbolic links to FASTQ files"""
     logger.info("\n" + "=" * 60)
@@ -228,25 +300,36 @@ def setup_data_directory(workdir, data_dir, dry_run=False):
     return linked
 
 
-def setup_reference_directory(workdir, reference_dir, dry_run=False):
+def setup_reference_directory(workdir, reference_dirs, dry_run=False):
     """Setup reference directory with symbolic links"""
     logger.info("\n" + "=" * 60)
     logger.info("Setting up reference directory")
     logger.info("=" * 60)
-    
-    if not reference_dir:
+
+    if not reference_dirs:
         logger.warning("No reference directory specified, skipping")
         return {}
+
+    if isinstance(reference_dirs, (str, Path)):
+        reference_dirs = [reference_dirs]
+    else:
+        reference_dirs = list(reference_dirs)
     
     target_dir = Path(workdir) / 'reference'
     linked_refs = {}
     
     for ref_type, patterns in REFERENCE_FILES.items():
         logger.info(f"\nSearching for {ref_type} files...")
-        files = create_symlinks(reference_dir, target_dir, patterns, dry_run)
+        files = []
+        for ref_dir in reference_dirs:
+            files.extend(create_symlinks(ref_dir, target_dir, patterns, dry_run))
         if files:
             linked_refs[ref_type] = files
             logger.info(f"  Found {len(files)} {ref_type} file(s)")
+
+    if linked_refs:
+        logger.info("\nDecompressing reference .gz files in workdir...")
+        decompress_gzip_files(target_dir, dry_run)
     
     return linked_refs
 
@@ -368,14 +451,25 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     if 'rpbp' in containers:
         nf_cmd_parts.append(f"--rpbp_container {containers['rpbp']}")
     
+    def prefer_uncompressed(path_obj):
+        path_obj = Path(path_obj)
+        if path_obj.suffix == '.gz':
+            uncompressed = path_obj.with_suffix('')
+            if uncompressed.exists():
+                return uncompressed
+        return path_obj
+
     # Add reference files if provided
     if references:
         if 'genome_fasta' in references and references['genome_fasta']:
-            nf_cmd_parts.append(f"--fasta {references['genome_fasta'][0]}")
+            fasta_path = prefer_uncompressed(references['genome_fasta'][0])
+            nf_cmd_parts.append(f"--fasta {fasta_path}")
         if 'gtf' in references and references['gtf']:
-            nf_cmd_parts.append(f"--gtf {references['gtf'][0]}")
+            gtf_path = prefer_uncompressed(references['gtf'][0])
+            nf_cmd_parts.append(f"--gtf {gtf_path}")
         if 'contaminant' in references and references['contaminant']:
-            nf_cmd_parts.append(f"--contaminant_fasta {references['contaminant'][0]}")
+            contam_path = prefer_uncompressed(references['contaminant'][0])
+            nf_cmd_parts.append(f"--contaminant_fasta {contam_path}")
     
     # Add pipeline options
     if args.run_prefilter_qc:
@@ -456,7 +550,8 @@ echo "=========================================="
 
 
 def create_config_summary(workdir, args, sample_sheet, containers, 
-                          references, script_path, dry_run=False):
+                          references, script_path, auto_reference_info=None,
+                          dry_run=False):
     """Create a summary configuration file"""
     workdir = Path(workdir).resolve()
     summary_path = workdir / 'scripts' / 'workflow_config.json'
@@ -476,7 +571,10 @@ def create_config_summary(workdir, args, sample_sheet, containers,
         'reference': {
             'genome': args.genome,
             'species': args.species,
-            'source_directory': args.reference_dir,
+            'source_directory': args.reference_dir or (str(auto_reference_info.get('reference_dir')) if auto_reference_info else None),
+            'auto_generated': bool(auto_reference_info),
+            'auto_reference_base_dir': str(auto_reference_info.get('base_dir')) if auto_reference_info else None,
+            'auto_reference_dirs': [str(auto_reference_info.get('reference_dir')), str(auto_reference_info.get('contaminant_dir'))] if auto_reference_info else None,
             'files': {k: [str(f) for f in v] for k, v in references.items()} if references else {}
         },
         'containers': {
@@ -558,7 +656,23 @@ def main():
     setup_data_directory(workdir, args.data_dir, args.dry_run)
     
     # Step 3: Setup reference directory
-    references = setup_reference_directory(workdir, args.reference_dir, args.dry_run)
+    reference_dirs = []
+    auto_reference_info = None
+    if args.reference_dir:
+        reference_dirs = [args.reference_dir]
+    else:
+        logger.info("No reference directory provided. Preparing reference database...")
+        auto_reference_info = prepare_reference_db_if_missing(workdir, args.species, args.dry_run)
+        if auto_reference_info:
+            logger.info(f"Auto reference base dir: {auto_reference_info['base_dir']}")
+            reference_dirs = [auto_reference_info['reference_dir']]
+            if auto_reference_info.get('contaminant_dir'):
+                reference_dirs.append(auto_reference_info['contaminant_dir'])
+        else:
+            logger.error("Failed to prepare reference database.")
+            sys.exit(1)
+
+    references = setup_reference_directory(workdir, reference_dirs, args.dry_run)
     
     # Step 4: Setup container directory
     containers = setup_container_directory(
@@ -596,6 +710,7 @@ def main():
         containers,
         references,
         script_path,
+        auto_reference_info,
         args.dry_run
     )
     

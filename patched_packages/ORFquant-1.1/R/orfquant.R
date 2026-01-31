@@ -3011,18 +3011,13 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
                      stn.orf_find.all_starts=T,stn.orf_find.nostarts=F,stn.orf_find.start_sel_cutoff = NA,
                      stn.orf_find.start_sel_cutoff_ave = .5,stn.orf_find.cutoff_fr_ave=.5,
                      stn.orf_quant.cutoff_cums = NA,stn.orf_quant.cutoff_pct = 2,stn.orf_quant.cutoff_P_sites=NA,unique_reads_only=F,canonical_start_only=T){    
-    # Setup BiocParallel backend
-    if (n_cores > 1) {
-        if (.Platform$OS.type == "unix") {
-            BPPARAM <- BiocParallel::MulticoreParam(workers = n_cores)
-        } else {
-            BPPARAM <- BiocParallel::SnowParam(workers = n_cores)
-        }
-    } else {
-        BPPARAM <- BiocParallel::SerialParam()
-    }
+    # Parallel processing configuration
+    # Use parallel::mclapply for Unix (fork-based, inherits parent environment)
+    # Use serial processing for Windows
+    use_parallel <- (n_cores > 1) && (.Platform$OS.type == "unix")
+    
     if(FALSE){  # Legacy doMC code disabled
-        # registerDoMC(n_cores)  # Replaced by BiocParallel
+        # registerDoMC(n_cores)  # Replaced by parallel::mclapply
     }
     
     for (f in c(for_ORFquant_file,annotation_file)){
@@ -3194,39 +3189,9 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
     
     cat(paste("Summoning ORFquant with ", sum(for_ORFquant_data$P_sites_all%over%genes_red)," P_sites positions over ", length(genes_red), " genomic regions using ",n_cores," processor(s) ... ",date(),"\n",sep = ""))
     
-    # Setup BiocParallel backend
-    if (n_cores > 1) {
-        if (.Platform$OS.type == "unix") {
-            BPPARAM <- BiocParallel::MulticoreParam(workers = n_cores)
-        } else {
-            BPPARAM <- BiocParallel::SnowParam(workers = n_cores)
-        }
-    } else {
-        BPPARAM <- BiocParallel::SerialParam()
-    }
-    if(FALSE){  # Legacy doMC code disabled
-        
-        ORFs_found<-foreach(g=1:length(genes_red),.packages='GenomicRanges') %dopar%{
-            
-            gen_region<-genes_red[g]
-            genetcd<-GTF_annotation$genetic_codes$genetic_code[rownames(GTF_annotation$genetic_codes)==as.character(seqnames(gen_region))]
-            genetcd<-getGeneticCode(genetcd)
-            if(canonical_start_only){
-                attributes(genetcd)$alt_init_codons<-names(which(genetcd=="M"))
-            }
-            
-            
-            ORFquant(region=gen_region,for_ORFquant=for_ORFquant_data,genetic_code_region=genetcd,
-                   orf_find.all_starts=stn.orf_find.all_starts,orf_find.nostarts=stn.orf_find.nostarts,
-                   orf_find.start_sel_cutoff = stn.orf_find.start_sel_cutoff,orf_find.start_sel_cutoff_ave = stn.orf_find.start_sel_cutoff_ave,
-                   orf_find.cutoff_fr_ave=stn.orf_find.cutoff_fr_ave,orf_quant.cutoff_cums = stn.orf_quant.cutoff_cums,
-                   orf_quant.cutoff_pct = stn.orf_quant.cutoff_pct,orf_quant.cutoff_P_sites=stn.orf_quant.cutoff_P_sites,unique_reads = unique_reads_only)
-        }
-        
-    }
-    
-    # BiocParallel execution (replaces both foreach %dopar% and sequential for loop)
-    ORFs_found <- BiocParallel::bplapply(seq_along(genes_red), function(g) {
+    # Define the worker function that processes a single gene region
+    # All required variables are captured in the closure
+    process_gene <- function(g) {
         gen_region <- genes_red[g]
         genetcd <- GTF_annotation$genetic_codes$genetic_code[
             rownames(GTF_annotation$genetic_codes) == as.character(seqnames(gen_region))
@@ -3247,7 +3212,23 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
                  orf_quant.cutoff_pct = stn.orf_quant.cutoff_pct, 
                  orf_quant.cutoff_P_sites = stn.orf_quant.cutoff_P_sites, 
                  unique_reads = unique_reads_only)
-    }, BPPARAM = BPPARAM)
+    }
+    
+    # Use parallel::mclapply for Unix (fork-based, inherits parent environment naturally)
+    # Falls back to serial lapply on Windows
+    if (use_parallel) {
+        ORFs_found <- parallel::mclapply(seq_along(genes_red), process_gene, 
+                                         mc.cores = n_cores, 
+                                         mc.preschedule = TRUE,
+                                         mc.silent = FALSE)
+        # Check for errors in parallel execution
+        errors <- sapply(ORFs_found, function(x) inherits(x, "try-error"))
+        if (any(errors)) {
+            warning(paste("Parallel processing encountered", sum(errors), "errors. Results may be incomplete."))
+        }
+    } else {
+        ORFs_found <- lapply(seq_along(genes_red), process_gene)
+    }
     
     cat(paste("Summoning ORFquant --- Done! ",date(),"\n",sep = ""))
     
