@@ -312,9 +312,6 @@ workflow RIBOSEQ {
     // Pre-filter: using unfiltered BAMs (with MT reads) - suffix 'prefilter' for output organization
     ch_bams_for_prefilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ filter_status: 'prefilter' ], bam, bai ] }
 
-    // Post-filter: using filtered BAMs (MT reads removed) - suffix 'postfilter' for output organization
-    ch_bams_for_postfilter = ch_bams_for_analysis
-
     // ORF prediction outputs for unified post-processing
     ch_ribotish_predictions = Channel.empty()
     ch_ribotricer_orfs      = Channel.empty()
@@ -340,6 +337,13 @@ workflow RIBOSEQ {
 
         def ch_filtered_index = params.bam_csi_index ? SAMTOOLS_INDEX.out.csi : SAMTOOLS_INDEX.out.bai
         ch_bams_for_sorf_prediction = SORF_BAM_FILTER.out.bam.join(ch_filtered_index)
+        
+        // Post-filter: using filtered BAMs (MT reads removed) - suffix 'postfilter' for output organization
+        ch_bams_for_postfilter = ch_bams_for_sorf_prediction.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] }
+    } else {
+        // If sorf_filter is disabled, use original BAMs for all downstream analysis
+        ch_bams_for_sorf_prediction = ch_bams_for_analysis
+        ch_bams_for_postfilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] }
     }
 
     if (!params.skip_ribotish){
