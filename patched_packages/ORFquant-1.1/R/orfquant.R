@@ -3050,13 +3050,34 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
         }
 
     add_scoregranges <- function(grs,addcols='score',idcols=NULL){
+      # Empty data protection: Filter out NULL or empty GRanges before processing
+      grs <- Filter(function(gr) {
+        tryCatch({
+          !is.null(gr) && length(gr) > 0 && 
+          all(is.finite(start(gr))) && all(is.finite(end(gr))) &&
+          all(width(gr) > 0)
+        }, error = function(e) FALSE)
+      }, grs)
+      
+      if (length(grs) == 0) {
+        warning("add_scoregranges: All input GRanges are NULL or empty")
+        return(GRanges())
+      }
+      
       scores <- grs[[1]]
       # magrittr now imported via NAMESPACE
       if(length(grs)>1){
         for(i in 2:length(grs)){
           
-
-          matchinds <- match(scores,grs[[i]])
+          matchinds <- tryCatch({
+            match(scores,grs[[i]])
+          }, error = function(e) {
+            warning("Error matching GRanges: ", conditionMessage(e))
+            integer(0)
+          })
+          
+          if (length(matchinds) == 0) next
+          
           for(idcol in idcols){
             colmatch <-(
                 mcols(scores)[[idcol]][!is.na(matchinds)] == 
@@ -3103,18 +3124,41 @@ run_ORFquant<-function(for_ORFquant_file,annotation_file,n_cores,prefix=for_ORFq
 
     # Empty data protection: Clean P_sites_all to remove invalid or empty ranges
     if (!is.null(for_ORFquant_data$P_sites_all)) {
-        # If P_sites_all is a GRangesList, filter out empty elements
+        # If P_sites_all is a GRangesList, filter out empty or invalid elements
         if (is(for_ORFquant_data$P_sites_all, "GRangesList")) {
             valid_idx <- sapply(for_ORFquant_data$P_sites_all, function(gr) {
-                length(gr) > 0 && all(width(gr) > 0)
+                tryCatch({
+                    # Check if GRanges has valid structure
+                    if (length(gr) == 0) return(FALSE)
+                    # Check if all ranges have positive width
+                    if (!all(is.finite(start(gr))) || !all(is.finite(end(gr)))) return(FALSE)
+                    if (any(width(gr) <= 0)) return(FALSE)
+                    return(TRUE)
+                }, error = function(e) {
+                    # If any error occurs, mark as invalid
+                    return(FALSE)
+                })
             })
             for_ORFquant_data$P_sites_all <- for_ORFquant_data$P_sites_all[valid_idx]
+            
+            # If all elements are invalid, create an empty GRangesList
+            if (length(for_ORFquant_data$P_sites_all) == 0) {
+                warning("All P-site data elements were invalid or empty. Creating empty GRangesList.")
+                for_ORFquant_data$P_sites_all <- GRangesList()
+            }
         } else if (is(for_ORFquant_data$P_sites_all, "GRanges")) {
             # If it's a GRanges, filter out invalid ranges
-            if (length(for_ORFquant_data$P_sites_all) > 0) {
-                valid_idx <- width(for_ORFquant_data$P_sites_all) > 0
-                for_ORFquant_data$P_sites_all <- for_ORFquant_data$P_sites_all[valid_idx]
-            }
+            tryCatch({
+                if (length(for_ORFquant_data$P_sites_all) > 0) {
+                    valid_idx <- is.finite(start(for_ORFquant_data$P_sites_all)) & 
+                                 is.finite(end(for_ORFquant_data$P_sites_all)) &
+                                 width(for_ORFquant_data$P_sites_all) > 0
+                    for_ORFquant_data$P_sites_all <- for_ORFquant_data$P_sites_all[valid_idx]
+                }
+            }, error = function(e) {
+                warning("Error filtering P-site GRanges: ", conditionMessage(e))
+                for_ORFquant_data$P_sites_all <- GRanges()
+            })
         }
     }
 
