@@ -183,10 +183,11 @@ RSCRIPT
     Rscript extract_rl.R "${psites_calcs}" "${prefix}_rl_cutoff.tsv"
 
     # Write versions
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        r-base: \$(Rscript -e 'cat(paste(R.version[["major"]], R.version[["minor"]], sep="."))')
-    END_VERSIONS
+    R_VERSION=\$(Rscript -e 'cat(paste(R.version[["major"]], R.version[["minor"]], sep="."))')
+    cat > versions.yml <<EOF
+"${task.process}":
+    r-base: "\$R_VERSION"
+EOF
     """
 
     stub:
