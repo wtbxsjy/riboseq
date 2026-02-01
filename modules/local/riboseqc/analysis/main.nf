@@ -75,12 +75,12 @@ process RIBOSEQC_ANALYSIS {
             cat("ERROR: Required output file not found:", f, "\\n")
             quit(status = 1)
         }
-        size <- file.info(f)\$size
-        if (is.na(size) || size < 10) {
-            cat("ERROR: Output file is empty or too small:", f, "(", size, "bytes)\\n")
+        fsize <- file.info(f)\\$size
+        if (is.na(fsize) || fsize < 10) {
+            cat("ERROR: Output file is empty or too small:", f, "(", fsize, "bytes)\\n")
             quit(status = 1)
         }
-        cat("Verified output:", f, "(", size, "bytes)\\n")
+        cat("Verified output:", f, "(", fsize, "bytes)\\n")
     }
 
     # Write versions
