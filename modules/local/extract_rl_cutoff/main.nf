@@ -39,35 +39,94 @@ process EXTRACT_RL_CUTOFF {
     """
     #!/usr/bin/env Rscript
 
+    # Check if input file exists and has content
+    input_file <- "${psites_calcs}"
+    if (!file.exists(input_file)) {
+        stop(paste("Input file not found:", input_file))
+    }
+    
+    file_size <- file.info(input_file)\$size
+    if (is.na(file_size) || file_size == 0) {
+        stop(paste("Input file is empty:", input_file))
+    }
+    
+    cat("Reading P_sites_calcs file:", input_file, "\\n")
+    cat("File size:", file_size, "bytes\\n")
+
     # Read P_sites_calcs file
     # The file is typically an RDS file from RiboseQC containing a data frame
     psites_data <- tryCatch({
-        readRDS("${psites_calcs}")
+        data <- readRDS(input_file)
+        cat("Successfully read RDS file\\n")
+        data
     }, error = function(e) {
-        # If not RDS, try reading as tab-delimited text
-        read.table("${psites_calcs}", header = TRUE, sep = "\\t", stringsAsFactors = FALSE)
+        cat("Failed to read as RDS:", e\$message, "\\n")
+        cat("Attempting to read as tab-delimited text...\\n")
+        tryCatch({
+            read.table(input_file, header = TRUE, sep = "\\t", stringsAsFactors = FALSE)
+        }, error = function(e2) {
+            stop(paste("Failed to read file as RDS or TSV.\\n",
+                      "RDS error:", e\$message, "\\n",
+                      "TSV error:", e2\$message))
+        })
     })
+    
+    # Debug: print structure
+    cat("Data object class:", class(psites_data), "\\n")
+    if (is.list(psites_data)) {
+        cat("List names:", paste(names(psites_data), collapse = ", "), "\\n")
+    }
 
     # If the data is a list (from RDS), extract the P_sites_calcs data frame
     if (is.list(psites_data) && !is.data.frame(psites_data)) {
+        cat("Data is a list, attempting to extract P_sites_calcs data frame...\\n")
+        
         # RiboseQC stores results in a list structure
         # Look for P_sites_calcs or similar component
         if ("P_sites_calcs" %in% names(psites_data)) {
             psites_data <- psites_data[["P_sites_calcs"]]
+            cat("Extracted P_sites_calcs component\\n")
         } else if ("read_stats" %in% names(psites_data)) {
             # Alternative structure in some RiboseQC versions
             psites_data <- psites_data[["read_stats"]]
+            cat("Extracted read_stats component\\n")
         } else {
-            # Try to find the correct component
+            # Try to find any data frame with max_coverage column
+            cat("Searching for data frame with max_coverage column...\\n")
+            found <- FALSE
             for (name in names(psites_data)) {
-                if (is.data.frame(psites_data[[name]]) && 
-                    "max_coverage" %in% colnames(psites_data[[name]])) {
-                    psites_data <- psites_data[[name]]
+                obj <- psites_data[[name]]
+                if (is.data.frame(obj) && "max_coverage" %in% colnames(obj)) {
+                    psites_data <- obj
+                    cat("Found suitable data frame in component:", name, "\\n")
+                    found <- TRUE
                     break
                 }
             }
+            if (!found) {
+                # Print available components for debugging
+                cat("ERROR: Could not find P_sites_calcs data frame\\n")
+                cat("Available components:\\n")
+                for (name in names(psites_data)) {
+                    obj <- psites_data[[name]]
+                    cat("  -", name, ":", class(obj))
+                    if (is.data.frame(obj)) {
+                        cat(" (", ncol(obj), "cols:", paste(head(colnames(obj), 5), collapse=", "), ")")
+                    }
+                    cat("\\n")
+                }
+                stop("P_sites_calcs data frame not found in RDS file")
+            }
         }
     }
+    
+    # Verify we have a data frame now
+    if (!is.data.frame(psites_data)) {
+        stop(paste("Expected data frame, but got:", class(psites_data)))
+    }
+    
+    cat("Final data frame: ", nrow(psites_data), "rows x", ncol(psites_data), "columns\\n")
+    cat("Column names:", paste(colnames(psites_data), collapse = ", "), "\\n")
 
     # Check and normalize column names
     # The file may have different column name variations

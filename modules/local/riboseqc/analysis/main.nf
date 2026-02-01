@@ -32,26 +32,56 @@ process RIBOSEQC_ANALYSIS {
     def fast_mode = args.contains('fast_mode=FALSE') ? 'fast_mode = FALSE,' : 'fast_mode = TRUE,'
     """
     #!/bin/bash
+    set -euo pipefail
 
     cat <<EOF > script.R
     library(RiboseQC)
     library(Rsamtools)
 
-    # Run RiboseQC analysis
+    # Run RiboseQC analysis with error handling
     # Note: genome_seq should be a file path string, not an FaFile object
     # The function will internally create FaFile and FaFile_Circ objects
     # HTML report generation is disabled due to compatibility issues with
     # rmarkdown in containerized environments (RiboseQC 1.1)
-    RiboseQC_analysis(
-        annotation_file = "${annotation}",
-        bam_files = "${bam}",
-        genome_seq = "${fasta}",
-        dest_names = "${prefix}",
-        sample_names = "${prefix}",
-        ${fast_mode}
-        create_report = FALSE,
-        write_tmp_files = TRUE
-    )
+    
+    cat("Starting RiboseQC analysis...\\n")
+    cat("Annotation file:", "${annotation}", "\\n")
+    cat("BAM file:", "${bam}", "\\n")
+    cat("Genome FASTA:", "${fasta}", "\\n")
+    cat("Sample name:", "${prefix}", "\\n")
+    
+    tryCatch({
+        RiboseQC_analysis(
+            annotation_file = "${annotation}",
+            bam_files = "${bam}",
+            genome_seq = "${fasta}",
+            dest_names = "${prefix}",
+            sample_names = "${prefix}",
+            ${fast_mode}
+            create_report = FALSE,
+            write_tmp_files = TRUE
+        )
+        cat("RiboseQC analysis completed successfully\\n")
+    }, error = function(e) {
+        cat("ERROR in RiboseQC_analysis:\\n")
+        cat(conditionMessage(e), "\\n")
+        quit(status = 1)
+    })
+    
+    # Verify critical output files exist and have content
+    required_files <- c("${prefix}_P_sites_calcs")
+    for (f in required_files) {
+        if (!file.exists(f)) {
+            cat("ERROR: Required output file not found:", f, "\\n")
+            quit(status = 1)
+        }
+        size <- file.info(f)\$size
+        if (is.na(size) || size < 10) {
+            cat("ERROR: Output file is empty or too small:", f, "(", size, "bytes)\\n")
+            quit(status = 1)
+        }
+        cat("Verified output:", f, "(", size, "bytes)\\n")
+    }
 
     # Write versions
     writeLines(
@@ -64,11 +94,21 @@ process RIBOSEQC_ANALYSIS {
     EOF
 
     # Use Rscript from the Conda environment if available
+    echo "[INFO] Running RiboseQC analysis..."
     if [[ -n "\$CONDA_PREFIX" ]]; then
         "\$CONDA_PREFIX/bin/Rscript" script.R
     else
         Rscript script.R
     fi
+    
+    # Check if critical files were created
+    if [[ ! -f "${prefix}_P_sites_calcs" ]] || [[ ! -s "${prefix}_P_sites_calcs" ]]; then
+        echo "[ERROR] P_sites_calcs file is missing or empty"
+        exit 1
+    fi
+    
+    echo "[INFO] RiboseQC analysis completed"
+    ls -lh ${prefix}_*
 
     # Convert P-sites bedgraphs to ggRibo input format
     # ggRibo format: Count \t Chromosome \t Position \t Strand
