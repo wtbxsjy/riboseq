@@ -142,6 +142,16 @@ Examples:
     parser.add_argument('--no-orfquant-psite-correction', action='store_false', dest='orfquant_psite_correction',
                         help='Disable ORFquant P-site offset correction')
     
+    # Advanced ORF unification options
+    parser.add_argument('--unify-orf-merge-tolerance', type=int, default=3,
+                        help='Base pair tolerance for frame-aware ORF merging (default: 3)')
+    parser.add_argument('--unify-orf-min-overlap', type=float, default=0.5,
+                        help='Minimum overlap fraction for grouping ORFs (default: 0.5)')
+    parser.add_argument('--unify-orf-no-frame-merge', action='store_true',
+                        help='Disable frame-aware merging (only use exact matches)')
+    parser.add_argument('--unify-orf-no-overlap-group', action='store_true',
+                        help='Disable overlap grouping (treat all ORFs independently)')
+    
     # SRA conversion options
     parser.add_argument('--sra-threads', type=int, default=8,
                         help='Number of threads for fasterq-dump when converting SRA files (default: 8)')
@@ -588,6 +598,16 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
         "--orf_classify_mode orf_type",
     ])
     
+    # Advanced ORF merging options
+    if hasattr(args, 'unify_orf_merge_tolerance'):
+        nf_cmd_parts.append(f"--unify_orf_merge_tolerance {args.unify_orf_merge_tolerance}")
+    if hasattr(args, 'unify_orf_min_overlap'):
+        nf_cmd_parts.append(f"--unify_orf_min_overlap {args.unify_orf_min_overlap}")
+    if hasattr(args, 'unify_orf_no_frame_merge') and args.unify_orf_no_frame_merge:
+        nf_cmd_parts.append("--unify_orf_no_frame_merge true")
+    if hasattr(args, 'unify_orf_no_overlap_group') and args.unify_orf_no_overlap_group:
+        nf_cmd_parts.append("--unify_orf_no_overlap_group true")
+    
     # Generate script content
     script_content = f"""#!/bin/bash
 # =============================================================================
@@ -692,6 +712,10 @@ def create_config_summary(workdir, args, sample_sheet, containers,
         'pipeline_options': {
             'run_prefilter_qc': args.run_prefilter_qc,
             'unify_orf_min_len': args.unify_orf_min_len,
+            'unify_orf_merge_tolerance': getattr(args, 'unify_orf_merge_tolerance', 3),
+            'unify_orf_min_overlap': getattr(args, 'unify_orf_min_overlap', 0.5),
+            'unify_orf_no_frame_merge': getattr(args, 'unify_orf_no_frame_merge', False),
+            'unify_orf_no_overlap_group': getattr(args, 'unify_orf_no_overlap_group', False),
             'profile': args.profile
         },
         'scripts': {

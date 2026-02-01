@@ -27,6 +27,12 @@ P-site Statistics Options (for unified P-site stats from RiboseQC):
   --bedgraph-dir  Directory containing RiboseQC P-site bedgraph files
   --sample-list   Comma-separated list of sample names (matching bedgraph file prefixes)
 
+Advanced Merging Options:
+  --merge-tolerance   Base pair tolerance for frame-aware merging (default: 3)
+  --min-overlap       Minimum overlap fraction for grouping ORFs (default: 0.5)
+  --no-frame-merge    Disable frame-aware merging (only use exact matches)
+  --no-overlap-group  Disable overlap grouping (treat all ORFs independently)
+
 Other Options:
   --min-len    Minimum AA length (default: 10)
   --outdir     Output directory for logs/scripts (default: ./out_unify)
@@ -51,6 +57,13 @@ Examples:
     --bedgraph-dir ./out_riboseqc_analysis \
     --sample-list "s1,s2" \
     --output ./results/unified_with_psite_stats
+  
+  # With custom merging parameters
+  17_unify_predictions.sh \
+    --gtf gencode.gtf --fasta genome.fa \
+    --ribotish "s1_pred.txt" --orfquant "s1_orfquant.gtf" \
+    --merge-tolerance 5 --min-overlap 0.6 \
+    --output ./results/unified
 EOF
 }
 
@@ -63,6 +76,10 @@ ORFQUANT_FILES=""
 BEDGRAPH_DIR=""
 SAMPLE_LIST=""
 MIN_LEN=10
+MERGE_TOLERANCE=3
+MIN_OVERLAP=0.5
+NO_FRAME_MERGE=false
+NO_OVERLAP_GROUP=false
 OUTDIR="./out_unify"
 IMAGE=""
 CPUS=1
@@ -78,6 +95,10 @@ while [[ $# -gt 0 ]]; do
     --bedgraph-dir) BEDGRAPH_DIR="$2"; shift 2;;
     --sample-list) SAMPLE_LIST="$2"; shift 2;;
     --min-len) MIN_LEN="$2"; shift 2;;
+    --merge-tolerance) MERGE_TOLERANCE="$2"; shift 2;;
+    --min-overlap) MIN_OVERLAP="$2"; shift 2;;
+    --no-frame-merge) NO_FRAME_MERGE=true; shift;;
+    --no-overlap-group) NO_OVERLAP_GROUP=true; shift;;
     --outdir) OUTDIR="$2"; shift 2;;
     --image) IMAGE="$2"; shift 2;;
     --cpus) CPUS="$2"; shift 2;;
@@ -172,6 +193,14 @@ echo "[INFO] Output: $OUTPUT_PREFIX_ABS"
 
 # Construct command args
 CMD_ARGS="--gtf '$GTF' --fasta '$FASTA' --output '$OUTPUT_PREFIX_ABS' --min_len $MIN_LEN --threads $CPUS"
+CMD_ARGS="$CMD_ARGS --merge-tolerance $MERGE_TOLERANCE --min-overlap $MIN_OVERLAP"
+
+if [[ "$NO_FRAME_MERGE" == "true" ]]; then
+    CMD_ARGS="$CMD_ARGS --no-frame-merge"
+fi
+if [[ "$NO_OVERLAP_GROUP" == "true" ]]; then
+    CMD_ARGS="$CMD_ARGS --no-overlap-group"
+fi
 
 if [[ -n "$RIBOTISH_FILES" ]]; then
     CMD_ARGS="$CMD_ARGS --ribotish $RIBOTISH_FILES"

@@ -34,6 +34,11 @@ process UNIFY_ORF_PREDICTIONS {
     script:
     def min_len = params.unify_orf_min_len ?: 10
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
+    // Advanced merging parameters
+    def merge_tolerance = params.unify_orf_merge_tolerance ?: 3
+    def min_overlap = params.unify_orf_min_overlap ?: 0.5
+    def no_frame_merge = params.unify_orf_no_frame_merge ? "--no-frame-merge" : ''
+    def no_overlap_group = params.unify_orf_no_overlap_group ? "--no-overlap-group" : ''
     // Files are already staged via all_inputs, just need filenames properly quoted
     def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ? 
         "--ribotish ${ribotish_files.collect{ "\"${it}\"" }.join(' ')}" : ''
@@ -78,6 +83,10 @@ process UNIFY_ORF_PREDICTIONS {
         --output ${prefix} \\
         --min_len ${min_len} \\
         --threads ${task.cpus} \\
+        --merge-tolerance ${merge_tolerance} \\
+        --min-overlap ${min_overlap} \\
+        ${no_frame_merge} \\
+        ${no_overlap_group} \\
         ${ribotish_arg} \\
         ${ribotricer_arg} \\
         ${orfquant_arg} \\

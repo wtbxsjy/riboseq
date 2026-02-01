@@ -151,6 +151,291 @@ class GTFIndex:
         
         return chrom, strand, genomic_blocks
 
+
+def calculate_frame(chrom, strand, start, blocks):
+    """
+    Calculate the reading frame (0, 1, 2) of an ORF.
+    Frame is determined by the start codon position modulo 3.
+    For negative strand, we use the end position of the last block.
+    """
+    if strand == '+':
+        return start % 3
+    else:
+        # For negative strand, frame is based on the end of the ORF
+        end = blocks[-1][1] if blocks else start
+        return end % 3
+
+
+def get_frame_aware_key(cand, tolerance=3):
+    """
+    Generate a key for frame-aware grouping.
+    ORFs with same chrom, strand, frame, and start within tolerance are grouped.
+    
+    Returns: (chrom, strand, frame, rounded_start, block_count)
+    """
+    frame = calculate_frame(cand.chrom, cand.strand, cand.start, cand.blocks)
+    # Round start to nearest multiple of 3 (frame-aligned)
+    rounded_start = (cand.start // tolerance) * tolerance
+    return (cand.chrom, cand.strand, frame, rounded_start, len(cand.blocks))
+
+
+def are_frame_compatible(cand1, cand2, tolerance=3):
+    """
+    Check if two ORF candidates are frame-compatible for merging.
+    
+    Conditions:
+    1. Same chromosome and strand
+    2. Same reading frame
+    3. Start positions differ by <= tolerance bases
+    4. End positions differ by <= tolerance bases  
+    5. Same number of exon blocks
+    """
+    if cand1.chrom != cand2.chrom or cand1.strand != cand2.strand:
+        return False
+    
+    if len(cand1.blocks) != len(cand2.blocks):
+        return False
+    
+    frame1 = calculate_frame(cand1.chrom, cand1.strand, cand1.start, cand1.blocks)
+    frame2 = calculate_frame(cand2.chrom, cand2.strand, cand2.start, cand2.blocks)
+    
+    if frame1 != frame2:
+        return False
+    
+    # Check start and end within tolerance
+    if abs(cand1.start - cand2.start) > tolerance:
+        return False
+    if abs(cand1.end - cand2.end) > tolerance:
+        return False
+    
+    # Check each block boundary (for multi-exon ORFs)
+    for (s1, e1), (s2, e2) in zip(cand1.blocks, cand2.blocks):
+        if abs(s1 - s2) > tolerance or abs(e1 - e2) > tolerance:
+            return False
+    
+    return True
+
+
+def calculate_overlap(cand1, cand2):
+    """
+    Calculate overlap between two ORF candidates.
+    Returns: (overlap_bp, overlap_fraction)
+    overlap_fraction is relative to the shorter ORF.
+    """
+    if cand1.chrom != cand2.chrom or cand1.strand != cand2.strand:
+        return 0, 0.0
+    
+    # Calculate genomic overlap
+    overlap_start = max(cand1.start, cand2.start)
+    overlap_end = min(cand1.end, cand2.end)
+    
+    if overlap_start >= overlap_end:
+        return 0, 0.0
+    
+    # For single-exon ORFs, simple overlap calculation
+    if len(cand1.blocks) == 1 and len(cand2.blocks) == 1:
+        overlap_bp = overlap_end - overlap_start
+        min_len = min(cand1.length_nt, cand2.length_nt)
+        return overlap_bp, overlap_bp / min_len if min_len > 0 else 0.0
+    
+    # For multi-exon ORFs, calculate exon-level overlap
+    overlap_bp = 0
+    for s1, e1 in cand1.blocks:
+        for s2, e2 in cand2.blocks:
+            os = max(s1, s2)
+            oe = min(e1, e2)
+            if os < oe:
+                overlap_bp += oe - os
+    
+    min_len = min(cand1.length_nt, cand2.length_nt)
+    return overlap_bp, overlap_bp / min_len if min_len > 0 else 0.0
+
+
+class UnionFind:
+    """Union-Find data structure for grouping overlapping ORFs."""
+    
+    def __init__(self, n):
+        self.parent = list(range(n))
+        self.rank = [0] * n
+    
+    def find(self, x):
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])  # Path compression
+        return self.parent[x]
+    
+    def union(self, x, y):
+        px, py = self.find(x), self.find(y)
+        if px == py:
+            return
+        # Union by rank
+        if self.rank[px] < self.rank[py]:
+            px, py = py, px
+        self.parent[py] = px
+        if self.rank[px] == self.rank[py]:
+            self.rank[px] += 1
+
+
+def group_overlapping_orfs(candidates, min_overlap_fraction=0.5):
+    """
+    Group overlapping ORFs using Union-Find.
+    
+    Args:
+        candidates: List of ORFCandidate
+        min_overlap_fraction: Minimum overlap fraction to group ORFs
+    
+    Returns:
+        List of groups, where each group is a list of ORFCandidate indices
+    """
+    n = len(candidates)
+    if n == 0:
+        return []
+    
+    uf = UnionFind(n)
+    
+    # Sort by chromosome and position for efficient comparison
+    sorted_indices = sorted(range(n), key=lambda i: (candidates[i].chrom, candidates[i].strand, candidates[i].start))
+    
+    # Only compare nearby candidates (within max ORF length window)
+    for i, idx1 in enumerate(sorted_indices):
+        cand1 = candidates[idx1]
+        
+        # Compare with subsequent candidates on same chromosome/strand
+        for j in range(i + 1, n):
+            idx2 = sorted_indices[j]
+            cand2 = candidates[idx2]
+            
+            # Stop if different chromosome or strand
+            if cand2.chrom != cand1.chrom or cand2.strand != cand1.strand:
+                break
+            
+            # Stop if too far apart (no possible overlap)
+            if cand2.start > cand1.end:
+                break
+            
+            # Check overlap
+            _, overlap_frac = calculate_overlap(cand1, cand2)
+            if overlap_frac >= min_overlap_fraction:
+                uf.union(idx1, idx2)
+    
+    # Collect groups
+    groups = defaultdict(list)
+    for i in range(n):
+        groups[uf.find(i)].append(i)
+    
+    return list(groups.values())
+
+
+def merge_frame_compatible_orfs(candidates, tolerance=3):
+    """
+    Merge ORFs that are frame-compatible (same frame, coordinates within tolerance).
+    This handles slight P-site offset differences between tools.
+    
+    Args:
+        candidates: List of ORFCandidate
+        tolerance: Maximum base pair difference allowed for merging
+    
+    Returns:
+        List of merged ORFCandidate
+    """
+    if not candidates:
+        return []
+    
+    # Sort by chromosome, strand, start for efficient comparison
+    sorted_cands = sorted(candidates, key=lambda c: (c.chrom, c.strand, c.start))
+    
+    merged = []
+    used = set()
+    
+    for i, cand1 in enumerate(sorted_cands):
+        if i in used:
+            continue
+        
+        # Find all frame-compatible candidates
+        compatible_group = [cand1]
+        for j in range(i + 1, len(sorted_cands)):
+            if j in used:
+                continue
+            cand2 = sorted_cands[j]
+            
+            # Early exit if different chromosome/strand
+            if cand2.chrom != cand1.chrom or cand2.strand != cand1.strand:
+                break
+            
+            # Early exit if too far apart
+            if cand2.start > cand1.start + tolerance:
+                break
+            
+            if are_frame_compatible(cand1, cand2, tolerance):
+                compatible_group.append(cand2)
+                used.add(j)
+        
+        used.add(i)
+        
+        if len(compatible_group) == 1:
+            merged.append(cand1)
+        else:
+            # Select the longest ORF as representative
+            representative = max(compatible_group, key=lambda c: c.length_nt)
+            for cand in compatible_group:
+                if cand is not representative:
+                    representative.merge(cand)
+            merged.append(representative)
+    
+    return merged
+
+
+def select_representative_for_group(candidates, group_indices):
+    """
+    Select the representative ORF for a group of overlapping ORFs.
+    The longest ORF becomes representative, shorter ones become subsets.
+    
+    Args:
+        candidates: List of all ORFCandidate
+        group_indices: List of indices belonging to this group
+    
+    Returns:
+        The representative ORFCandidate with subset information recorded
+    """
+    if len(group_indices) == 1:
+        return candidates[group_indices[0]]
+    
+    # Sort by length (longest first)
+    group_cands = [candidates[i] for i in group_indices]
+    group_cands.sort(key=lambda c: c.length_nt, reverse=True)
+    
+    representative = group_cands[0]
+    
+    # Add all other ORFs as subsets
+    for cand in group_cands[1:]:
+        representative.add_subset_orf(cand)
+        cand.is_representative = False
+    
+    return representative
+
+
+def process_overlap_groups(candidates, min_overlap_fraction=0.5):
+    """
+    Process all candidates: group overlapping ORFs and select representatives.
+    
+    Args:
+        candidates: List of ORFCandidate
+        min_overlap_fraction: Minimum overlap fraction to group ORFs
+    
+    Returns:
+        List of representative ORFCandidate (subset info recorded in each)
+    """
+    # Group overlapping ORFs
+    groups = group_overlapping_orfs(candidates, min_overlap_fraction)
+    
+    # Select representative for each group
+    representatives = []
+    for group_indices in groups:
+        rep = select_representative_for_group(candidates, group_indices)
+        representatives.append(rep)
+    
+    return representatives
+
+
 class ORFCandidate:
     def __init__(self, chrom, strand, blocks, tid, gid, tool, sample, score=None, pvalue=None, sequence=None):
         self.chrom = chrom
@@ -170,13 +455,20 @@ class ORFCandidate:
         self.total_reads = 0
         self.unique_reads = 0
         
+        # Subset ORFs (for representatives)
+        self.subset_orfs = []  # List of (blocks_str, tools, samples) for subset ORFs
+        self.is_representative = True  # Whether this is the representative of its group
+        
         # Calculated fields
         self.start = self.blocks[0][0]
         self.end = self.blocks[-1][1]
         self.length_nt = sum(e - s + 1 for s, e in self.blocks)
         self.length_aa = self.length_nt // 3
         
-        # ID for grouping
+        # Frame (0, 1, 2)
+        self.frame = calculate_frame(chrom, strand, self.start, self.blocks)
+        
+        # ID for grouping (exact match)
         self.id_key = (self.chrom, self.strand, self.blocks)
 
     def merge(self, other):
@@ -197,6 +489,36 @@ class ORFCandidate:
         self.unique_reads += other.unique_reads
         if not self.sequence and other.sequence:
             self.sequence = other.sequence
+        # Merge subset ORFs
+        self.subset_orfs.extend(other.subset_orfs)
+    
+    def add_subset_orf(self, other):
+        """
+        Add another ORF as a subset of this representative.
+        Records the subset's coordinates and source information.
+        """
+        blocks_str = ",".join(f"{s}-{e}" for s, e in other.blocks)
+        tools = ",".join(sorted(set(t for t, s in other.sources)))
+        samples = ",".join(sorted(set(s for t, s in other.sources)))
+        self.subset_orfs.append({
+            'blocks': blocks_str,
+            'start': other.start,
+            'end': other.end,
+            'length_aa': other.length_aa,
+            'tools': tools,
+            'samples': samples,
+            'tool_scores': dict(other.tool_scores),
+            'tool_pvalues': dict(other.tool_pvalues)
+        })
+        # Merge sources into representative
+        self.sources.update(other.sources)
+        # Merge tool scores and pvalues
+        for tool, score in other.tool_scores.items():
+            if tool not in self.tool_scores or (score is not None and self.tool_scores.get(tool) is None):
+                self.tool_scores[tool] = score
+        for tool, pval in other.tool_pvalues.items():
+            if tool not in self.tool_pvalues or (pval is not None and self.tool_pvalues.get(tool) is None):
+                self.tool_pvalues[tool] = pval
     
     @property
     def pN(self):
@@ -816,6 +1138,15 @@ def main():
     parser.add_argument("--bedgraph-dir", help="Directory containing RiboseQC bedgraph files (optional)")
     parser.add_argument("--sample-list", help="Comma-separated list of sample names for bedgraph stats (optional)")
     parser.add_argument("--threads", type=int, default=4, help="Number of threads for parallel processing (default: 4)")
+    # New parameters for advanced merging
+    parser.add_argument("--merge-tolerance", type=int, default=3,
+                        help="Base pair tolerance for frame-aware merging (default: 3)")
+    parser.add_argument("--min-overlap", type=float, default=0.5,
+                        help="Minimum overlap fraction for grouping ORFs (default: 0.5)")
+    parser.add_argument("--no-frame-merge", action="store_true",
+                        help="Disable frame-aware merging (only use exact matches)")
+    parser.add_argument("--no-overlap-group", action="store_true",
+                        help="Disable overlap grouping (treat all ORFs independently)")
     
     args = parser.parse_args()
     
@@ -843,6 +1174,7 @@ def main():
 
     print(f"Total raw candidates: {len(all_candidates)}", file=sys.stderr)
     
+    # Stage 1: Exact match merging (same chrom, strand, and exact block coordinates)
     merged_candidates = {} 
     for cand in all_candidates:
         if cand.id_key in merged_candidates:
@@ -850,9 +1182,21 @@ def main():
         else:
             merged_candidates[cand.id_key] = cand
     
-    print(f"Unique candidates after merging: {len(merged_candidates)}", file=sys.stderr)
+    print(f"After exact-match merging: {len(merged_candidates)}", file=sys.stderr)
     
     final_list = list(merged_candidates.values())
+    
+    # Stage 2: Frame-aware merging (merge ORFs with same frame and coordinates within tolerance)
+    if not args.no_frame_merge and args.merge_tolerance > 0:
+        print(f"Performing frame-aware merging (tolerance={args.merge_tolerance}bp)...", file=sys.stderr)
+        final_list = merge_frame_compatible_orfs(final_list, tolerance=args.merge_tolerance)
+        print(f"After frame-aware merging: {len(final_list)}", file=sys.stderr)
+    
+    # Stage 3: Overlap grouping (group overlapping ORFs, select longest as representative)
+    if not args.no_overlap_group:
+        print(f"Grouping overlapping ORFs (min_overlap={args.min_overlap})...", file=sys.stderr)
+        final_list = process_overlap_groups(final_list, min_overlap_fraction=args.min_overlap)
+        print(f"After overlap grouping: {len(final_list)} representative ORFs", file=sys.stderr)
     
     # Calculate statistics from bedgraphs if provided (using optimized indexed version)
     if args.bedgraph_dir and args.sample_list:
@@ -876,6 +1220,7 @@ def main():
                   "gene_id", "transcript_id", "tools", "samples", 
                   "tool_scores", "tool_pvalues", 
                   "total_reads", "unique_reads", "total_psites", "unique_psites", "pN", "unique_pN",
+                  "num_subset_orfs", "subset_orfs",
                   "sequence"]
         out.write('\t'.join(header) + '\n')
         
@@ -892,12 +1237,25 @@ def main():
             # Format tool_pvalues as tool1:pval1,tool2:pval2
             tool_pvalues_str = ",".join(f"{t}:{p:.2e}" for t, p in sorted(cand.tool_pvalues.items()) if p is not None) or "NA"
             
+            # Format subset_orfs as blocks|tools|samples;blocks|tools|samples;...
+            if cand.subset_orfs:
+                subset_strs = []
+                for subset in cand.subset_orfs:
+                    subset_str = f"{subset['blocks']}|{subset['tools']}|{subset['samples']}"
+                    subset_strs.append(subset_str)
+                subset_orfs_str = ";".join(subset_strs)
+                num_subset_orfs = len(cand.subset_orfs)
+            else:
+                subset_orfs_str = "NA"
+                num_subset_orfs = 0
+            
             row = [orf_id, cand.chrom, cand.strand, str(cand.start), str(cand.end), str(cand.length_aa), 
                    blocks_str, cand.gid, cand.tid, tools, samples, 
                    tool_scores_str, tool_pvalues_str,
                    str(cand.total_reads), str(cand.unique_reads), 
                    str(cand.total_psites), str(cand.unique_psites),
                    f"{cand.pN:.6f}", f"{cand.unique_pN:.6f}",
+                   str(num_subset_orfs), subset_orfs_str,
                    cand.sequence]
             out.write('\t'.join(row) + '\n')
             
