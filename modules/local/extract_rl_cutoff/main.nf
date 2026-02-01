@@ -17,10 +17,11 @@ process EXTRACT_RL_CUTOFF {
     tag "$meta.id"
     label 'process_low'
 
-    conda "${moduleDir}/environment.yml"
+    // Use same container as RiboseQC (contains R environment)
+    conda "../../riboseqc/analysis/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/r-base:4.1.0' :
-        'quay.io/biocontainers/r-base:4.1.0' }"
+        'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1' :
+        'quay.io/biocontainers/riboseqc:1.1--r36_1' }"
 
     input:
     tuple val(meta), path(psites_calcs)  // *_P_sites_calcs file from RiboseQC

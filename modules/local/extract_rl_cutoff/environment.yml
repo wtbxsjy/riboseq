@@ -1,6 +1,0 @@
-name: extract_rl_cutoff
-channels:
-  - conda-forge
-  - defaults
-dependencies:
-  - r-base>=4.0.0
