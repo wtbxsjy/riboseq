@@ -10,9 +10,11 @@ process PREPARE_FOR_ORFQUANT_CORRECTED {
     tag "$meta.id"
     label 'process_medium'
 
-    conda "${moduleDir}/environment.yml"
+    // Use same conda environment and container as ORFQUANT_RUN
+    conda "../../orfquant/environment.yml"
     // Use custom container with ORFquant pre-installed (same as ORFQUANT_RUN)
     // Build from: containers/Singularity.orfquant.def
+    // Or specify via params.orfquant_container
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         (params.orfquant_container ?: 'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1') :
         'quay.io/biocontainers/riboseqc:1.1--r36_1' }"
