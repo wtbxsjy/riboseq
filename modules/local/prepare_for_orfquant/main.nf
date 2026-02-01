@@ -25,7 +25,9 @@ process PREPARE_FOR_ORFQUANT_CORRECTED {
     tuple val(meta2), path(rl_cutoff)        // read_length to cutoff mapping from EXTRACT_RL_CUTOFF
 
     output:
-    tuple val(meta), path("*_for_ORFquant_corrected"), emit: for_orfquant
+    // prepare_for_ORFquant appends "_for_ORFquant" to dest_name
+    // So output is: ${prefix}_corrected_for_ORFquant
+    tuple val(meta), path("*_corrected_for_ORFquant"), emit: for_orfquant
     path "versions.yml"                              , emit: versions
 
     when:
@@ -94,7 +96,7 @@ RSCRIPTEOF
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
-    touch ${prefix}_for_ORFquant_corrected
+    touch ${prefix}_corrected_for_ORFquant
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
