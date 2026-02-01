@@ -198,6 +198,37 @@ By default, the input GTF file will be filtered to ensure that sequence names co
 
 The pipeline will by default run the [Ribo-TISH](https://github.com/zhpn1024/ribotish) [quality](https://github.com/zhpn1024/ribotish?tab=readme-ov-file#quality) and [predict](https://github.com/zhpn1024/ribotish?tab=readme-ov-file#predict) commands for QC and ORF prediction, respectively. Additional arguments can be supplied to either command via the `--extra_ribotish_quality_args` and `--extra_ribotish_predict_args` parameters.
 
+### ORFquant P-site offset correction
+
+When using ORFquant for ORF detection and quantification, the pipeline can apply P-site offset correction to improve accuracy. This feature is enabled by default via the `--orfquant_psite_correction` parameter.
+
+The correction process works as follows:
+
+1. **Extract optimal offsets**: After RiboseQC analysis, the pipeline extracts read length to P-site offset mappings from the `P_sites_calcs` output. Only rows where `max_coverage` is TRUE are selected, keeping the `read_length`, `cutoff`, and `compartment` columns.
+
+2. **Regenerate for_ORFquant file**: Using these corrected offsets, the pipeline regenerates the `for_ORFquant` input file via ORFquant's `prepare_for_ORFquant()` function with the `path_to_rl_cutoff_file` parameter.
+
+3. **Improved ORF detection**: The corrected P-site positions lead to more accurate ribosome positioning, which can improve ORFquant's ability to detect and quantify translated ORFs.
+
+Example output format for the extracted offsets:
+
+```
+read_length  cutoff  comp
+25           12      nucl
+26           12      nucl
+27           12      nucl
+28           12      nucl
+29           12      nucl
+30           12      nucl
+31           13      nucl
+```
+
+To disable this correction and use the original RiboseQC for_ORFquant file:
+
+```bash
+--orfquant_psite_correction false
+```
+
 ## Translational efficiency
 
 If you have paired RNA-seq and Riboseq samples, you can use this workflow to initiate a translational efficiency analysis.

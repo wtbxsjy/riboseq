@@ -710,6 +710,13 @@
                     "description": "Skip ORFquant ORF detection and quantification. Note: ORFquant requires RiboseQC to be enabled.",
                     "fa_icon": "fas fa-fast-forward"
                 },
+                "orfquant_psite_correction": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Use corrected P-site offsets for ORFquant. Extracts offsets from RiboseQC P_sites_calcs where max_coverage is TRUE. This can improve ORFquant accuracy.",
+                    "fa_icon": "fas fa-crosshairs",
+                    "help_text": "When enabled, P-site offsets are extracted from RiboseQC results (rows with max_coverage=TRUE) and used to regenerate the for_ORFquant file. This ensures more accurate P-site positioning for ORF detection."
+                },
                 "extra_orfquant_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to ORFquant (e.g., 'plot_results=TRUE' to generate plots).",

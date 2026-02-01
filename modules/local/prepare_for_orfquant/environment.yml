@@ -1,0 +1,15 @@
+name: prepare_for_orfquant
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - bioconda::riboseqc=1.1
+  - bioconductor-variantannotation
+  - bioconductor-genomicfiles
+  - bioconductor-genomicfeatures
+  - bioconductor-bsgenome
+  - bioconductor-rtracklayer
+  - r-remotes
+  - r-usethis=2.0.1
+  - r-base=3.6

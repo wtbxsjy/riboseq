@@ -150,7 +150,7 @@ class GTFIndex:
         return chrom, strand, genomic_blocks
 
 class ORFCandidate:
-    def __init__(self, chrom, strand, blocks, tid, gid, tool, sample, score=None, sequence=None):
+    def __init__(self, chrom, strand, blocks, tid, gid, tool, sample, score=None, pvalue=None, sequence=None):
         self.chrom = chrom
         self.strand = strand
         self.blocks = tuple(sorted(blocks)) # List of (start, end) tuples, 1-based
@@ -160,6 +160,13 @@ class ORFCandidate:
         self.score = score
         self.sequence = sequence # Extracted sequence
         self.tool_scores = {tool: score} if score is not None else {}  # Dict: tool -> score
+        self.tool_pvalues = {tool: pvalue} if pvalue is not None else {}  # Dict: tool -> pvalue
+        
+        # Statistics from bedgraph (calculated later)
+        self.total_psites = 0
+        self.unique_psites = 0
+        self.total_reads = 0
+        self.unique_reads = 0
         
         # Calculated fields
         self.start = self.blocks[0][0]
@@ -177,8 +184,27 @@ class ORFCandidate:
         for tool, score in other.tool_scores.items():
             if tool not in self.tool_scores or (score is not None and self.tool_scores.get(tool) is None):
                 self.tool_scores[tool] = score
+        # Merge tool pvalues
+        for tool, pval in other.tool_pvalues.items():
+            if tool not in self.tool_pvalues or (pval is not None and self.tool_pvalues.get(tool) is None):
+                self.tool_pvalues[tool] = pval
+        # Merge statistics (sum across samples)
+        self.total_psites += other.total_psites
+        self.unique_psites += other.unique_psites
+        self.total_reads += other.total_reads
+        self.unique_reads += other.unique_reads
         if not self.sequence and other.sequence:
             self.sequence = other.sequence
+    
+    @property
+    def pN(self):
+        """P-sites per nucleotide"""
+        return self.total_psites / self.length_nt if self.length_nt > 0 else 0
+    
+    @property
+    def unique_pN(self):
+        """Unique P-sites per nucleotide"""
+        return self.unique_psites / self.length_nt if self.length_nt > 0 else 0
 
 # Parsers
 def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
@@ -189,28 +215,77 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
             header = f.readline().strip().split('\t')
             col_map = {name: i for i, name in enumerate(header)}
             
-            if 'Tid' not in col_map or 'Start' not in col_map or 'Stop' not in col_map:
-                print("Warning: Missing required columns in Ribo-TISH file. Skipping.", file=sys.stderr)
+            # Check for required columns - support two formats:
+            # Format 1: Start, Stop columns (separate)
+            # Format 2: GenomePos column (chr:start-end:strand)
+            has_start_stop = 'Tid' in col_map and 'Start' in col_map and 'Stop' in col_map
+            has_genomepos = 'Tid' in col_map and 'GenomePos' in col_map
+            
+            if not has_start_stop and not has_genomepos:
+                print("Warning: Ribo-TISH file missing required columns (need Start/Stop or GenomePos). Skipping.", file=sys.stderr)
                 return []
 
             for line in f:
                 parts = line.strip().split('\t')
                 tid = parts[col_map['Tid']]
                 
-                try:
-                    t_start = int(parts[col_map['Start']])
-                    t_stop = int(parts[col_map['Stop']])
-                except ValueError:
+                # Extract TisPvalue as score (lower is better, convert to -log10(p))
+                score = None
+                pvalue = None
+                if 'TisPvalue' in col_map:
+                    try:
+                        pval = float(parts[col_map['TisPvalue']])
+                        if pval > 0:
+                            import math
+                            score = -math.log10(pval)  # Convert to -log10(p), higher is better
+                            pvalue = pval  # Keep original p-value
+                    except (ValueError, OverflowError):
+                        pass
+                
+                # Parse coordinates
+                t_start = None
+                t_stop = None
+                chrom = None
+                strand = None
+                
+                if has_start_stop:
+                    # Format 1: Direct Start/Stop columns (transcriptomic coordinates)
+                    try:
+                        t_start = int(parts[col_map['Start']])
+                        t_stop = int(parts[col_map['Stop']])
+                    except ValueError:
+                        continue
+                    
+                    # Convert to genomic coordinates via GTF
+                    length_nt = t_stop - t_start
+                    if length_nt // 3 < min_len: continue
+                    
+                    chrom, strand, blocks = gtf_index.get_genomic_blocks(tid, t_start, t_stop, feature_type='exon')
+                    
+                elif has_genomepos:
+                    # Format 2: GenomePos (chr:start-end:strand) - ALREADY genomic coordinates
+                    genome_pos = parts[col_map['GenomePos']]
+                    import re
+                    match = re.search(r'(.+):(\d+)-(\d+):([+-])', genome_pos)
+                    if match:
+                        chrom = match.group(1)
+                        t_start = int(match.group(2))
+                        t_stop = int(match.group(3))
+                        strand = match.group(4)
+                        
+                        length_nt = t_stop - t_start + 1  # Inclusive
+                        if length_nt // 3 < min_len: continue
+                        
+                        # GenomePos gives genomic coords directly - create blocks
+                        blocks = [(t_start, t_stop)]
+                    else:
+                        continue
+                else:
                     continue
-
-                length_nt = t_stop - t_start
-                if length_nt // 3 < min_len: continue
-
-                chrom, strand, blocks = gtf_index.get_genomic_blocks(tid, t_start, t_stop, feature_type='exon')
                 
                 if blocks:
                     gid = gtf_index.gene_map.get(tid, 'NA')
-                    cand = ORFCandidate(chrom, strand, blocks, tid, gid, 'Ribo-TISH', sample_id)
+                    cand = ORFCandidate(chrom, strand, blocks, tid, gid, 'Ribo-TISH', sample_id, score=score, pvalue=pvalue)
                     candidates.append(cand)
     except Exception as e:
         print(f"Error parsing Ribo-TISH file: {e}", file=sys.stderr)
@@ -236,6 +311,14 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
                 tid = parts[col_map['transcript_id']]
                 orf_id = parts[col_map['ORF_ID']]
                 
+                # Extract phase_score (0-1, higher is better)
+                score = None
+                if 'phase_score' in col_map:
+                    try:
+                        score = float(parts[col_map['phase_score']])
+                    except ValueError:
+                        pass
+                
                 blocks = None
                 chrom = parts[col_map.get('chrom', -1)] if 'chrom' in col_map else None
                 strand = parts[col_map.get('strand', -1)] if 'strand' in col_map else None
@@ -257,7 +340,7 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
                 
                 if blocks:
                     gid = gtf_index.gene_map.get(tid, 'NA')
-                    cand = ORFCandidate(chrom, strand, blocks, tid, gid, 'Ribotricer', sample_id)
+                    cand = ORFCandidate(chrom, strand, blocks, tid, gid, 'Ribotricer', sample_id, score=score)
                     candidates.append(cand)
     except Exception as e:
         print(f"Error parsing Ribotricer file: {e}", file=sys.stderr)
@@ -298,9 +381,17 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0):
                         tid = current_attrs.get('transcript_id', 'NA')
                         gid = current_attrs.get('gene_id', 'NA')
                         
+                        # Extract P_sites as score (integer, higher is better)
+                        score = None
+                        if 'P_sites' in current_attrs:
+                            try:
+                                score = float(current_attrs['P_sites'])
+                            except ValueError:
+                                pass
+                        
                         length_nt = sum(e-s+1 for s,e in current_blocks)
                         if length_nt // 3 >= min_len:
-                            cand = ORFCandidate(chrom, strand, current_blocks, tid, gid, 'ORFquant', sample_id)
+                            cand = ORFCandidate(chrom, strand, current_blocks, tid, gid, 'ORFquant', sample_id, score=score)
                             candidates.append(cand)
                     
                     current_orf = orf_id
@@ -316,9 +407,18 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0):
             strand = current_attrs.get('strand')
             tid = current_attrs.get('transcript_id', 'NA')
             gid = current_attrs.get('gene_id', 'NA')
+            
+            # Extract P_sites as score
+            score = None
+            if 'P_sites' in current_attrs:
+                try:
+                    score = float(current_attrs['P_sites'])
+                except ValueError:
+                    pass
+            
             length_nt = sum(e-s+1 for s,e in current_blocks)
             if length_nt // 3 >= min_len:
-                cand = ORFCandidate(chrom, strand, current_blocks, tid, gid, 'ORFquant', sample_id)
+                cand = ORFCandidate(chrom, strand, current_blocks, tid, gid, 'ORFquant', sample_id, score=score)
                 candidates.append(cand)
 
     except Exception as e:
@@ -345,6 +445,86 @@ def validate_sequence(cand, genome_fasta):
     except Exception as e:
         cand.sequence = "N" * cand.length_nt
 
+def count_psites_in_region(bedgraph_file, chrom, start, end):
+    """
+    Count P-sites in a genomic region from bedgraph file
+    bedgraph format: chrom start end value
+    Returns: total count
+    """
+    if not os.path.exists(bedgraph_file):
+        return 0
+    
+    total_count = 0
+    try:
+        with open(bedgraph_file, 'r') as f:
+            for line in f:
+                if line.startswith('track') or line.startswith('#'):
+                    continue
+                parts = line.strip().split('\t')
+                if len(parts) < 4:
+                    continue
+                
+                bg_chrom = parts[0]
+                bg_start = int(parts[1])  # 0-based
+                bg_end = int(parts[2])    # 0-based, exclusive
+                bg_value = float(parts[3])
+                
+                if bg_chrom != chrom:
+                    continue
+                
+                # Convert ORF coords (1-based) to 0-based for overlap check
+                orf_start_0 = start - 1
+                orf_end_0 = end
+                
+                # Calculate overlap
+                overlap_start = max(bg_start, orf_start_0)
+                overlap_end = min(bg_end, orf_end_0)
+                
+                if overlap_start < overlap_end:
+                    overlap_len = overlap_end - overlap_start
+                    total_count += bg_value * overlap_len
+    
+    except Exception as e:
+        print(f"Warning: Error reading bedgraph {bedgraph_file}: {e}", file=sys.stderr)
+        return 0
+    
+    return int(total_count)
+
+def calculate_statistics_from_bedgraphs(cand, bedgraph_dir, sample_list):
+    """
+    Calculate statistics from RiboseQC bedgraph files
+    """
+    if not bedgraph_dir or not os.path.exists(bedgraph_dir):
+        return
+    
+    total_psites = 0
+    unique_psites = 0
+    total_reads = 0
+    unique_reads = 0
+    
+    strand_suffix = 'plus' if cand.strand == '+' else 'minus'
+    
+    for sample in sample_list:
+        # P-site bedgraphs
+        psite_file = os.path.join(bedgraph_dir, f"{sample}_P_sites_{strand_suffix}.bedgraph")
+        psite_uniq_file = os.path.join(bedgraph_dir, f"{sample}_P_sites_uniq_{strand_suffix}.bedgraph")
+        
+        # Coverage bedgraphs (optional)
+        coverage_file = os.path.join(bedgraph_dir, f"{sample}_coverage_{strand_suffix}.bedgraph")
+        coverage_uniq_file = os.path.join(bedgraph_dir, f"{sample}_coverage_uniq_{strand_suffix}.bedgraph")
+        
+        # Sum across all exon blocks
+        for block_start, block_end in cand.blocks:
+            total_psites += count_psites_in_region(psite_file, cand.chrom, block_start, block_end)
+            unique_psites += count_psites_in_region(psite_uniq_file, cand.chrom, block_start, block_end)
+            total_reads += count_psites_in_region(coverage_file, cand.chrom, block_start, block_end)
+            unique_reads += count_psites_in_region(coverage_uniq_file, cand.chrom, block_start, block_end)
+    
+    cand.total_psites = total_psites
+    cand.unique_psites = unique_psites
+    cand.total_reads = total_reads
+    cand.unique_reads = unique_reads
+
 def main():
     parser = argparse.ArgumentParser(description="Unify ORF predictions from multiple tools")
     parser.add_argument("--ribotish", nargs='+', help="Ribo-TISH output files")
@@ -354,6 +534,8 @@ def main():
     parser.add_argument("--fasta", required=True, help="Genome FASTA file for validation")
     parser.add_argument("--output", required=True, help="Output prefix")
     parser.add_argument("--min_len", type=int, default=10, help="Minimum amino acid length")
+    parser.add_argument("--bedgraph-dir", help="Directory containing RiboseQC bedgraph files (optional)")
+    parser.add_argument("--sample-list", help="Comma-separated list of sample names for bedgraph stats (optional)")
     
     args = parser.parse_args()
     
@@ -391,11 +573,25 @@ def main():
     print(f"Unique candidates after merging: {len(merged_candidates)}", file=sys.stderr)
     
     final_list = list(merged_candidates.values())
+    
+    # Calculate statistics from bedgraphs if provided
+    if args.bedgraph_dir and args.sample_list:
+        sample_list = args.sample_list.split(',')
+        print(f"Calculating statistics from bedgraphs for {len(sample_list)} samples...", file=sys.stderr)
+        for cand in final_list:
+            calculate_statistics_from_bedgraphs(cand, args.bedgraph_dir, sample_list)
+    
+    # Validate sequences
     for cand in final_list:
         validate_sequence(cand, genome_fasta)
     
+    # Write metadata.tsv with extended columns
     with open(f"{args.output}.metadata.tsv", 'w') as out:
-        header = ["orf_id", "chrom", "strand", "start", "end", "length_aa", "exon_blocks", "gene_id", "transcript_id", "tools", "samples", "tool_scores", "sequence"]
+        header = ["orf_id", "chrom", "strand", "start", "end", "length_aa", "exon_blocks", 
+                  "gene_id", "transcript_id", "tools", "samples", 
+                  "tool_scores", "tool_pvalues", 
+                  "total_reads", "unique_reads", "total_psites", "unique_psites", "pN", "unique_pN",
+                  "sequence"]
         out.write('\t'.join(header) + '\n')
         
         for i, cand in enumerate(final_list):
@@ -403,10 +599,21 @@ def main():
             tools = ",".join(sorted(list(set(t for t, s in cand.sources))))
             samples = ",".join(sorted(list(set(s for t, s in cand.sources))))
             blocks_str = ",".join(f"{s}-{e}" for s, e in cand.blocks)
-            # Format tool_scores as tool1:score1,tool2:score2
-            tool_scores_str = ",".join(f"{t}:{s}" for t, s in sorted(cand.tool_scores.items()) if s is not None) or "NA"
             
-            row = [orf_id, cand.chrom, cand.strand, str(cand.start), str(cand.end), str(cand.length_aa), blocks_str, cand.gid, cand.tid, tools, samples, tool_scores_str, cand.sequence]
+            # Format tool_scores as tool1:score1,tool2:score2
+            tool_scores_str = ",".join(f"{t}:{s:.3f}" if isinstance(s, float) else f"{t}:{s}" 
+                                      for t, s in sorted(cand.tool_scores.items()) if s is not None) or "NA"
+            
+            # Format tool_pvalues as tool1:pval1,tool2:pval2
+            tool_pvalues_str = ",".join(f"{t}:{p:.2e}" for t, p in sorted(cand.tool_pvalues.items()) if p is not None) or "NA"
+            
+            row = [orf_id, cand.chrom, cand.strand, str(cand.start), str(cand.end), str(cand.length_aa), 
+                   blocks_str, cand.gid, cand.tid, tools, samples, 
+                   tool_scores_str, tool_pvalues_str,
+                   str(cand.total_reads), str(cand.unique_reads), 
+                   str(cand.total_psites), str(cand.unique_psites),
+                   f"{cand.pN:.6f}", f"{cand.unique_pN:.6f}",
+                   cand.sequence]
             out.write('\t'.join(row) + '\n')
             
     with open(f"{args.output}.bed", 'w') as out:
