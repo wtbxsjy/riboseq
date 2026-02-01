@@ -171,7 +171,7 @@ echo "[INFO] Running Unified Prediction..."
 echo "[INFO] Output: $OUTPUT_PREFIX_ABS"
 
 # Construct command args
-CMD_ARGS="--gtf '$GTF' --fasta '$FASTA' --output '$OUTPUT_PREFIX_ABS' --min_len $MIN_LEN"
+CMD_ARGS="--gtf '$GTF' --fasta '$FASTA' --output '$OUTPUT_PREFIX_ABS' --min_len $MIN_LEN --threads $CPUS"
 
 if [[ -n "$RIBOTISH_FILES" ]]; then
     CMD_ARGS="$CMD_ARGS --ribotish $RIBOTISH_FILES"

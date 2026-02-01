@@ -77,6 +77,7 @@ process UNIFY_ORF_PREDICTIONS {
         --fasta ${fasta} \\
         --output ${prefix} \\
         --min_len ${min_len} \\
+        --threads ${task.cpus} \\
         ${ribotish_arg} \\
         ${ribotricer_arg} \\
         ${orfquant_arg} \\

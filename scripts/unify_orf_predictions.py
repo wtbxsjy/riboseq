@@ -6,6 +6,8 @@ import csv
 import re
 from typing import List, Dict, Tuple, Set, Optional
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 
 # Try to import biopython and pyfaidx
 try:
@@ -471,11 +473,120 @@ def validate_sequence(cand, genome_fasta):
     except Exception as e:
         cand.sequence = "N" * cand.length_nt
 
+
+class BedgraphIndex:
+    """
+    Pre-loaded and indexed bedgraph data for fast region queries.
+    Uses a simple binning strategy for efficient overlap queries.
+    """
+    BIN_SIZE = 10000  # 10kb bins
+    
+    def __init__(self, bedgraph_file):
+        """Load bedgraph file into memory with binned index."""
+        self.data = defaultdict(lambda: defaultdict(list))  # chrom -> bin -> [(start, end, value), ...]
+        self.loaded = False
+        
+        if not bedgraph_file or not os.path.exists(bedgraph_file):
+            return
+        
+        try:
+            with open(bedgraph_file, 'r') as f:
+                for line in f:
+                    if line.startswith('track') or line.startswith('#'):
+                        continue
+                    parts = line.strip().split('\t')
+                    if len(parts) < 4:
+                        continue
+                    
+                    chrom = parts[0]
+                    start = int(parts[1])  # 0-based
+                    end = int(parts[2])    # 0-based, exclusive
+                    value = float(parts[3])
+                    
+                    # Add to all overlapping bins
+                    start_bin = start // self.BIN_SIZE
+                    end_bin = (end - 1) // self.BIN_SIZE
+                    for bin_idx in range(start_bin, end_bin + 1):
+                        self.data[chrom][bin_idx].append((start, end, value))
+            
+            self.loaded = True
+        except Exception as e:
+            print(f"Warning: Error loading bedgraph: {e}", file=sys.stderr)
+    
+    def count_in_region(self, chrom, start_1based, end_1based):
+        """Count signal in a genomic region (1-based coordinates)."""
+        if not self.loaded:
+            return 0
+        
+        # Convert to 0-based
+        start_0 = start_1based - 1
+        end_0 = end_1based
+        
+        total_count = 0
+        start_bin = start_0 // self.BIN_SIZE
+        end_bin = (end_0 - 1) // self.BIN_SIZE
+        
+        seen = set()  # Avoid double-counting entries in multiple bins
+        
+        for bin_idx in range(start_bin, end_bin + 1):
+            for entry in self.data[chrom].get(bin_idx, []):
+                entry_id = id(entry)
+                if entry_id in seen:
+                    continue
+                seen.add(entry_id)
+                
+                bg_start, bg_end, bg_value = entry
+                
+                # Calculate overlap
+                overlap_start = max(bg_start, start_0)
+                overlap_end = min(bg_end, end_0)
+                
+                if overlap_start < overlap_end:
+                    overlap_len = overlap_end - overlap_start
+                    total_count += bg_value * overlap_len
+        
+        return int(total_count)
+
+
+def load_bedgraph_indices(bedgraph_dir, sample_list):
+    """
+    Pre-load all bedgraph files into indexed structures.
+    Returns: dict of sample -> strand -> type -> BedgraphIndex
+    """
+    if not bedgraph_dir or not os.path.exists(bedgraph_dir):
+        return None
+    
+    print(f"Pre-loading bedgraph files for {len(sample_list)} samples...", file=sys.stderr)
+    indices = {}
+    
+    for sample in sample_list:
+        indices[sample] = {}
+        for strand_suffix in ['plus', 'minus']:
+            indices[sample][strand_suffix] = {}
+            
+            # P-site bedgraphs
+            psite_file = os.path.join(bedgraph_dir, f"{sample}_P_sites_{strand_suffix}.bedgraph")
+            psite_uniq_file = os.path.join(bedgraph_dir, f"{sample}_P_sites_uniq_{strand_suffix}.bedgraph")
+            coverage_file = os.path.join(bedgraph_dir, f"{sample}_coverage_{strand_suffix}.bedgraph")
+            coverage_uniq_file = os.path.join(bedgraph_dir, f"{sample}_coverage_uniq_{strand_suffix}.bedgraph")
+            
+            indices[sample][strand_suffix]['psite'] = BedgraphIndex(psite_file)
+            indices[sample][strand_suffix]['psite_uniq'] = BedgraphIndex(psite_uniq_file)
+            indices[sample][strand_suffix]['coverage'] = BedgraphIndex(coverage_file)
+            indices[sample][strand_suffix]['coverage_uniq'] = BedgraphIndex(coverage_uniq_file)
+    
+    print(f"Bedgraph indices loaded.", file=sys.stderr)
+    return indices
+
+
 def count_psites_in_region(bedgraph_file, chrom, start, end):
     """
     Count P-sites in a genomic region from bedgraph file
     bedgraph format: chrom start end value
     Returns: total count
+    
+    NOTE: This function is kept for backward compatibility but is slow.
+    Use BedgraphIndex for better performance.
     """
     if not os.path.exists(bedgraph_file):
         return 0
@@ -518,7 +629,7 @@ def count_psites_in_region(bedgraph_file, chrom, start, end):
 
 def calculate_statistics_from_bedgraphs(cand, bedgraph_dir, sample_list):
     """
-    Calculate statistics from RiboseQC bedgraph files
+    Calculate statistics from RiboseQC bedgraph files (slow legacy version)
     """
     if not bedgraph_dir or not os.path.exists(bedgraph_dir):
         return
@@ -551,6 +662,148 @@ def calculate_statistics_from_bedgraphs(cand, bedgraph_dir, sample_list):
     cand.total_reads = total_reads
     cand.unique_reads = unique_reads
 
+
+def calculate_statistics_from_indices(cand, bedgraph_indices, sample_list):
+    """
+    Calculate statistics using pre-loaded bedgraph indices (fast version)
+    """
+    if not bedgraph_indices:
+        return
+    
+    total_psites = 0
+    unique_psites = 0
+    total_reads = 0
+    unique_reads = 0
+    
+    strand_suffix = 'plus' if cand.strand == '+' else 'minus'
+    
+    for sample in sample_list:
+        if sample not in bedgraph_indices:
+            continue
+        
+        idx = bedgraph_indices[sample][strand_suffix]
+        
+        # Sum across all exon blocks
+        for block_start, block_end in cand.blocks:
+            total_psites += idx['psite'].count_in_region(cand.chrom, block_start, block_end)
+            unique_psites += idx['psite_uniq'].count_in_region(cand.chrom, block_start, block_end)
+            total_reads += idx['coverage'].count_in_region(cand.chrom, block_start, block_end)
+            unique_reads += idx['coverage_uniq'].count_in_region(cand.chrom, block_start, block_end)
+    
+    cand.total_psites = total_psites
+    cand.unique_psites = unique_psites
+    cand.total_reads = total_reads
+    cand.unique_reads = unique_reads
+
+
+def process_candidate_batch(batch_data):
+    """
+    Process a batch of candidates for P-site statistics.
+    Used for parallel processing.
+    
+    batch_data: tuple of (candidate_dicts, bedgraph_indices, sample_list)
+    Returns: list of updated candidate dicts with statistics
+    """
+    candidates, bedgraph_indices, sample_list = batch_data
+    
+    results = []
+    for cand_dict in candidates:
+        # Reconstruct minimal candidate info for counting
+        chrom = cand_dict['chrom']
+        strand = cand_dict['strand']
+        blocks = cand_dict['blocks']
+        strand_suffix = 'plus' if strand == '+' else 'minus'
+        
+        total_psites = 0
+        unique_psites = 0
+        total_reads = 0
+        unique_reads = 0
+        
+        for sample in sample_list:
+            if sample not in bedgraph_indices:
+                continue
+            
+            idx = bedgraph_indices[sample][strand_suffix]
+            
+            for block_start, block_end in blocks:
+                total_psites += idx['psite'].count_in_region(chrom, block_start, block_end)
+                unique_psites += idx['psite_uniq'].count_in_region(chrom, block_start, block_end)
+                total_reads += idx['coverage'].count_in_region(chrom, block_start, block_end)
+                unique_reads += idx['coverage_uniq'].count_in_region(chrom, block_start, block_end)
+        
+        results.append({
+            'id_key': cand_dict['id_key'],
+            'total_psites': total_psites,
+            'unique_psites': unique_psites,
+            'total_reads': total_reads,
+            'unique_reads': unique_reads
+        })
+    
+    return results
+
+
+def calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, num_workers=None):
+    """
+    Calculate P-site statistics for all candidates in parallel.
+    """
+    if not bedgraph_indices or not sample_list:
+        return
+    
+    if num_workers is None:
+        num_workers = min(multiprocessing.cpu_count(), 8)
+    
+    # Convert candidates to serializable dicts
+    cand_dicts = [
+        {
+            'id_key': cand.id_key,
+            'chrom': cand.chrom,
+            'strand': cand.strand,
+            'blocks': cand.blocks
+        }
+        for cand in final_list
+    ]
+    
+    # Create a lookup for updating results
+    cand_lookup = {cand.id_key: cand for cand in final_list}
+    
+    # For small datasets or single worker, process sequentially
+    if len(final_list) < 100 or num_workers <= 1:
+        print(f"Processing {len(final_list)} candidates sequentially...", file=sys.stderr)
+        for cand in final_list:
+            calculate_statistics_from_indices(cand, bedgraph_indices, sample_list)
+        return
+    
+    # Split into batches for parallel processing
+    batch_size = max(50, len(cand_dicts) // num_workers)
+    batches = [cand_dicts[i:i + batch_size] for i in range(0, len(cand_dicts), batch_size)]
+    
+    print(f"Processing {len(final_list)} candidates in {len(batches)} batches using {num_workers} workers...", file=sys.stderr)
+    
+    # Note: Since BedgraphIndex contains complex data structures that are hard to pickle,
+    # we'll use threading instead of multiprocessing for simplicity
+    from concurrent.futures import ThreadPoolExecutor
+    
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = []
+        for batch in batches:
+            futures.append(executor.submit(process_candidate_batch, (batch, bedgraph_indices, sample_list)))
+        
+        processed = 0
+        for future in as_completed(futures):
+            results = future.result()
+            for res in results:
+                cand = cand_lookup.get(res['id_key'])
+                if cand:
+                    cand.total_psites = res['total_psites']
+                    cand.unique_psites = res['unique_psites']
+                    cand.total_reads = res['total_reads']
+                    cand.unique_reads = res['unique_reads']
+            processed += len(results)
+            print(f"  Processed {processed}/{len(final_list)} candidates...", file=sys.stderr, end='\r')
+    
+    print(f"  Processed {len(final_list)}/{len(final_list)} candidates.", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Unify ORF predictions from multiple tools")
     parser.add_argument("--ribotish", nargs='+', help="Ribo-TISH output files")
@@ -562,6 +815,7 @@ def main():
     parser.add_argument("--min_len", type=int, default=10, help="Minimum amino acid length")
     parser.add_argument("--bedgraph-dir", help="Directory containing RiboseQC bedgraph files (optional)")
     parser.add_argument("--sample-list", help="Comma-separated list of sample names for bedgraph stats (optional)")
+    parser.add_argument("--threads", type=int, default=4, help="Number of threads for parallel processing (default: 4)")
     
     args = parser.parse_args()
     
@@ -600,14 +854,19 @@ def main():
     
     final_list = list(merged_candidates.values())
     
-    # Calculate statistics from bedgraphs if provided
+    # Calculate statistics from bedgraphs if provided (using optimized indexed version)
     if args.bedgraph_dir and args.sample_list:
         sample_list = args.sample_list.split(',')
         print(f"Calculating statistics from bedgraphs for {len(sample_list)} samples...", file=sys.stderr)
-        for cand in final_list:
-            calculate_statistics_from_bedgraphs(cand, args.bedgraph_dir, sample_list)
+        
+        # Load bedgraph files into indexed structures (one-time cost)
+        bedgraph_indices = load_bedgraph_indices(args.bedgraph_dir, sample_list)
+        
+        # Use parallel processing for large datasets
+        calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, args.threads)
     
     # Validate sequences
+    print(f"Validating sequences for {len(final_list)} candidates...", file=sys.stderr)
     for cand in final_list:
         validate_sequence(cand, genome_fasta)
     
