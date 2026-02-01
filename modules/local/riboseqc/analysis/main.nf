@@ -88,7 +88,7 @@ RSCRIPT
 
     # Use Rscript from the Conda environment if available
     echo "[INFO] Running RiboseQC analysis..."
-    if [[ -n "\$CONDA_PREFIX" ]]; then
+    if [[ -n "\${CONDA_PREFIX:-}" ]]; then
         "\$CONDA_PREFIX/bin/Rscript" script.R
     else
         Rscript script.R
