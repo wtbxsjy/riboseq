@@ -34,21 +34,16 @@ process RIBOSEQC_ANALYSIS {
     #!/bin/bash
     set -euo pipefail
 
-    cat <<EOF > script.R
+    cat <<'RSCRIPT' > script.R
     library(RiboseQC)
     library(Rsamtools)
 
     # Run RiboseQC analysis with error handling
-    # Note: genome_seq should be a file path string, not an FaFile object
-    # The function will internally create FaFile and FaFile_Circ objects
-    # HTML report generation is disabled due to compatibility issues with
-    # rmarkdown in containerized environments (RiboseQC 1.1)
-    
     cat("Starting RiboseQC analysis...\\n")
-    cat("Annotation file:", "${annotation}", "\\n")
-    cat("BAM file:", "${bam}", "\\n")
-    cat("Genome FASTA:", "${fasta}", "\\n")
-    cat("Sample name:", "${prefix}", "\\n")
+    cat("Annotation file: ${annotation}\\n")
+    cat("BAM file: ${bam}\\n")
+    cat("Genome FASTA: ${fasta}\\n")
+    cat("Sample name: ${prefix}\\n")
     
     tryCatch({
         RiboseQC_analysis(
@@ -69,19 +64,17 @@ process RIBOSEQC_ANALYSIS {
     })
     
     # Verify critical output files exist and have content
-    required_files <- c("${prefix}_P_sites_calcs")
-    for (f in required_files) {
-        if (!file.exists(f)) {
-            cat("ERROR: Required output file not found:", f, "\\n")
-            quit(status = 1)
-        }
-        fsize <- file.info(f)\\$size
-        if (is.na(fsize) || fsize < 10) {
-            cat("ERROR: Output file is empty or too small:", f, "(", fsize, "bytes)\\n")
-            quit(status = 1)
-        }
-        cat("Verified output:", f, "(", fsize, "bytes)\\n")
+    output_file <- "${prefix}_P_sites_calcs"
+    if (!file.exists(output_file)) {
+        cat("ERROR: Required output file not found:", output_file, "\\n")
+        quit(status = 1)
     }
+    finfo <- file.info(output_file)
+    if (is.na(finfo[["size"]]) || finfo[["size"]] < 10) {
+        cat("ERROR: Output file is empty or too small:", output_file, "(", finfo[["size"]], "bytes)\\n")
+        quit(status = 1)
+    }
+    cat("Verified output:", output_file, "(", finfo[["size"]], "bytes)\\n")
 
     # Write versions
     writeLines(
@@ -91,7 +84,7 @@ process RIBOSEQC_ANALYSIS {
         ),
         "versions.yml"
     )
-    EOF
+RSCRIPT
 
     # Use Rscript from the Conda environment if available
     echo "[INFO] Running RiboseQC analysis..."
