@@ -1134,7 +1134,7 @@ def main():
     parser.add_argument("--gtf", required=True, help="Reference GTF file for coordinate mapping")
     parser.add_argument("--fasta", required=True, help="Genome FASTA file for validation")
     parser.add_argument("--output", required=True, help="Output prefix")
-    parser.add_argument("--min_len", type=int, default=10, help="Minimum amino acid length")
+    parser.add_argument("--min_len", type=int, default=24, help="Minimum amino acid length")
     parser.add_argument("--bedgraph-dir", help="Directory containing RiboseQC bedgraph files (optional)")
     parser.add_argument("--sample-list", help="Comma-separated list of sample names for bedgraph stats (optional)")
     parser.add_argument("--threads", type=int, default=4, help="Number of threads for parallel processing (default: 4)")

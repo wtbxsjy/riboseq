@@ -32,7 +32,7 @@ process UNIFY_ORF_PREDICTIONS {
     task.ext.when == null || task.ext.when
 
     script:
-    def min_len = params.unify_orf_min_len ?: 10
+    def min_len = params.unify_orf_min_len ?: 24
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
     // Advanced merging parameters
     def merge_tolerance = params.unify_orf_merge_tolerance ?: 3
