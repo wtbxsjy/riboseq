@@ -383,15 +383,28 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0):
                         
                         # Extract P_sites as score (integer, higher is better)
                         score = None
+                        psites_count = 0
                         if 'P_sites' in current_attrs:
                             try:
+                                psites_count = int(float(current_attrs['P_sites']))
                                 score = float(current_attrs['P_sites'])
+                            except ValueError:
+                                pass
+                        
+                        # Extract unique P_sites if available
+                        unique_psites_count = 0
+                        if 'P_sites_uniq' in current_attrs:
+                            try:
+                                unique_psites_count = int(float(current_attrs['P_sites_uniq']))
                             except ValueError:
                                 pass
                         
                         length_nt = sum(e-s+1 for s,e in current_blocks)
                         if length_nt // 3 >= min_len:
                             cand = ORFCandidate(chrom, strand, current_blocks, tid, gid, 'ORFquant', sample_id, score=score)
+                            # Set P-site counts from ORFquant attributes
+                            cand.total_psites = psites_count
+                            cand.unique_psites = unique_psites_count if unique_psites_count > 0 else psites_count
                             candidates.append(cand)
                     
                     current_orf = orf_id
@@ -410,15 +423,28 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0):
             
             # Extract P_sites as score
             score = None
+            psites_count = 0
             if 'P_sites' in current_attrs:
                 try:
+                    psites_count = int(float(current_attrs['P_sites']))
                     score = float(current_attrs['P_sites'])
+                except ValueError:
+                    pass
+            
+            # Extract unique P_sites if available
+            unique_psites_count = 0
+            if 'P_sites_uniq' in current_attrs:
+                try:
+                    unique_psites_count = int(float(current_attrs['P_sites_uniq']))
                 except ValueError:
                     pass
             
             length_nt = sum(e-s+1 for s,e in current_blocks)
             if length_nt // 3 >= min_len:
                 cand = ORFCandidate(chrom, strand, current_blocks, tid, gid, 'ORFquant', sample_id, score=score)
+                # Set P-site counts from ORFquant attributes
+                cand.total_psites = psites_count
+                cand.unique_psites = unique_psites_count if unique_psites_count > 0 else psites_count
                 candidates.append(cand)
 
     except Exception as e:

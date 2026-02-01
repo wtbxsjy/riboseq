@@ -557,6 +557,24 @@ workflow RIBOSEQ {
             ch_orfquant_list = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
                 .map { it ?: [] }
 
+            // Collect RiboseQC P-site bedgraph files for unified P-site statistics
+            // Each sample produces two bedgraph files: *_P_sites_plus.bedgraph and *_P_sites_minus.bedgraph
+            ch_psites_bedgraph = params.skip_riboseqc ? 
+                Channel.value([]) :
+                RIBOSEQC_POSTFILTER.out.psites_bedgraph
+                    .map { meta, files -> files }
+                    .flatten()
+                    .collect()
+                    .map { it ?: [] }
+            
+            // Collect sample names from RiboseQC output
+            ch_sample_list = params.skip_riboseqc ?
+                Channel.value([]) :
+                RIBOSEQC_POSTFILTER.out.psites_bedgraph
+                    .map { meta, files -> meta.id }
+                    .collect()
+                    .map { it ?: [] }
+
             // Combine three channels using chained combine operators
             ch_unify_inputs = ch_ribotish_list
                 .combine(ch_ribotricer_list)
@@ -578,7 +596,9 @@ workflow RIBOSEQ {
                 ch_unify_inputs,
                 ch_gtf,
                 ch_fasta,
-                file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true)
+                file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true),
+                ch_psites_bedgraph,
+                ch_sample_list
             )
             ch_versions = ch_versions.mix(UNIFY_ORF_PREDICTIONS.out.versions)
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata

@@ -1,11 +1,4 @@
 {
-	"servers": {
-		"cognitionai/deepwiki": {
-			"type": "http",
-			"url": "https://mcp.deepwiki.com/sse",
-			"gallery": "https://api.mcp.github.com",
-			"version": "1.0.0"
-		}
-	},
-	"inputs": []
+	"inputs": [],
+	"servers": {}
 }

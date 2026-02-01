@@ -229,6 +229,34 @@ To disable this correction and use the original RiboseQC for_ORFquant file:
 --orfquant_psite_correction false
 ```
 
+### Unified ORF Predictions with P-site Statistics
+
+When multiple ORF prediction tools are run (Ribo-TISH, Ribotricer, ORFquant), the pipeline can merge their results into a unified output. This unified prediction step now integrates RiboseQC P-site bedgraph data to calculate standardized P-site statistics for ALL predicted ORFs, regardless of which tool originally detected them.
+
+**Key features:**
+
+1. **Unified coordinate system**: ORFs from different tools are merged based on their genomic coordinates, with a configurable overlap threshold.
+
+2. **Consistent P-site statistics**: Using RiboseQC's P-site bedgraph files, the pipeline calculates the following metrics for each ORF:
+   - `total_reads`: Total read count across all samples
+   - `unique_reads`: Unique read count across all samples  
+   - `total_psites`: Total P-site count within the ORF region
+   - `unique_psites`: Unique P-site count
+   - `pN`: P-site density (psites per codon)
+   - `unique_pN`: Unique P-site density
+
+3. **Source tracking**: The output preserves information about which tools originally detected each ORF, along with their original scores and p-values.
+
+4. **Multi-sample support**: Statistics are aggregated across all samples processed by RiboseQC.
+
+This approach ensures that all ORF predictions can be compared using the same evidence metric, even if the original prediction tools don't provide P-site statistics (e.g., Ribo-TISH predictions).
+
+**Output files:**
+
+- `unified_orfs.metadata.tsv`: Full metadata with P-site statistics
+- `unified_orfs.bed`: BED12 format for visualization
+- `unified_orfs.gtf`: GTF format for downstream analysis
+
 ## Translational efficiency
 
 If you have paired RNA-seq and Riboseq samples, you can use this workflow to initiate a translational efficiency analysis.

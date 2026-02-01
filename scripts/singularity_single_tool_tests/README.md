@@ -44,11 +44,21 @@ export BIND_EXTRA="/mnt:/mnt"
 - `12_riboseqc_orfquant_from_filtered_bam.sh`：从过滤后 BAM 运行 RiboseQC + ORFquant。
 - `13_orfquant_prepareannotation.sh`：ORFquant 注释准备。
 
-### GENCODE 注释工具（14-16）✨ 新增
+### GENCODE 注释工具（14-16）✨
 
 - **`14_ribotish_to_gencode.sh`**：将 Ribo-TISH 预测结果转换为 gencode-riboseqORFs 兼容格式
 - **`15_ribotricer_to_gencode.sh`**：将 Ribotricer 预测结果转换为 gencode-riboseqORFs 兼容格式
 - **`16_gencode_orf_mapper.sh`**：运行 gencode-riboseqORFs 统一 ORF 注释和去冗余
+
+### ORF 统一预测（17-18）
+
+- **`17_unify_predictions.sh`**：统一 Ribo-TISH、Ribotricer、ORFquant 的 ORF 预测结果
+- **`18_classify_orfs.sh`**：ORF 类型分类
+
+### P-site 校正工具（19-20）✨ 新增
+
+- **`19_extract_rl_cutoff.sh`**：从 RiboseQC P_sites_calcs 提取最优 P-site 偏移量
+- **`20_prepare_for_orfquant_corrected.sh`**：使用校正后的偏移量重新生成 for_ORFquant 文件
 
 ## 最小运行示例
 
@@ -69,6 +79,107 @@ cd scripts/singularity_single_tool_tests
 ```
 
 ### GENCODE 注释流程 ✨ 新增
+
+```bash
+cd scripts/singularity_single_tool_tests
+
+# 步骤 1: 运行 ORF 预测工具（以 Ribo-TISH 和 Ribotricer 为例）
+
+# Ribo-TISH
+./05_ribotish_quality.sh \
+  --sample S1 \
+  --bam S1.filtered.bam \
+  --gtf annotation.gtf
+
+./06_ribotish_predict.sh \
+  --sample S1 \
+  --bam S1.filtered.bam \
+  --gtf annotation.gtf \
+  --fasta genome.fa \
+  --ribopara out_ribotish_quality/S1.para.py
+
+# Ribotricer
+./07_ribotricer_prepareorfs.sh \
+  --gtf annotation.gtf \
+  --fasta genome.fa \
+  --prefix ribotricer_idx
+
+./08_ribotricer_detectorfs.sh \
+  --sample S1 \
+  --bam S1.filtered.bam \
+  --ribotricer-index out_ribotricer_prepareorfs/ribotricer_idx
+```
+
+### P-site 校正流程 ✨ 新增
+
+使用 RiboseQC 的 `P_sites_calcs` 提取最优 P-site 偏移量，并重新生成 `for_ORFquant` 文件以提高 ORFquant 准确性：
+
+```bash
+cd scripts/singularity_single_tool_tests
+
+# 步骤 1: 运行 RiboseQC 分析
+./03_riboseqc_analysis.sh \
+  --sample S1 \
+  --bam S1.filtered.bam \
+  --annotation Rannot \
+  --fasta genome.fa
+
+# 步骤 2: 提取最优 P-site 偏移量
+./19_extract_rl_cutoff.sh \
+  --sample S1 \
+  --psites-calcs out_riboseqc_analysis/S1_P_sites_calcs
+
+# 步骤 3: 使用校正后的偏移量重新生成 for_ORFquant
+./20_prepare_for_orfquant_corrected.sh \
+  --sample S1 \
+  --for-orfquant out_riboseqc_analysis/S1_for_ORFquant \
+  --rl-cutoff out_extract_rl_cutoff/S1_rl_cutoff.tsv \
+  --annot Rannot \
+  --image ./containers/orfquant_patched.sif
+
+# 步骤 4: 使用校正后的 for_ORFquant 运行 ORFquant
+./04_orfquant_run.sh \
+  --sample S1 \
+  --for-orfquant out_prepare_for_orfquant_corrected/S1_corrected_for_ORFquant \
+  --annotation Rannot \
+  --fasta genome.fa
+```
+
+**输出文件**：
+
+- `S1_rl_cutoff.tsv`: 最优 P-site 偏移量表（read_length, cutoff, comp）
+- `S1_corrected_for_ORFquant`: 校正后的 for_ORFquant 文件
+
+### 统一 ORF 预测（带 P-site 统计）
+
+使用 RiboseQC bedgraph 文件为所有工具的 ORF 预测计算统一的 P-site 统计信息：
+
+```bash
+cd scripts/singularity_single_tool_tests
+
+# 运行统一预测（带 P-site 统计）
+./17_unify_predictions.sh \
+  --gtf annotation.gtf \
+  --fasta genome.fa \
+  --ribotish "out_ribotish_predict/S1_pred.txt" \
+  --orfquant "out_orfquant/S1_final_ORFquant_results.gtf" \
+  --bedgraph-dir out_riboseqc_analysis \
+  --sample-list "S1" \
+  --output ./unified/all_orfs
+
+# 输出文件：
+# - unified/all_orfs.metadata.tsv: 含 P-site 统计的完整元数据
+# - unified/all_orfs.bed: BED12 格式
+# - unified/all_orfs.gtf: GTF 格式
+```
+
+**P-site 统计列**（在 metadata.tsv 中）：
+- `total_psites`: 总 P-site 计数
+- `unique_psites`: 唯一 P-site 计数
+- `pN`: P-site 密度（每密码子）
+- `unique_pN`: 唯一 P-site 密度
+
+### GENCODE 注释流程
 
 ```bash
 cd scripts/singularity_single_tool_tests

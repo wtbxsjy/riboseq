@@ -199,8 +199,10 @@ def main():
     # 2. Load ORFs
     print(f"Loading ORFs from {args.input}...", file=sys.stderr)
     orfs = []
+    original_header = None
     with open(args.input, 'r') as f:
         reader = csv.DictReader(f, delimiter='\t')
+        original_header = reader.fieldnames
         for row in reader:
             row['exons'] = parse_coords(row['exon_blocks'])
             orfs.append(row)
@@ -219,15 +221,31 @@ def main():
         func = partial(process_chunk, cds_data=cds_data)
         results_list = pool.map(func, chunks)
     
-    # Flatten results
-    final_results = [item for sublist in results_list for item in sublist]
+    # Flatten results and create a mapping
+    classification_map = {}
+    for sublist in results_list:
+        for orf_id, cat in sublist:
+            classification_map[orf_id] = cat
     
-    # 4. Write Output
+    # 4. Write Output - Preserve ALL original columns and add classification
     print(f"Writing results to {args.output}...", file=sys.stderr)
-    with open(args.output, 'w') as f:
-        f.write("orf_id\torf_type_category\n")
-        for orf_id, cat in final_results:
-            f.write(f"{orf_id}\t{cat}\n")
+    
+    # Build output header: original columns + orf_type_category
+    if original_header:
+        output_header = list(original_header) + ['orf_type_category']
+    else:
+        output_header = ['orf_id', 'orf_type_category']
+    
+    with open(args.output, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=output_header, delimiter='\t', extrasaction='ignore')
+        writer.writeheader()
+        
+        for orf in orfs:
+            orf_id = orf.get('orf_id', 'NA')
+            orf['orf_type_category'] = classification_map.get(orf_id, 'unknown')
+            # Remove the temporary 'exons' field before writing
+            orf_copy = {k: v for k, v in orf.items() if k != 'exons'}
+            writer.writerow(orf_copy)
 
     print("Done.", file=sys.stderr)
 

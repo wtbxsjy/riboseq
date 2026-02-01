@@ -136,6 +136,12 @@ Examples:
     parser.add_argument('--profile', default='singularity',
                         help='Nextflow profile (default: singularity)')
     
+    # P-site correction options
+    parser.add_argument('--orfquant-psite-correction', action='store_true', default=True,
+                        help='Enable ORFquant P-site offset correction (default: enabled)')
+    parser.add_argument('--no-orfquant-psite-correction', action='store_false', dest='orfquant_psite_correction',
+                        help='Disable ORFquant P-site offset correction')
+    
     # SRA conversion options
     parser.add_argument('--sra-threads', type=int, default=8,
                         help='Number of threads for fasterq-dump when converting SRA files (default: 8)')
@@ -568,6 +574,13 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     
     # Skip RPBP by default (not fully validated yet)
     nf_cmd_parts.append("--skip_rpbp")
+    
+    # P-site offset correction for ORFquant (enabled by default)
+    if hasattr(args, 'orfquant_psite_correction'):
+        if args.orfquant_psite_correction:
+            nf_cmd_parts.append("--orfquant_psite_correction true")
+        else:
+            nf_cmd_parts.append("--orfquant_psite_correction false")
     
     # ORF unification and classification options (default: run, so no need to set false)
     nf_cmd_parts.extend([

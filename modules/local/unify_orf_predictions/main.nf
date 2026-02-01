@@ -19,6 +19,8 @@ process UNIFY_ORF_PREDICTIONS {
     path gtf
     path fasta
     path unify_script
+    path psites_bedgraph, stageAs: 'bedgraph/*'  // RiboseQC P-site bedgraph files (optional)
+    val sample_list       // List of sample names for bedgraph files
 
     output:
     path "${prefix}.metadata.tsv", emit: metadata
@@ -39,6 +41,12 @@ process UNIFY_ORF_PREDICTIONS {
         "--ribotricer ${ribotricer_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ? 
         "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    // Bedgraph arguments for P-site statistics from RiboseQC
+    // psites_bedgraph can be a list or path, check if it has files
+    def has_bedgraph = (psites_bedgraph instanceof List && psites_bedgraph.size() > 0) || 
+                       (psites_bedgraph && !(psites_bedgraph instanceof List) && psites_bedgraph.name != 'NO_FILE')
+    def bedgraph_arg = has_bedgraph ? "--bedgraph-dir bedgraph" : ''
+    def sample_arg = (sample_list && sample_list instanceof List && sample_list.size() > 0) ? "--sample-list ${sample_list.join(',')}" : ''
     """
     set -euo pipefail
 
@@ -72,6 +80,8 @@ process UNIFY_ORF_PREDICTIONS {
         ${ribotish_arg} \\
         ${ribotricer_arg} \\
         ${orfquant_arg} \\
+        ${bedgraph_arg} \\
+        ${sample_arg} \\
         ${extra_args}
 
     cat <<-END_VERSIONS > versions.yml
