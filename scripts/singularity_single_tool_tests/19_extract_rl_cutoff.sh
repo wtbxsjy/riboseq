@@ -90,19 +90,35 @@ cd '$OUTDIR'
 
 cat <<'RSCRIPT' > script.R
 # Extract P-site offsets from RiboseQC P_sites_calcs
-# Selects rows with max_coverage=TRUE
+# Selects rows with max_coverage=TRUE (or 1 for numeric)
 
 psites_calcs <- readRDS('$PSITES_CALCS')
 
-# Extract rows with max_coverage=TRUE
+# Debug output
+cat('Data structure:\\n')
+cat('Rows:', nrow(psites_calcs), '\\n')
+cat('Columns:', paste(colnames(psites_calcs), collapse=', '), '\\n')
+
 if ('max_coverage' %in% colnames(psites_calcs)) {
-    optimal <- psites_calcs[psites_calcs\$max_coverage == TRUE, ]
+    cat('max_coverage class:', class(psites_calcs\$max_coverage), '\\n')
+    cat('max_coverage unique values:', paste(unique(psites_calcs\$max_coverage), collapse=', '), '\\n')
+    
+    # Handle both logical and numeric max_coverage
+    if (is.logical(psites_calcs\$max_coverage)) {
+        optimal <- psites_calcs[psites_calcs\$max_coverage == TRUE, ]
+    } else if (is.numeric(psites_calcs\$max_coverage)) {
+        optimal <- psites_calcs[psites_calcs\$max_coverage == 1, ]
+    } else {
+        optimal <- psites_calcs[as.logical(psites_calcs\$max_coverage), ]
+    }
+    
+    if (nrow(optimal) == 0) {
+        cat('WARNING: No rows with max_coverage indicator. Using all unique read lengths.\\n')
+        optimal <- psites_calcs[!duplicated(psites_calcs\$read_length), ]
+    }
     
     # Select relevant columns
     result <- optimal[, c('read_length', 'cutoff', 'comp')]
-    
-    # Rename columns for clarity
-    colnames(result) <- c('read_length', 'cutoff', 'comp')
     
     # Write output
     write.table(result, '${SAMPLE}_rl_cutoff.tsv', 

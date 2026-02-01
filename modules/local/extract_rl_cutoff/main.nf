@@ -95,11 +95,37 @@ process EXTRACT_RL_CUTOFF {
                    "\\nAvailable columns:", paste(colnames(psites_data), collapse = ", ")))
     }
 
+    # Debug: Print data structure
+    cat("Data structure:\\n")
+    cat("Rows:", nrow(psites_data), "\\n")
+    cat("Columns:", paste(colnames(psites_data), collapse = ", "), "\\n")
+    cat("max_coverage class:", class(psites_data[["max_coverage"]]), "\\n")
+    cat("max_coverage unique values:", paste(unique(psites_data[["max_coverage"]]), collapse = ", "), "\\n")
+    
     # Filter rows where max_coverage is TRUE
-    filtered_data <- psites_data[psites_data[["max_coverage"]] == TRUE, ]
+    # Handle both logical (TRUE/FALSE) and numeric (1/0) representations
+    if (is.logical(psites_data[["max_coverage"]])) {
+        filtered_data <- psites_data[psites_data[["max_coverage"]] == TRUE, ]
+    } else if (is.numeric(psites_data[["max_coverage"]])) {
+        # Treat 1 as TRUE, others as FALSE
+        filtered_data <- psites_data[psites_data[["max_coverage"]] == 1, ]
+    } else {
+        # Try to coerce to logical
+        filtered_data <- psites_data[as.logical(psites_data[["max_coverage"]]), ]
+    }
 
     if (nrow(filtered_data) == 0) {
-        stop("No rows with max_coverage == TRUE found in P_sites_calcs file")
+        # Fallback: If no max_coverage rows, use all unique read_length/cutoff pairs
+        cat("WARNING: No rows with max_coverage == TRUE found. Using all unique read_length/cutoff pairs.\\n")
+        
+        # Remove duplicates based on read_length
+        filtered_data <- psites_data[!duplicated(psites_data[["read_length"]]), ]
+        
+        if (nrow(filtered_data) == 0) {
+            stop("No valid data found in P_sites_calcs file")
+        }
+    } else {
+        cat("Found", nrow(filtered_data), "rows with max_coverage indicator\\n")
     }
 
     # Select columns: read_length, cutoff, and comp (if exists)
