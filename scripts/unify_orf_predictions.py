@@ -159,6 +159,7 @@ class ORFCandidate:
         self.sources = {(tool, sample)} # Set of (tool, sample) tuples
         self.score = score
         self.sequence = sequence # Extracted sequence
+        self.tool_scores = {tool: score} if score is not None else {}  # Dict: tool -> score
         
         # Calculated fields
         self.start = self.blocks[0][0]
@@ -172,6 +173,10 @@ class ORFCandidate:
     def merge(self, other):
         """Merge another candidate into this one."""
         self.sources.update(other.sources)
+        # Merge tool scores
+        for tool, score in other.tool_scores.items():
+            if tool not in self.tool_scores or (score is not None and self.tool_scores.get(tool) is None):
+                self.tool_scores[tool] = score
         if not self.sequence and other.sequence:
             self.sequence = other.sequence
 
@@ -390,7 +395,7 @@ def main():
         validate_sequence(cand, genome_fasta)
     
     with open(f"{args.output}.metadata.tsv", 'w') as out:
-        header = ["orf_id", "chrom", "strand", "start", "end", "length_aa", "exon_blocks", "gene_id", "transcript_id", "tools", "samples", "sequence"]
+        header = ["orf_id", "chrom", "strand", "start", "end", "length_aa", "exon_blocks", "gene_id", "transcript_id", "tools", "samples", "tool_scores", "sequence"]
         out.write('\t'.join(header) + '\n')
         
         for i, cand in enumerate(final_list):
@@ -398,8 +403,10 @@ def main():
             tools = ",".join(sorted(list(set(t for t, s in cand.sources))))
             samples = ",".join(sorted(list(set(s for t, s in cand.sources))))
             blocks_str = ",".join(f"{s}-{e}" for s, e in cand.blocks)
+            # Format tool_scores as tool1:score1,tool2:score2
+            tool_scores_str = ",".join(f"{t}:{s}" for t, s in sorted(cand.tool_scores.items()) if s is not None) or "NA"
             
-            row = [orf_id, cand.chrom, cand.strand, str(cand.start), str(cand.end), str(cand.length_aa), blocks_str, cand.gid, cand.tid, tools, samples, cand.sequence]
+            row = [orf_id, cand.chrom, cand.strand, str(cand.start), str(cand.end), str(cand.length_aa), blocks_str, cand.gid, cand.tid, tools, samples, tool_scores_str, cand.sequence]
             out.write('\t'.join(row) + '\n')
             
     with open(f"{args.output}.bed", 'w') as out:
@@ -435,8 +442,11 @@ def main():
             orf_id = f"ORF_{i+1}_{cand.gid}"
             gene_id = cand.gid
             tid = cand.tid
+            tools = ",".join(sorted(list(set(t for t, s in cand.sources))))
+            samples = ",".join(sorted(list(set(s for t, s in cand.sources))))
+            num_tools = len(set(t for t, s in cand.sources))
             
-            attr_base = f'gene_id "{gene_id}"; transcript_id "{tid}"; orf_id "{orf_id}";'
+            attr_base = f'gene_id "{gene_id}"; transcript_id "{tid}"; orf_id "{orf_id}"; sources "{tools}"; samples "{samples}"; num_tools "{num_tools}";'
             
             for s, e in cand.blocks:
                 out.write(f"{cand.chrom}\t{source}\texon\t{s}\t{e}\t.\t{cand.strand}\t.\t{attr_base}\n")
