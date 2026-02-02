@@ -648,7 +648,7 @@ echo "=========================================="
 echo ""
 
 # Nextflow command
-{' \\\\\n    '.join(nf_cmd_parts)} \\
+{' \\\n    '.join(nf_cmd_parts)} \\
     -resume \\
     -with-report "${{RESULT_DIR}}/pipeline_report.html" \\
     -with-timeline "${{RESULT_DIR}}/timeline.html" \\
