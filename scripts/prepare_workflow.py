@@ -669,7 +669,8 @@ echo "=========================================="
         logger.info("Script content preview:")
         logger.info("=" * 60)
         print(script_content)
-    else# Ensure process directory exists
+    else:
+        # Ensure process directory exists
         script_path.parent.mkdir(parents=True, exist_ok=True)
         
         with open(script_path, 'w') as f:
@@ -679,8 +680,7 @@ echo "=========================================="
         script_path.chmod(0o755)
         logger.info(f"✓ Execution script created: {script_path}")
         logger.info(f"  Run with: bash {script_path}")
-        logger.info(f"  Or from workdir: bash process/{args.script_namescript_path}")
-        logger.info(f"  Run with: bash {script_path}")
+        logger.info(f"  Or from workdir: bash process/{args.script_name}")
     
     return script_path
 
