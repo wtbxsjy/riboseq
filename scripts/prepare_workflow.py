@@ -203,9 +203,14 @@ def create_symlinks(source_dir, target_dir, patterns=None, dry_run=False):
     linked_files = []
     
     if patterns:
-        # Search by patterns
+        # Search by patterns (use ** for recursive search)
         for pattern in patterns:
+            # Try both direct and recursive search
             files = list(source_dir.glob(pattern))
+            # Also try recursive search if no direct matches
+            if not files:
+                files = list(source_dir.glob(f"**/{pattern}"))
+            
             for file_path in files:
                 if file_path.is_file():
                     link_path = target_dir / file_path.name
@@ -572,6 +577,7 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
         return path_obj
 
     # Add reference files if provided
+    contaminant_provided = False
     if references:
         if 'genome_fasta' in references and references['genome_fasta']:
             fasta_path = prefer_uncompressed(references['genome_fasta'][0])
@@ -582,6 +588,11 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
         if 'contaminant' in references and references['contaminant']:
             contam_path = prefer_uncompressed(references['contaminant'][0])
             nf_cmd_parts.append(f"--contaminant_fasta {contam_path}")
+            contaminant_provided = True
+    
+    # Skip contaminant filter if no contaminant FASTA provided
+    if not contaminant_provided:
+        nf_cmd_parts.append("--skip_contaminant_filter")
     
     # Add pipeline options
     if args.run_prefilter_qc:
