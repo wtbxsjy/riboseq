@@ -1,9 +1,0 @@
-"orf_id","gene_id","seqnames","start","end","strand","ORF_type_py","ORF_category_Tx","ORF_category_Tx_compatible"
-"orf1","geneA","chr1",100,400,"+","exact_start_stop",NA,NA
-"orf2","geneA","chr1",80,400,"+","Alt5_start",NA,NA
-"orf3","geneA","chr1",120,380,"+","Alt3_start_Alt5_stop",NA,NA
-"orf4","geneA","chr1",450,480,"+","novel_Downstream",NA,NA
-"orf5","geneB","chr2",520,600,"-","Alt5_stop",NA,NA
-"orf6","geneB","chr2",450,480,"-","novel_Downstream",NA,NA
-"orf7","geneX","chr3",100,120,"+","novel",NA,NA
-"orf8","geneA","chr1",120,180,"-","novel_antisenese",NA,NA

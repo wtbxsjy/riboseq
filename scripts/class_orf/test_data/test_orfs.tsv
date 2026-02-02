@@ -1,9 +1,0 @@
-orf_id	gene_id	seqnames	strand	exons
-orf1	geneA	chr1	+	100-200,300-400
-orf2	geneA	chr1	+	80-200,300-400
-orf3	geneA	chr1	+	120-200,300-380
-orf4	geneA	chr1	+	450-480
-orf5	geneB	chr2	-	520-600
-orf6	geneB	chr2	-	450-480
-orf7	geneX	chr3	+	100-120
-orf8	geneA	chr1	-	120-180

@@ -22,7 +22,8 @@ test_*.R
 
 # Containers / patched binaries
 *.sif
-# patched_packages
+patched_packages/
+patched_packages/*
 
 # OS / tooling
 .DS_Store
