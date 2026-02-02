@@ -536,7 +536,8 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     logger.info("=" * 60)
     
     workdir = Path(workdir).resolve()
-    script_path = workdir / args.script_name
+    # Place script in process directory for better organization
+    script_path = workdir / 'process' / args.script_name
     
     # Determine the pipeline directory (parent of scripts directory)
     pipeline_dir = Path(__file__).resolve().parent.parent
@@ -631,14 +632,15 @@ RESULT_DIR="${{WORKDIR}}/result"
 mkdir -p "${{PROCESS_DIR}}"
 mkdir -p "${{RESULT_DIR}}"
 
-# Change to working directory
-cd "${{WORKDIR}}"
+# Change to process directory (where this script is located)
+cd "${{PROCESS_DIR}}"
 
 # --- Pipeline Execution ---
 echo "=========================================="
 echo "Starting Ribo-seq Pipeline"
 echo "=========================================="
 echo "Working directory: ${{WORKDIR}}"
+echo "Process directory: ${{PROCESS_DIR}}"
 echo "Sample sheet: {sample_sheet}"
 echo "Output directory: ${{RESULT_DIR}}"
 echo "Work directory: ${{PROCESS_DIR}}/work"
@@ -667,13 +669,17 @@ echo "=========================================="
         logger.info("Script content preview:")
         logger.info("=" * 60)
         print(script_content)
-    else:
+    else# Ensure process directory exists
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        
         with open(script_path, 'w') as f:
             f.write(script_content)
         
         # Make executable
         script_path.chmod(0o755)
         logger.info(f"✓ Execution script created: {script_path}")
+        logger.info(f"  Run with: bash {script_path}")
+        logger.info(f"  Or from workdir: bash process/{args.script_namescript_path}")
         logger.info(f"  Run with: bash {script_path}")
     
     return script_path
