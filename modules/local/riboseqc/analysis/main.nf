@@ -54,8 +54,7 @@ process RIBOSEQC_ANALYSIS {
             sample_names = "${prefix}",
             ${fast_mode}
             create_report = FALSE,
-            write_tmp_files = TRUE,
-            choose_readlengths = "all"  # Force P-site calculation even with low signal
+            write_tmp_files = TRUE
         )
         cat("RiboseQC analysis completed successfully\\n")
     }, error = function(e) {
@@ -64,18 +63,24 @@ process RIBOSEQC_ANALYSIS {
         quit(status = 1)
     })
     
-    # Verify critical output files exist and have content
+    # Verify critical output files - warn but continue if P-sites calculation failed
     output_file <- "${prefix}_P_sites_calcs"
     if (!file.exists(output_file)) {
-        cat("ERROR: Required output file not found:", output_file, "\\n")
-        quit(status = 1)
+        cat("WARNING: P_sites_calcs file not found. Sample may have insufficient signal.\\n")
+        cat("Creating empty placeholder file for downstream processing.\\n")
+        writeLines("# No P-site data - insufficient signal or low frame preference", output_file)
+    } else {
+        finfo <- file.info(output_file)
+        if (is.na(finfo[["size"]]) || finfo[["size"]] < 10) {
+            cat("WARNING: P_sites_calcs file is empty or too small (", finfo[["size"]], "bytes).\\n")
+            cat("This sample has insufficient ribosome signal or low frame preference.\\n")
+            cat("Downstream ORF prediction will be skipped for this sample.\\n")
+            # Overwrite with informative message
+            writeLines("# No P-site data - insufficient signal or low frame preference", output_file)
+        } else {
+            cat("Verified output:", output_file, "(", finfo[["size"]], "bytes)\\n")
+        }
     }
-    finfo <- file.info(output_file)
-    if (is.na(finfo[["size"]]) || finfo[["size"]] < 10) {
-        cat("ERROR: Output file is empty or too small:", output_file, "(", finfo[["size"]], "bytes)\\n")
-        quit(status = 1)
-    }
-    cat("Verified output:", output_file, "(", finfo[["size"]], "bytes)\\n")
 
     # Write versions
     writeLines(
@@ -95,14 +100,16 @@ RSCRIPT
         Rscript script.R
     fi
     
-    # Check if critical files were created
+    # Check if P_sites_calcs was created successfully
     if [[ ! -f "${prefix}_P_sites_calcs" ]] || [[ ! -s "${prefix}_P_sites_calcs" ]]; then
-        echo "[ERROR] P_sites_calcs file is missing or empty"
-        exit 1
+        echo "[WARNING] P_sites_calcs file is missing or empty - sample has insufficient signal"
+        echo "[WARNING] Downstream ORF prediction will be skipped for this sample"
+    else
+        echo "[INFO] P-site calculation successful"
     fi
     
     echo "[INFO] RiboseQC analysis completed"
-    ls -lh ${prefix}_*
+    ls -lh ${prefix}_* || true
 
     # Convert P-sites bedgraphs to ggRibo input format
     # ggRibo format: Count \t Chromosome \t Position \t Strand

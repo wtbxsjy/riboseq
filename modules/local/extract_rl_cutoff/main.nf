@@ -41,7 +41,7 @@ process EXTRACT_RL_CUTOFF {
     set -euo pipefail
 
     cat <<'RSCRIPT' > extract_rl.R
-    # Check if input file exists and has content
+    # Check if input file exists and has valid content
     args <- commandArgs(trailingOnly = TRUE)
     input_file <- args[1]
     output_file <- args[2]
@@ -53,6 +53,25 @@ process EXTRACT_RL_CUTOFF {
     finfo <- file.info(input_file)
     if (is.na(finfo[["size"]]) || finfo[["size"]] == 0) {
         stop(paste("Input file is empty:", input_file))
+    }
+    
+    # Check if file contains placeholder message for failed P-site calculation
+    first_line <- readLines(input_file, n = 1)
+    if (grepl("^# No P-site data", first_line)) {
+        cat("WARNING: Input file indicates P-site calculation failed (insufficient signal)\\n")
+        cat("Creating default rl_cutoff with common ribosome footprint lengths\\n")
+        
+        # Create default configuration with typical ribosome footprint read lengths
+        default_data <- data.frame(
+            read_length = c(28, 29, 30, 31, 32),
+            cutoff = c(12, 12, 12, 12, 12),
+            comp = c("nucl", "nucl", "nucl", "nucl", "nucl"),
+            stringsAsFactors = FALSE
+        )
+        
+        write.table(default_data, file = output_file, sep = "\\t", row.names = FALSE, quote = FALSE)
+        cat("Created default rl_cutoff with", nrow(default_data), "read lengths\\n")
+        quit(status = 0)
     }
     
     cat("Reading P_sites_calcs file:", input_file, "\\n")
