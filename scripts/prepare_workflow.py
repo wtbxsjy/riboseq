@@ -538,9 +538,13 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     workdir = Path(workdir).resolve()
     script_path = workdir / args.script_name
     
+    # Determine the pipeline directory (parent of scripts directory)
+    pipeline_dir = Path(__file__).resolve().parent.parent
+    main_nf = pipeline_dir / 'main.nf'
+    
     # Build Nextflow command
     nf_cmd_parts = [
-        "nextflow run main.nf",
+        f"nextflow run {main_nf}",
         f"-profile {args.profile}",
         f"-w {workdir / 'process' / 'work'}",
         f"--input {sample_sheet}",
