@@ -54,7 +54,8 @@ process RIBOSEQC_ANALYSIS {
             sample_names = "${prefix}",
             ${fast_mode}
             create_report = FALSE,
-            write_tmp_files = TRUE
+            write_tmp_files = TRUE,
+            choose_readlengths = "all"  # Force P-site calculation even with low signal
         )
         cat("RiboseQC analysis completed successfully\\n")
     }, error = function(e) {
