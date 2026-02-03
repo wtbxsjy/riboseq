@@ -307,7 +307,11 @@ workflow RIBOSEQ {
         }
 
     ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_genome_bam_index)
-    ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> [ [:], fasta, gtf ] }
+    // Create fasta+gtf tuple with a meaningful meta id for tools that need it (e.g., ribotricer)
+    ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> 
+        def genome_name = fasta.simpleName.replaceAll(/\.(genome|transcripts|dna|cdna).*/, '')
+        [ [id: genome_name], fasta, gtf ] 
+    }
 
     // Pre-filter: using unfiltered BAMs (with MT reads) - suffix 'prefilter' for output organization
     ch_bams_for_prefilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ filter_status: 'prefilter' ], bam, bai ] }
