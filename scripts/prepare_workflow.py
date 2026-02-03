@@ -92,9 +92,15 @@ Examples:
   %(prog)s -w /path/to/workdir \\
            -d /path/to/fastq_dir \\
            -r /path/to/reference_dir \\
-           -c /path/to/containers_dir \\
-           --genome GRCh38 \\
+           --contaminant-dir /path/to/contamination_indices \\
            --species human
+
+  # Using prepare_reference_db_v2.2.py output structure
+  %(prog)s -w /path/to/workdir \\
+           -d /path/to/fastq_dir \\
+           -r /path/to/reference_data_project/reference \\
+           --contaminant-dir /path/to/reference_data_project/contamination_indices \\
+           --species rice
 
   # Setup with custom containers
   %(prog)s -w /path/to/workdir \\
@@ -112,8 +118,13 @@ Examples:
     
     # Optional data sources
     parser.add_argument('-r', '--reference-dir', default=None,
-                        help='Directory containing reference files (genome FASTA, GTF, etc.). '
+                        help='Directory containing reference files (genome FASTA, GTF, transcripts). '
+                             'Expected files: {species}.genome.fa, {species}.gtf, {species}.transcripts.fa. '
                              'If not provided, prepare_reference_db_v2.2.py will be used to generate references.')
+    parser.add_argument('--contaminant-dir', default=None,
+                        help='Directory containing contamination database files. '
+                             'Expected file: {species}_final_contamination.fasta. '
+                             'If not provided, will search in reference-dir or auto-generate.')
     parser.add_argument('-c', '--container-dir', default=None,
                         help='(Deprecated) Directory containing Singularity container images. '
                              'Prefer specifying containers directly with --orfquant-container and --rpbp-container.')
@@ -844,6 +855,8 @@ def main():
     logger.info(f"Data directory: {args.data_dir}")
     if args.reference_dir:
         logger.info(f"Reference directory: {args.reference_dir}")
+    if args.contaminant_dir:
+        logger.info(f"Contaminant directory: {args.contaminant_dir}")
     if args.container_dir:
         logger.info(f"Container directory: {args.container_dir}")
     logger.info(f"Genome: {args.genome}")
@@ -862,9 +875,17 @@ def main():
     # Step 3: Setup reference directory
     reference_dirs = []
     auto_reference_info = None
+    
+    # Collect user-specified directories
     if args.reference_dir:
-        reference_dirs = [args.reference_dir]
-    else:
+        reference_dirs.append(args.reference_dir)
+        logger.info(f"Using reference directory: {args.reference_dir}")
+    if args.contaminant_dir:
+        reference_dirs.append(args.contaminant_dir)
+        logger.info(f"Using contaminant directory: {args.contaminant_dir}")
+    
+    # If no directories specified, use auto-generation
+    if not reference_dirs:
         logger.info("No reference directory provided. Preparing reference database...")
         auto_reference_info = prepare_reference_db_if_missing(workdir, args.species, args.dry_run)
         if auto_reference_info:
