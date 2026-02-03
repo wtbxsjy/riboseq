@@ -256,9 +256,11 @@ def create_symlinks(source_dir, target_dir, patterns=None, dry_run=False):
                     
                     if dry_run:
                         logger.info(f"[DRY RUN] Would link: {file_path} -> {link_path}")
+                        linked_files.append(link_path)
                     else:
                         if link_path.exists() or link_path.is_symlink():
                             logger.info(f"  Skipping (exists): {link_path.name}")
+                            linked_files.append(link_path)  # Still track existing files
                         else:
                             link_path.symlink_to(file_path)
                             logger.info(f"✓ Linked: {file_path.name}")
@@ -271,9 +273,11 @@ def create_symlinks(source_dir, target_dir, patterns=None, dry_run=False):
                 
                 if dry_run:
                     logger.info(f"[DRY RUN] Would link: {file_path} -> {link_path}")
+                    linked_files.append(link_path)
                 else:
                     if link_path.exists() or link_path.is_symlink():
                         logger.info(f"  Skipping (exists): {link_path.name}")
+                        linked_files.append(link_path)  # Still track existing files
                     else:
                         link_path.symlink_to(file_path)
                         logger.info(f"✓ Linked: {file_path.name}")
