@@ -397,10 +397,10 @@ def setup_data_directory(workdir, data_dir, dry_run=False, sra_threads=8, pigz_t
     return linked
 
 
-def setup_reference_directory(workdir, reference_dirs, dry_run=False):
-    """Setup reference directory with symbolic links"""
+def setup_reference_directory(workdir, reference_dirs, species, dry_run=False):
+    """Setup reference directory with symbolic links for specified species"""
     logger.info("\n" + "=" * 60)
-    logger.info("Setting up reference directory")
+    logger.info(f"Setting up reference directory for species: {species}")
     logger.info("=" * 60)
 
     if not reference_dirs:
@@ -419,10 +419,13 @@ def setup_reference_directory(workdir, reference_dirs, dry_run=False):
         logger.info(f"\nSearching for {ref_type} files...")
         files = []
         for ref_dir in reference_dirs:
-            files.extend(create_symlinks(ref_dir, target_dir, patterns, dry_run))
+            all_files = create_symlinks(ref_dir, target_dir, patterns, dry_run)
+            # Filter files to only include the specified species
+            species_files = [f for f in all_files if species in f.name]
+            files.extend(species_files)
         if files:
             linked_refs[ref_type] = files
-            logger.info(f"  Found {len(files)} {ref_type} file(s)")
+            logger.info(f"  Found {len(files)} {ref_type} file(s) for {species}")
 
     # Decompress only the linked files (species-specific)
     if linked_refs:
@@ -893,7 +896,7 @@ def main():
             logger.error("Failed to prepare reference database.")
             sys.exit(1)
 
-    references = setup_reference_directory(workdir, reference_dirs, args.dry_run)
+    references = setup_reference_directory(workdir, reference_dirs, args.species, args.dry_run)
     
     # Validate required references exist, regenerate if missing
     required_refs = ['genome_fasta', 'gtf', 'contaminant']
@@ -910,7 +913,7 @@ def main():
             if auto_reference_info.get('contaminant_dir'):
                 reference_dirs.append(auto_reference_info['contaminant_dir'])
             # Re-run reference setup
-            references = setup_reference_directory(workdir, reference_dirs, args.dry_run)
+            references = setup_reference_directory(workdir, reference_dirs, args.species, args.dry_run)
     
     # Final validation
     final_missing = [r for r in required_refs if r not in references or not references[r]]
