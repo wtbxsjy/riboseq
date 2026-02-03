@@ -57,11 +57,24 @@ DEFAULT_CONTAINERS = {
 }
 
 # Reference files mapping
+# Patterns based on prepare_reference_db_v2.2.py output:
+#   - reference/: {species}.genome.fa.gz, {species}.gtf.gz, {species}.transcripts.fa.gz
+#   - contamination_indices/: {species}_final_contamination.fasta
 REFERENCE_FILES = {
-    'genome_fasta': ['*.fa', '*.fasta', '*.fa.gz', '*.fasta.gz'],
+    'genome_fasta': [
+        '*.genome.fa', '*.genome.fasta', '*.genome.fa.gz', '*.genome.fasta.gz',  # species.genome.fa
+        '*.dna.toplevel.fa*', '*.dna.primary_assembly.fa*',  # Ensembl naming
+        '*primary_assembly.genome.fa*',  # GENCODE naming (GRCh38.primary_assembly.genome.fa.gz)
+    ],
     'gtf': ['*.gtf', '*.gtf.gz'],
-    'transcripts': ['*transcripts*.fa', '*transcripts*.fa.gz'],
-    'contaminant': ['*contamination*.fa*', '*contaminant*.fa*', '*rrna*.fa*', '*rRNA*.fa*']
+    'transcripts': [
+        '*.transcripts.fa', '*.transcripts.fa.gz',  # species.transcripts.fa
+        '*.cdna.all.fa*', '*.cdna.fa*',  # Ensembl naming
+    ],
+    'contaminant': [
+        '*_final_contamination.fasta', '*_final_contamination.fa',  # Primary: from prepare_reference_db
+        '*contamination*.fa*', '*contaminant*.fa*',
+    ]
 }
 
 
@@ -157,6 +170,21 @@ Examples:
                         help='Number of threads for fasterq-dump when converting SRA files (default: 8)')
     parser.add_argument('--pigz-threads', type=int, default=8,
                         help='Number of threads for pigz compression when converting SRA files (default: 8)')
+    
+    # Resource allocation options
+    parser.add_argument('--aligner', default='star',
+                        choices=['star', 'bowtie2'],
+                        help='Alignment tool to use (default: star)')
+    parser.add_argument('--max-memory', default='150.GB',
+                        help='Maximum memory for Nextflow (default: 150.GB)')
+    parser.add_argument('--max-cpus', type=int, default=42,
+                        help='Maximum CPUs for Nextflow (default: 42)')
+    parser.add_argument('--max-time', default='48.h',
+                        help='Maximum time for Nextflow (default: 48.h)')
+    parser.add_argument('--save-reference', action='store_true', default=True,
+                        help='Save reference files for reuse (default: True)')
+    parser.add_argument('--no-save-reference', action='store_false', dest='save_reference',
+                        help='Do not save reference files')
     
     # Script generation
     parser.add_argument('--script-name', default='run_pipeline.sh',
@@ -548,15 +576,27 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     pipeline_dir = Path(__file__).resolve().parent.parent
     main_nf = pipeline_dir / 'main.nf'
     
-    # Build Nextflow command
+    # Build Nextflow command (based on validated reference parameters)
     nf_cmd_parts = [
         f"nextflow run {main_nf}",
         f"-profile {args.profile}",
         f"-w {workdir / 'process' / 'work'}",
         f"--input {sample_sheet}",
         f"--outdir {workdir / 'result'}",
-        f"--genome {args.genome}",
+        f"--aligner {args.aligner}",
     ]
+    
+    # Add resource limits
+    nf_cmd_parts.extend([
+        f"--max_memory '{args.max_memory}'",
+        f"--max_cpus {args.max_cpus}",
+        f"--max_time '{args.max_time}'",
+    ])
+    
+    # Background mode and save reference
+    nf_cmd_parts.append("-bg")
+    if args.save_reference:
+        nf_cmd_parts.append("--save_reference")
     
     # Add container paths
     if 'orfquant' in containers:
@@ -577,6 +617,7 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
         return path_obj
 
     # Add reference files if provided
+    # Use species-specific file naming: {species}.genome.fa, {species}.gtf, {species}.transcripts.fa
     contaminant_provided = False
     if references:
         if 'genome_fasta' in references and references['genome_fasta']:
@@ -585,8 +626,18 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
         if 'gtf' in references and references['gtf']:
             gtf_path = prefer_uncompressed(references['gtf'][0])
             nf_cmd_parts.append(f"--gtf {gtf_path}")
+        if 'transcripts' in references and references['transcripts']:
+            transcript_path = prefer_uncompressed(references['transcripts'][0])
+            nf_cmd_parts.append(f"--transcript_fasta {transcript_path}")
         if 'contaminant' in references and references['contaminant']:
-            contam_path = prefer_uncompressed(references['contaminant'][0])
+            # Prefer *_final_contamination.fasta from prepare_reference_db_v2.2.py
+            contam_files = references['contaminant']
+            # Sort to prioritize *_final_contamination.fasta
+            final_contam = [f for f in contam_files if 'final_contamination' in str(f)]
+            if final_contam:
+                contam_path = prefer_uncompressed(final_contam[0])
+            else:
+                contam_path = prefer_uncompressed(contam_files[0])
             nf_cmd_parts.append(f"--contaminant_fasta {contam_path}")
             contaminant_provided = True
     
@@ -826,6 +877,29 @@ def main():
             sys.exit(1)
 
     references = setup_reference_directory(workdir, reference_dirs, args.dry_run)
+    
+    # Validate required references exist, regenerate if missing
+    required_refs = ['genome_fasta', 'gtf', 'contaminant']
+    missing_refs = [r for r in required_refs if r not in references or not references[r]]
+    
+    if missing_refs and not auto_reference_info:
+        logger.warning(f"Missing required reference files: {missing_refs}")
+        logger.info("Attempting to prepare missing references using prepare_reference_db_v2.2.py...")
+        auto_reference_info = prepare_reference_db_if_missing(workdir, args.species, args.dry_run)
+        if auto_reference_info:
+            # Add auto-generated directories to reference search
+            if auto_reference_info.get('reference_dir'):
+                reference_dirs.append(auto_reference_info['reference_dir'])
+            if auto_reference_info.get('contaminant_dir'):
+                reference_dirs.append(auto_reference_info['contaminant_dir'])
+            # Re-run reference setup
+            references = setup_reference_directory(workdir, reference_dirs, args.dry_run)
+    
+    # Final validation
+    final_missing = [r for r in required_refs if r not in references or not references[r]]
+    if final_missing:
+        logger.warning(f"Could not find all required references. Missing: {final_missing}")
+        logger.warning("Pipeline may fail. Consider providing explicit reference paths.")
     
     # Step 4: Setup container directory
     containers = setup_container_directory(
