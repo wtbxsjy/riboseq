@@ -323,36 +323,6 @@ def convert_sra_to_fastq(source_dir, target_dir, dry_run=False, threads_dump=8, 
         return []
 
 
-def decompress_gzip_files(target_dir, dry_run=False):
-    """Decompress .gz files in target directory"""
-    target_dir = Path(target_dir).resolve()
-    if not target_dir.exists():
-        return []
-
-    decompressed = []
-    for gz_path in target_dir.glob('*.gz'):
-        out_path = gz_path.with_suffix('')
-        if out_path.exists() and out_path.stat().st_size > 0:
-            logger.info(f"  Skipping (already decompressed): {out_path.name}")
-            continue
-
-        if dry_run:
-            logger.info(f"[DRY RUN] Would decompress: {gz_path} -> {out_path}")
-            decompressed.append(out_path)
-            continue
-
-        try:
-            import gzip
-            with gzip.open(gz_path, 'rb') as f_in, open(out_path, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            logger.info(f"✓ Decompressed: {out_path.name}")
-            decompressed.append(out_path)
-        except Exception as e:
-            logger.error(f"Failed to decompress {gz_path}: {e}")
-
-    return decompressed
-
-
 def prepare_reference_db_if_missing(workdir, species, dry_run=False):
     """Prepare reference database using prepare_reference_db_v2.2.py when not provided"""
     script_dir = Path(__file__).parent
@@ -450,9 +420,31 @@ def setup_reference_directory(workdir, reference_dirs, dry_run=False):
             linked_refs[ref_type] = files
             logger.info(f"  Found {len(files)} {ref_type} file(s)")
 
+    # Decompress only the linked files (species-specific)
     if linked_refs:
-        logger.info("\nDecompressing reference .gz files in workdir...")
-        decompress_gzip_files(target_dir, dry_run)
+        logger.info("\nDecompressing linked reference .gz files...")
+        files_to_decompress = []
+        for ref_type, file_list in linked_refs.items():
+            files_to_decompress.extend(file_list)
+        
+        for gz_path in files_to_decompress:
+            if str(gz_path).endswith('.gz'):
+                out_path = Path(str(gz_path).rsplit('.gz', 1)[0])
+                if out_path.exists() and out_path.stat().st_size > 0:
+                    logger.info(f"  Skipping (already decompressed): {out_path.name}")
+                    continue
+                
+                if dry_run:
+                    logger.info(f"[DRY RUN] Would decompress: {gz_path.name} -> {out_path.name}")
+                    continue
+                
+                try:
+                    import gzip
+                    with gzip.open(gz_path, 'rb') as f_in, open(out_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                    logger.info(f"✓ Decompressed: {out_path.name}")
+                except Exception as e:
+                    logger.error(f"Failed to decompress {gz_path}: {e}")
     
     return linked_refs
 
