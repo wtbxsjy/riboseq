@@ -99,20 +99,63 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
 
 library(ORFquant)
 
-# Run ORFquant
-run_ORFquant(
-    for_ORFquant_file = "${for_orfquant}",
-    annotation_file = "${annotation}",
-    n_cores = ${n_cores},
-    prefix = "${prefix}",
-    write_temp_files = ${write_tmp},
-    write_GTF_file = ${write_gtf},
-    write_protein_fasta = ${write_fasta},
-    interactive = FALSE
-)
+# Run ORFquant with error handling for low-quality samples
+cat("Running ORFquant on sample ${prefix}...\\n")
+orfquant_success <- tryCatch({
+    run_ORFquant(
+        for_ORFquant_file = "${for_orfquant}",
+        annotation_file = "${annotation}",
+        n_cores = ${n_cores},
+        prefix = "${prefix}",
+        write_temp_files = ${write_tmp},
+        write_GTF_file = ${write_gtf},
+        write_protein_fasta = ${write_fasta},
+        interactive = FALSE
+    )
+    TRUE
+}, error = function(e) {
+    error_msg <- conditionMessage(e)
+    cat("\\n=== ORFquant Error ===\\n")
+    cat(error_msg, "\\n")
+    
+    # Check if this is the common NULL GRanges error (low signal/no ORFs detected)
+    if (grepl("no method.*coercing.*NULL.*GRanges", error_msg, ignore.case = TRUE)) {
+        cat("\\nWARNING: ORFquant failed due to insufficient ORF predictions.\\n")
+        cat("This typically occurs when:\\n")
+        cat("  - Sample has low ribosome profiling signal\\n")
+        cat("  - Very few or no ORFs meet the detection thresholds\\n")
+        cat("  - P-site positioning is poor\\n")
+        cat("\\nCreating empty output files to allow pipeline continuation...\\n")
+        
+        # Create empty output files so downstream processes can handle gracefully
+        writeLines("# No ORFs detected - insufficient signal", "${prefix}_final_ORFquant_results")
+        
+        if (${write_gtf}) {
+            writeLines("# No ORFs detected", "${prefix}_Detected_ORFs.gtf")
+        }
+        if (${write_fasta}) {
+            writeLines("", "${prefix}_Protein_sequences.fasta")  # Empty FASTA
+        }
+        if (${write_tmp}) {
+            writeLines("# No ORFs detected", "${prefix}_tmp_ORFquant_results")
+        }
+        
+        return(FALSE)
+    } else {
+        # For other errors, re-throw
+        cat("\\nUnexpected ORFquant error. Re-throwing...\\n")
+        stop(e)
+    }
+})
 
-# Optionally generate plots
-if (${plot_results}) {
+if (orfquant_success) {
+    cat("ORFquant completed successfully\\n")
+} else {
+    cat("ORFquant skipped due to insufficient data\\n")
+}
+
+# Optionally generate plots (only if ORFquant succeeded)
+if (${plot_results} && orfquant_success) {
     tryCatch({
         plot_ORFquant_results(
             for_ORFquant_file = "${for_orfquant}",
@@ -124,6 +167,8 @@ if (${plot_results}) {
     }, error = function(e) {
         message("Warning: Could not generate ORFquant plots: ", conditionMessage(e))
     })
+} else if (${plot_results} && !orfquant_success) {
+    cat("Skipping plot generation - ORFquant did not produce results\\n")
 }
 
 # Write versions
