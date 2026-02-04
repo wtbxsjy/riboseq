@@ -118,11 +118,20 @@ orfquant_success <- tryCatch({
     cat("\\n=== ORFquant Error ===\\n")
     cat(error_msg, "\\n")
     
-    # Check if this is the common NULL GRanges error (low signal/no ORFs detected)
-    if (grepl("no method.*coercing.*NULL.*GRanges", error_msg, ignore.case = TRUE)) {
-        cat("\\nWARNING: ORFquant failed due to insufficient ORF predictions.\\n")
+    # Check for common low-signal/quality errors that should allow pipeline to continue
+    is_low_signal_error <- (
+        grepl("no method.*coercing.*NULL.*GRanges", error_msg, ignore.case = TRUE) ||
+        grepl("Not enough P_sites signal", error_msg, ignore.case = TRUE) ||
+        grepl("Not enough P.sites signal", error_msg, ignore.case = TRUE) ||
+        grepl("insufficient.*signal", error_msg, ignore.case = TRUE) ||
+        grepl("no ORFs? (were |was )?detected", error_msg, ignore.case = TRUE)
+    )
+    
+    if (is_low_signal_error) {
+        cat("\\nWARNING: ORFquant failed due to insufficient signal/ORF predictions.\\n")
         cat("This typically occurs when:\\n")
         cat("  - Sample has low ribosome profiling signal\\n")
+        cat("  - Not enough P-sites signal over genomic regions\\n")
         cat("  - Very few or no ORFs meet the detection thresholds\\n")
         cat("  - P-site positioning is poor\\n")
         cat("\\nCreating empty output files to allow pipeline continuation...\\n")
