@@ -68,15 +68,18 @@ process RIBOTRICER_DETECTORFS {
            grep -q "WARNING.*periodic" ribotricer.log; then
             echo "WARNING: Ribotricer failed due to insufficient periodic signal - creating placeholder files"
             
-            # Create placeholder files with informative headers
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_protocol.txt
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_bam_summary.txt
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_metagene_profiles_5p.tsv
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_metagene_profiles_3p.tsv
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_psite_offsets.txt
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_pos.wig
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_neg.wig
-            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_translating_ORFs.tsv
+            # Remove any partial output files first
+            rm -f ${prefix}_*.txt ${prefix}_*.tsv ${prefix}_*.pdf ${prefix}_*.wig
+            
+            # Create placeholder files with informative headers (using >| to force overwrite)
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_protocol.txt
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_bam_summary.txt
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_metagene_profiles_5p.tsv
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_metagene_profiles_3p.tsv
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_psite_offsets.txt
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_pos.wig
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_neg.wig
+            echo "# No ribotricer results - insufficient periodic signal detected" >| ${prefix}_translating_ORFs.tsv
             
             # Create empty PDFs (using touch as placeholder)
             touch ${prefix}_read_length_dist.pdf
