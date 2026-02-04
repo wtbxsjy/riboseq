@@ -50,12 +50,42 @@ process RIBOTRICER_DETECTORFS {
         //    break
     }
     """
+    # Wrap ribotricer in error handling for low-quality samples
+    set +e
     ribotricer detect-orfs \\
         --bam $bam \\
         --ribotricer_index $candidate_orfs \\
         --prefix $prefix \\
         $strandedness_cmd \\
-        $args
+        $args 2>&1 | tee ribotricer.log
+    
+    EXIT_CODE=\${PIPESTATUS[0]}
+    set -e
+    
+    # Check for low signal indicators
+    if [ \$EXIT_CODE -ne 0 ]; then
+        if grep -q "no periodic read length found" ribotricer.log || \
+           grep -q "WARNING.*periodic" ribotricer.log; then
+            echo "WARNING: Ribotricer failed due to insufficient periodic signal - creating placeholder files"
+            
+            # Create placeholder files with informative headers
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_protocol.txt
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_bam_summary.txt
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_metagene_profiles_5p.tsv
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_metagene_profiles_3p.tsv
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_psite_offsets.txt
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_pos.wig
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_neg.wig
+            echo "# No ribotricer results - insufficient periodic signal detected" > ${prefix}_translating_ORFs.tsv
+            
+            # Create empty PDFs (using touch as placeholder)
+            touch ${prefix}_read_length_dist.pdf
+            touch ${prefix}_metagene_plots.pdf
+        else
+            echo "ERROR: Ribotricer failed with unexpected error"
+            exit \$EXIT_CODE
+        fi
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
