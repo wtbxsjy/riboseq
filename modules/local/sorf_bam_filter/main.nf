@@ -51,9 +51,9 @@ process SORF_BAM_FILTER {
     # Exclude: unmapped(0x4), secondary(0x100), duplicate(0x400), supplementary(0x800)
     set +e
     total_primary_mapped=`samtools view -c -F 0xD04 ${bam} 2> samtools_total.err`
-    total_status=$?
+    total_status=\$?
     set -e
-    if [[ $total_status -ne 0 ]]; then
+    if [[ \$total_status -ne 0 ]]; then
       echo "WARNING: samtools failed counting reads; treating as 0 (see samtools_total.err)" >&2
       total_primary_mapped=0
     fi
@@ -101,13 +101,13 @@ process SORF_BAM_FILTER {
     status_bam=\${PIPESTATUS[2]}
     set -e
 
-    if [[ $status_view -ne 0 || $status_awk -ne 0 || $status_bam -ne 0 ]]; then
+    if [[ \$status_view -ne 0 || \$status_awk -ne 0 || \$status_bam -ne 0 ]]; then
       echo "WARNING: samtools/awk pipeline failed; creating empty filtered BAM (see stderr)" >&2
       set +e
       samtools view -H ${bam} | samtools view -b -o ${prefix}.sorf.filtered.bam -
-      header_status=$?
+      header_status=\$?
       set -e
-      if [[ $header_status -ne 0 ]]; then
+      if [[ \$header_status -ne 0 ]]; then
         echo "WARNING: failed to write header-only BAM; creating empty placeholder" >&2
         rm -f ${prefix}.sorf.filtered.bam
         touch ${prefix}.sorf.filtered.bam
