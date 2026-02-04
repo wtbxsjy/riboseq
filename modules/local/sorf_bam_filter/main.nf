@@ -96,9 +96,11 @@ process SORF_BAM_FILTER {
           }
         ' \
       | samtools view -b -o ${prefix}.sorf.filtered.bam -
-    status_view=\${PIPESTATUS[0]}
-    status_awk=\${PIPESTATUS[1]}
-    status_bam=\${PIPESTATUS[2]}
+    # CRITICAL: Capture PIPESTATUS in one line before it resets (required with set -u)
+    pipe_statuses=("\${PIPESTATUS[@]}")
+    status_view=\${pipe_statuses[0]:-1}
+    status_awk=\${pipe_statuses[1]:-1}
+    status_bam=\${pipe_statuses[2]:-1}
     set -e
 
     if [[ \$status_view -ne 0 || \$status_awk -ne 0 || \$status_bam -ne 0 ]]; then
