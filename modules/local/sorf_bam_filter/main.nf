@@ -49,9 +49,17 @@ process SORF_BAM_FILTER {
 
     # Count primary mapped reads (unfiltered baseline)
     # Exclude: unmapped(0x4), secondary(0x100), duplicate(0x400), supplementary(0x800)
-    total_primary_mapped=`samtools view -c -F 0xD04 ${bam}`
+    set +e
+    total_primary_mapped=`samtools view -c -F 0xD04 ${bam} 2> samtools_total.err`
+    total_status=$?
+    set -e
+    if [[ $total_status -ne 0 ]]; then
+      echo "WARNING: samtools failed counting reads; treating as 0 (see samtools_total.err)" >&2
+      total_primary_mapped=0
+    fi
 
     # Filter: keep header lines; drop contigs matching regex; enforce read length; enforce unique mapping.
+    set +e
     samtools view -h -F 0xD04 ${bam} \
         | awk -v mode="\$mode" -v mapq="\$mapq" -v rlmin="\$rlmin" -v rlmax="\$rlmax" -v re="\$re" '
           BEGIN{OFS="\\t"}
@@ -88,8 +96,26 @@ process SORF_BAM_FILTER {
           }
         ' \
       | samtools view -b -o ${prefix}.sorf.filtered.bam -
+    status_view=\${PIPESTATUS[0]}
+    status_awk=\${PIPESTATUS[1]}
+    status_bam=\${PIPESTATUS[2]}
+    set -e
 
-    kept_primary_mapped=`samtools view -c -F 0xD04 ${prefix}.sorf.filtered.bam`
+    if [[ $status_view -ne 0 || $status_awk -ne 0 || $status_bam -ne 0 ]]; then
+      echo "WARNING: samtools/awk pipeline failed; creating empty filtered BAM (see stderr)" >&2
+      set +e
+      samtools view -H ${bam} | samtools view -b -o ${prefix}.sorf.filtered.bam -
+      header_status=$?
+      set -e
+      if [[ $header_status -ne 0 ]]; then
+        echo "WARNING: failed to write header-only BAM; creating empty placeholder" >&2
+        rm -f ${prefix}.sorf.filtered.bam
+        touch ${prefix}.sorf.filtered.bam
+      fi
+      kept_primary_mapped=0
+    else
+      kept_primary_mapped=`samtools view -c -F 0xD04 ${prefix}.sorf.filtered.bam`
+    fi
 
     printf "sample\\ttotal_primary_mapped\\tkept_primary_mapped\\tpct_kept\\n" > ${prefix}.sorf.filter_stats.tsv
     awk -v s="${prefix}" -v t="\$total_primary_mapped" -v k="\$kept_primary_mapped" 'BEGIN{pct=(t>0)?(100.0*k/t):0; printf "%s\\t%d\\t%d\\t%.2f\\n", s, t, k, pct}' >> ${prefix}.sorf.filter_stats.tsv

@@ -596,16 +596,11 @@ workflow RIBOSEQ {
                     [ ribotish_names, ribotricer_names, orfquant_names, all_files ]
                 }
 
-            // Ensure gtf and fasta are channels containing single files (not tuples)
-            def unify_gtf_ch = ch_gtf.first()
-            def unify_fasta_ch = ch_fasta.first()
-            def unify_script = file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true)
-            
             UNIFY_ORF_PREDICTIONS(
                 ch_unify_inputs,
-                unify_gtf_ch,
-                unify_fasta_ch,
-                unify_script,
+                ch_gtf,
+                ch_fasta,
+                file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true),
                 ch_psites_bedgraph,
                 ch_sample_list
             )
