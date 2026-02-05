@@ -52,6 +52,9 @@ process UNIFY_ORF_PREDICTIONS {
                        (psites_bedgraph && !(psites_bedgraph instanceof List) && psites_bedgraph.name != 'NO_FILE')
     def bedgraph_arg = has_bedgraph ? "--bedgraph-dir bedgraph" : ''
     def sample_arg = (sample_list && sample_list instanceof List && sample_list.size() > 0) ? "--sample-list ${sample_list.join(',')}" : ''
+    
+    // Generate list of input files for bash to iterate over
+    def input_files_list = (all_inputs instanceof List) ? all_inputs.collect{ it.name }.join(' ') : (all_inputs ? all_inputs.name : '')
     """
     set -uo pipefail
 
@@ -78,22 +81,34 @@ process UNIFY_ORF_PREDICTIONS {
     python3 -c "import Bio; import pyfaidx; print('Dependencies OK: Bio=' + Bio.__version__ + ', pyfaidx=' + pyfaidx.__version__)"
 
     # Check if all input files are empty/placeholder files
+    # Input files list generated from Nextflow: ${input_files_list}
     has_valid_input=false
-    for input_file in \${all_inputs:-}; do
-        if [ -f "\${input_file}" ]; then
-            # Check if file has actual content (not just header or placeholder)
-            line_count=\$(wc -l < "\${input_file}" || echo "0")
-            if [ "\${line_count}" -gt 1 ]; then
-                # Check it's not a placeholder file
-                if ! grep -q "# Placeholder" "\${input_file}" 2>/dev/null && \\
-                   ! grep -q "# Empty" "\${input_file}" 2>/dev/null && \\
-                   ! grep -q "placeholder" "\${input_file}" 2>/dev/null; then
-                    has_valid_input=true
-                    break
+    input_files_to_check="${input_files_list}"
+    
+    if [ -n "\${input_files_to_check}" ]; then
+        for input_file in \${input_files_to_check}; do
+            if [ -f "\${input_file}" ]; then
+                # Check if file has actual content (not just header or placeholder)
+                line_count=\$(wc -l < "\${input_file}" 2>/dev/null || echo "0")
+                if [ "\${line_count}" -gt 2 ]; then
+                    # Check it's not a placeholder file
+                    if ! grep -qi "placeholder" "\${input_file}" 2>/dev/null && \\
+                       ! grep -qi "# Empty" "\${input_file}" 2>/dev/null && \\
+                       ! grep -qi "insufficient" "\${input_file}" 2>/dev/null; then
+                        has_valid_input=true
+                        echo "Found valid input file: \${input_file} (\${line_count} lines)"
+                        break
+                    else
+                        echo "Skipping placeholder file: \${input_file}"
+                    fi
+                else
+                    echo "Skipping empty/small file: \${input_file} (\${line_count} lines)"
                 fi
             fi
-        fi
-    done
+        done
+    else
+        echo "WARNING: No input files provided"
+    fi
 
     if [ "\${has_valid_input}" = "false" ]; then
         echo "WARNING: All input files are empty or placeholder files - creating placeholder unified output"

@@ -37,11 +37,16 @@ process CLASSIFY_ORFS_GENCODE {
     # Check if input is a placeholder file
     is_placeholder=false
     if [ -f "${unified_bed}" ]; then
-        if grep -q "# Placeholder" "${unified_bed}" 2>/dev/null || \\
-           grep -q "placeholder" "${unified_bed}" 2>/dev/null || \\
-           [ \$(wc -l < "${unified_bed}") -le 2 ]; then
+        line_count=\$(wc -l < "${unified_bed}" 2>/dev/null || echo "0")
+        if grep -qi "placeholder" "${unified_bed}" 2>/dev/null || \\
+           grep -qi "insufficient" "${unified_bed}" 2>/dev/null || \\
+           [ "\${line_count}" -le 2 ]; then
             is_placeholder=true
+            echo "INFO: Input file ${unified_bed} detected as placeholder (\${line_count} lines)"
         fi
+    else
+        is_placeholder=true
+        echo "WARNING: Input file ${unified_bed} not found - treating as placeholder"
     fi
 
     if [ "\${is_placeholder}" = "true" ]; then
@@ -129,11 +134,16 @@ process CLASSIFY_ORFS_ORFQUANT {
     # Check if input is a placeholder file
     is_placeholder=false
     if [ -f "${unified_gtf}" ]; then
-        if grep -q "# Placeholder" "${unified_gtf}" 2>/dev/null || \\
-           grep -q "placeholder" "${unified_gtf}" 2>/dev/null || \\
-           [ \$(wc -l < "${unified_gtf}") -le 2 ]; then
+        line_count=\$(wc -l < "${unified_gtf}" 2>/dev/null || echo "0")
+        if grep -qi "placeholder" "${unified_gtf}" 2>/dev/null || \\
+           grep -qi "insufficient" "${unified_gtf}" 2>/dev/null || \\
+           [ "\${line_count}" -le 2 ]; then
             is_placeholder=true
+            echo "INFO: Input file ${unified_gtf} detected as placeholder (\${line_count} lines)"
         fi
+    else
+        is_placeholder=true
+        echo "WARNING: Input file ${unified_gtf} not found - treating as placeholder"
     fi
 
     if [ "\${is_placeholder}" = "true" ]; then
@@ -223,11 +233,16 @@ process CLASSIFY_ORFS_ORF_TYPE {
     # Check if input is a placeholder file
     is_placeholder=false
     if [ -f "${unified_metadata}" ]; then
-        if grep -q "# Placeholder" "${unified_metadata}" 2>/dev/null || \\
-           grep -q "placeholder" "${unified_metadata}" 2>/dev/null || \\
-           [ \$(wc -l < "${unified_metadata}") -le 2 ]; then
+        line_count=\$(wc -l < "${unified_metadata}" 2>/dev/null || echo "0")
+        if grep -qi "placeholder" "${unified_metadata}" 2>/dev/null || \\
+           grep -qi "insufficient" "${unified_metadata}" 2>/dev/null || \\
+           [ "\${line_count}" -le 2 ]; then
             is_placeholder=true
+            echo "INFO: Input file ${unified_metadata} detected as placeholder (\${line_count} lines)"
         fi
+    else
+        is_placeholder=true
+        echo "WARNING: Input file ${unified_metadata} not found - treating as placeholder"
     fi
 
     if [ "\${is_placeholder}" = "true" ]; then
