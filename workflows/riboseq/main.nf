@@ -579,11 +579,32 @@ workflow RIBOSEQ {
                     .collect()
                     .map { it ?: [] }
 
-            // Combine three channels using chained combine operators
+            // Combine three channels - use explicit flattening to avoid nested structure
+            // Note: chained combine() creates nested tuples like [[a,b],c] not [a,b,c]
             ch_unify_inputs = ch_ribotish_list
                 .combine(ch_ribotricer_list)
                 .combine(ch_orfquant_list)
-                .map { ribotish_files, ribotricer_files, orfquant_files ->
+                .map { combined ->
+                    // Handle the nested tuple structure from chained combine()
+                    // combined is [[ribotish_files, ribotricer_files], orfquant_files]
+                    def ribotish_files, ribotricer_files, orfquant_files
+                    if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List) {
+                        // Nested structure: [[a, b], c]
+                        ribotish_files = combined[0][0]
+                        ribotricer_files = combined[0][1]
+                        orfquant_files = combined[1]
+                    } else if (combined instanceof List && combined.size() == 3) {
+                        // Flat structure (shouldn't happen but handle it)
+                        ribotish_files = combined[0]
+                        ribotricer_files = combined[1]
+                        orfquant_files = combined[2]
+                    } else {
+                        // Fallback - treat as single item
+                        ribotish_files = combined
+                        ribotricer_files = []
+                        orfquant_files = []
+                    }
+                    
                     def all_files = []
                     // Extract file objects for staging
                     if (ribotish_files) { all_files.addAll(ribotish_files instanceof List ? ribotish_files : [ribotish_files]) }
