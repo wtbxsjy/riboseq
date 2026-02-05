@@ -24,6 +24,7 @@ process RIBOTISH_QUALITY {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
+    set +e
     ribotish quality \\
         -b $bam \\
         -g $gtf \\
@@ -31,7 +32,40 @@ process RIBOTISH_QUALITY {
         -f ${prefix}_qual.pdf \\
         -r ${prefix}.para.py \\
         -p $task.cpus \\
-        $args
+        $args 2>&1 | tee ribotish_quality.log
+    
+    EXIT_CODE=\${PIPESTATUS[0]}
+    set -e
+    
+    # Check for low signal/quality errors that should allow pipeline continuation
+    if [ \$EXIT_CODE -ne 0 ]; then
+        # Check for known low-quality sample errors (no reads, insufficient signal)
+        if grep -qiE "(no reads found|Counted reads: 0|no valid|insufficient|empty)" ribotish_quality.log; then
+            echo "WARNING: Ribotish quality failed due to insufficient reads/signal - creating placeholder files"
+            
+            # Create placeholder quality distribution file
+            echo "# Ribotish quality placeholder - insufficient reads/signal for sample ${prefix}" > ${prefix}_qual.txt
+            echo "# No read length distribution available" >> ${prefix}_qual.txt
+            echo "read_length\tcount\tproportion" >> ${prefix}_qual.txt
+            
+            # Create placeholder PDF (empty file, as we can't generate a real PDF)
+            echo "# Placeholder - no quality plot generated due to insufficient reads" > ${prefix}_qual.pdf
+            
+            # Create placeholder offset parameter file with default values
+            cat > ${prefix}.para.py << 'PYEOF'
+# Ribotish quality placeholder - insufficient reads/signal
+# Using default ribosome footprint parameters
+# These are typical values for ribosome profiling data
+offdict = {28: 12, 29: 12, 30: 12, 31: 12, 32: 12}
+PYEOF
+            
+            echo "Placeholder files created - downstream analysis will use default parameters"
+        else
+            echo "ERROR: Ribotish quality failed with unexpected error:"
+            cat ribotish_quality.log
+            exit \$EXIT_CODE
+        fi
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
