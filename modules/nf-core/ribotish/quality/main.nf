@@ -43,6 +43,9 @@ process RIBOTISH_QUALITY {
         if grep -qiE "(no reads found|Counted reads: 0|no valid|insufficient|empty)" ribotish_quality.log; then
             echo "WARNING: Ribotish quality failed due to insufficient reads/signal - creating placeholder files"
             
+            # Ensure we can overwrite any existing output files
+            rm -f ${prefix}_qual.txt ${prefix}_qual.pdf ${prefix}.para.py
+
             # Create placeholder quality distribution file
             echo "# Ribotish quality placeholder - insufficient reads/signal for sample ${prefix}" > ${prefix}_qual.txt
             echo "# No read length distribution available" >> ${prefix}_qual.txt
