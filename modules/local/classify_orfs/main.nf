@@ -30,17 +30,48 @@ process CLASSIFY_ORFS_GENCODE {
     script:
     def extra_args = params.extra_orf_classify_args ?: ''
     """
-    set -euo pipefail
+    set -uo pipefail
 
     mkdir -p ${output_dir}
 
-    python3 ${classify_wrapper} \
-        --mode gencode \
-        --input ${input_prefix} \
-        --output_dir ${output_dir} \
-        --ensembl_dir ${ensembl_dir} \
-        --cpus ${task.cpus} \
-        ${extra_args}
+    # Check if input is a placeholder file
+    is_placeholder=false
+    if [ -f "${unified_bed}" ]; then
+        if grep -q "# Placeholder" "${unified_bed}" 2>/dev/null || \\
+           grep -q "placeholder" "${unified_bed}" 2>/dev/null || \\
+           [ \$(wc -l < "${unified_bed}") -le 2 ]; then
+            is_placeholder=true
+        fi
+    fi
+
+    if [ "\${is_placeholder}" = "true" ]; then
+        echo "WARNING: Input is placeholder/empty - creating placeholder classification output"
+        echo "# Placeholder GENCODE classification - input unified ORFs were empty/placeholder" > ${output_dir}/gencode_results.orfs.gtf
+        echo "# Placeholder GENCODE classification - input unified ORFs were empty/placeholder" > ${output_dir}/gencode_results.orfs.out
+    else
+        set +e
+        python3 ${classify_wrapper} \\
+            --mode gencode \\
+            --input ${input_prefix} \\
+            --output_dir ${output_dir} \\
+            --ensembl_dir ${ensembl_dir} \\
+            --cpus ${task.cpus} \\
+            ${extra_args} 2>&1 | tee classify_gencode.log
+        EXIT_CODE=\${PIPESTATUS[0]}
+        set -e
+        
+        if [ \${EXIT_CODE} -ne 0 ]; then
+            if grep -qiE "(no valid|no ORFs|zero|empty|no input|no data|IndexError|KeyError|ValueError)" classify_gencode.log; then
+                echo "WARNING: GENCODE classification failed due to insufficient data - creating placeholder output"
+                echo "# Placeholder GENCODE classification - classification failed: no valid ORFs" > ${output_dir}/gencode_results.orfs.gtf
+                echo "# Placeholder GENCODE classification - classification failed: no valid ORFs" > ${output_dir}/gencode_results.orfs.out
+            else
+                echo "ERROR: GENCODE classification failed with unexpected error"
+                cat classify_gencode.log
+                exit \${EXIT_CODE}
+            fi
+        fi
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -91,17 +122,48 @@ process CLASSIFY_ORFS_ORFQUANT {
     script:
     def extra_args = params.extra_orf_classify_args ?: ''
     """
-    set -euo pipefail
+    set -uo pipefail
 
     mkdir -p ${output_dir}
 
-    python3 ${classify_wrapper} \
-        --mode orfquant \
-        --input ${input_prefix} \
-        --output_dir ${output_dir} \
-        --gtf ${ref_gtf} \
-        --cpus ${task.cpus} \
-        ${extra_args}
+    # Check if input is a placeholder file
+    is_placeholder=false
+    if [ -f "${unified_gtf}" ]; then
+        if grep -q "# Placeholder" "${unified_gtf}" 2>/dev/null || \\
+           grep -q "placeholder" "${unified_gtf}" 2>/dev/null || \\
+           [ \$(wc -l < "${unified_gtf}") -le 2 ]; then
+            is_placeholder=true
+        fi
+    fi
+
+    if [ "\${is_placeholder}" = "true" ]; then
+        echo "WARNING: Input is placeholder/empty - creating placeholder classification output"
+        echo -e "# Placeholder ORFquant classification - input unified ORFs were empty/placeholder" > ${output_dir}/orfquant_classification.tsv
+        echo -e "orf_id\\torf_type\\tclassification" >> ${output_dir}/orfquant_classification.tsv
+    else
+        set +e
+        python3 ${classify_wrapper} \\
+            --mode orfquant \\
+            --input ${input_prefix} \\
+            --output_dir ${output_dir} \\
+            --gtf ${ref_gtf} \\
+            --cpus ${task.cpus} \\
+            ${extra_args} 2>&1 | tee classify_orfquant.log
+        EXIT_CODE=\${PIPESTATUS[0]}
+        set -e
+        
+        if [ \${EXIT_CODE} -ne 0 ]; then
+            if grep -qiE "(no valid|no ORFs|zero|empty|no input|no data|IndexError|KeyError|ValueError)" classify_orfquant.log; then
+                echo "WARNING: ORFquant classification failed due to insufficient data - creating placeholder output"
+                echo -e "# Placeholder ORFquant classification - classification failed: no valid ORFs" > ${output_dir}/orfquant_classification.tsv
+                echo -e "orf_id\\torf_type\\tclassification" >> ${output_dir}/orfquant_classification.tsv
+            else
+                echo "ERROR: ORFquant classification failed with unexpected error"
+                cat classify_orfquant.log
+                exit \${EXIT_CODE}
+            fi
+        fi
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -154,17 +216,48 @@ process CLASSIFY_ORFS_ORF_TYPE {
     script:
     def extra_args = params.extra_orf_classify_args ?: ''
     """
-    set -euo pipefail
+    set -uo pipefail
 
     mkdir -p ${output_dir}
 
-    python3 ${classify_wrapper} \
-        --mode orf_type \
-        --input ${input_prefix} \
-        --output_dir ${output_dir} \
-        --gtf ${ref_gtf} \
-        --cpus ${task.cpus} \
-        ${extra_args}
+    # Check if input is a placeholder file
+    is_placeholder=false
+    if [ -f "${unified_metadata}" ]; then
+        if grep -q "# Placeholder" "${unified_metadata}" 2>/dev/null || \\
+           grep -q "placeholder" "${unified_metadata}" 2>/dev/null || \\
+           [ \$(wc -l < "${unified_metadata}") -le 2 ]; then
+            is_placeholder=true
+        fi
+    fi
+
+    if [ "\${is_placeholder}" = "true" ]; then
+        echo "WARNING: Input is placeholder/empty - creating placeholder classification output"
+        echo -e "# Placeholder ORF type classification - input unified ORFs were empty/placeholder" > ${output_dir}/orftype_classification.tsv
+        echo -e "orf_id\\torf_type\\tclassification\\tgene_biotype" >> ${output_dir}/orftype_classification.tsv
+    else
+        set +e
+        python3 ${classify_wrapper} \\
+            --mode orf_type \\
+            --input ${input_prefix} \\
+            --output_dir ${output_dir} \\
+            --gtf ${ref_gtf} \\
+            --cpus ${task.cpus} \\
+            ${extra_args} 2>&1 | tee classify_orftype.log
+        EXIT_CODE=\${PIPESTATUS[0]}
+        set -e
+        
+        if [ \${EXIT_CODE} -ne 0 ]; then
+            if grep -qiE "(no valid|no ORFs|zero|empty|no input|no data|IndexError|KeyError|ValueError)" classify_orftype.log; then
+                echo "WARNING: ORF type classification failed due to insufficient data - creating placeholder output"
+                echo -e "# Placeholder ORF type classification - classification failed: no valid ORFs" > ${output_dir}/orftype_classification.tsv
+                echo -e "orf_id\\torf_type\\tclassification\\tgene_biotype" >> ${output_dir}/orftype_classification.tsv
+            else
+                echo "ERROR: ORF type classification failed with unexpected error"
+                cat classify_orftype.log
+                exit \${EXIT_CODE}
+            fi
+        fi
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

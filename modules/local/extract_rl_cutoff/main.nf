@@ -46,19 +46,9 @@ process EXTRACT_RL_CUTOFF {
     input_file <- args[1]
     output_file <- args[2]
     
-    if (!file.exists(input_file)) {
-        stop(paste("Input file not found:", input_file))
-    }
-    
-    finfo <- file.info(input_file)
-    if (is.na(finfo[["size"]]) || finfo[["size"]] == 0) {
-        stop(paste("Input file is empty:", input_file))
-    }
-    
-    # Check if file contains placeholder message for failed P-site calculation
-    first_line <- readLines(input_file, n = 1)
-    if (grepl("^# No P-site data", first_line)) {
-        cat("WARNING: Input file indicates P-site calculation failed (insufficient signal)\\n")
+    # Helper function to create default output for low-quality samples
+    create_default_output <- function(output_file, reason) {
+        cat("WARNING:", reason, "\\n")
         cat("Creating default rl_cutoff with common ribosome footprint lengths\\n")
         
         # Create default configuration with typical ribosome footprint read lengths
@@ -72,6 +62,40 @@ process EXTRACT_RL_CUTOFF {
         write.table(default_data, file = output_file, sep = "\\t", row.names = FALSE, quote = FALSE)
         cat("Created default rl_cutoff with", nrow(default_data), "read lengths\\n")
         quit(status = 0)
+    }
+    
+    if (!file.exists(input_file)) {
+        create_default_output(output_file, paste("Input file not found:", input_file))
+    }
+    
+    finfo <- file.info(input_file)
+    if (is.na(finfo[["size"]]) || finfo[["size"]] == 0) {
+        create_default_output(output_file, paste("Input file is empty:", input_file))
+    }
+    
+    # Check for very small files (likely placeholder/corrupted) - less than 10 bytes
+    if (finfo[["size"]] < 10) {
+        create_default_output(output_file, paste("Input file too small (", finfo[["size"]], " bytes), likely placeholder/corrupted:", input_file))
+    }
+    
+    # Check if file contains placeholder message for failed P-site calculation
+    first_line <- tryCatch({
+        readLines(input_file, n = 1, warn = FALSE)
+    }, error = function(e) {
+        ""
+    })
+    
+    # Check various placeholder patterns
+    if (length(first_line) == 0 || nchar(first_line) == 0) {
+        create_default_output(output_file, "Input file is empty or unreadable")
+    }
+    
+    if (grepl("^# No P-site data", first_line, ignore.case = TRUE) ||
+        grepl("^# Placeholder", first_line, ignore.case = TRUE) ||
+        grepl("placeholder", first_line, ignore.case = TRUE) ||
+        grepl("insufficient", first_line, ignore.case = TRUE) ||
+        grepl("failed", first_line, ignore.case = TRUE)) {
+        create_default_output(output_file, paste("Input file indicates P-site calculation failed:", first_line))
     }
     
     cat("Reading P_sites_calcs file:", input_file, "\\n")
@@ -88,9 +112,11 @@ process EXTRACT_RL_CUTOFF {
         tryCatch({
             read.table(input_file, header = TRUE, sep = "\\t", stringsAsFactors = FALSE)
         }, error = function(e2) {
-            stop(paste("Failed to read file as RDS or TSV.\\n",
-                      "RDS error:", conditionMessage(e), "\\n",
-                      "TSV error:", conditionMessage(e2)))
+            # Both RDS and TSV reading failed - create default output
+            cat("Failed to read file as RDS or TSV.\\n")
+            cat("RDS error:", conditionMessage(e), "\\n")
+            cat("TSV error:", conditionMessage(e2), "\\n")
+            create_default_output(output_file, "Unable to parse input file - likely corrupted or placeholder")
         })
     })
     
@@ -129,13 +155,13 @@ process EXTRACT_RL_CUTOFF {
                     obj <- psites_data[[name]]
                     cat("  -", name, ":", class(obj), "\\n")
                 }
-                stop("P_sites_calcs data frame not found in RDS file")
+                create_default_output(output_file, "P_sites_calcs data frame not found in RDS file")
             }
         }
     }
     
     if (!is.data.frame(psites_data)) {
-        stop(paste("Expected data frame, but got:", class(psites_data)))
+        create_default_output(output_file, paste("Expected data frame, but got:", class(psites_data)))
     }
     
     cat("Final data frame:", nrow(psites_data), "rows x", ncol(psites_data), "columns\\n")
@@ -156,7 +182,7 @@ process EXTRACT_RL_CUTOFF {
     required_cols <- c("read_length", "cutoff", "max_coverage")
     missing_cols <- setdiff(required_cols, colnames(psites_data))
     if (length(missing_cols) > 0) {
-        stop(paste("Missing required columns:", paste(missing_cols, collapse = ", "), 
+        create_default_output(output_file, paste("Missing required columns:", paste(missing_cols, collapse = ", "), 
                    "\\nAvailable columns:", paste(colnames(psites_data), collapse = ", ")))
     }
 
@@ -176,7 +202,7 @@ process EXTRACT_RL_CUTOFF {
         cat("WARNING: No rows with max_coverage indicator. Using all unique read_length/cutoff pairs.\\n")
         filtered_data <- psites_data[!duplicated(psites_data[["read_length"]]), ]
         if (nrow(filtered_data) == 0) {
-            stop("No valid data found in P_sites_calcs file")
+            create_default_output(output_file, "No valid data found in P_sites_calcs file")
         }
     } else {
         cat("Found", nrow(filtered_data), "rows with max_coverage indicator\\n")

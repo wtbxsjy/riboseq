@@ -54,22 +54,21 @@ process RIBOSEQC_ANALYSIS {
         results_file <- paste0(prefix, "_results_RiboseQC")
         writeLines(paste0("# RiboseQC placeholder - ", reason), results_file)
         
-        # Create empty P_sites_calcs
+        # Create placeholder P_sites_calcs with clear marker
         psites_file <- paste0(prefix, "_P_sites_calcs")
-        writeLines(paste0("# No P-site data - ", reason), psites_file)
+        writeLines(paste0("# Placeholder P_sites_calcs - ", reason), psites_file)
         
-        # Create empty for_ORFquant file (optional but helps downstream)
+        # Create placeholder for_ORFquant file
         orfquant_file <- paste0(prefix, "_for_ORFquant")
-        # Create an empty RData-like marker file
-        writeLines(paste0("# No ORFquant data - ", reason), orfquant_file)
+        writeLines(paste0("# Placeholder for_ORFquant - ", reason), orfquant_file)
         
-        # Create empty bedgraph files
-        writeLines("", paste0(prefix, "_P_sites_plus.bedgraph"))
-        writeLines("", paste0(prefix, "_P_sites_minus.bedgraph"))
-        writeLines("", paste0(prefix, "_coverage_plus.bedgraph"))
-        writeLines("", paste0(prefix, "_coverage_minus.bedgraph"))
+        # Create placeholder bedgraph files with header comment
+        writeLines(paste0("# Placeholder bedgraph - ", reason), paste0(prefix, "_P_sites_plus.bedgraph"))
+        writeLines(paste0("# Placeholder bedgraph - ", reason), paste0(prefix, "_P_sites_minus.bedgraph"))
+        writeLines(paste0("# Placeholder bedgraph - ", reason), paste0(prefix, "_coverage_plus.bedgraph"))
+        writeLines(paste0("# Placeholder bedgraph - ", reason), paste0(prefix, "_coverage_minus.bedgraph"))
         
-        cat("Placeholder files created. Downstream ORF prediction will be skipped for this sample.\\n")
+        cat("Placeholder files created. Downstream ORF prediction will use defaults for this sample.\\n")
     }
     
     analysis_success <- tryCatch({
