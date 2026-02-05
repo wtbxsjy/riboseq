@@ -79,7 +79,7 @@ process UNIFY_ORF_PREDICTIONS {
 
     # Check if all input files are empty/placeholder files
     has_valid_input=false
-    for input_file in \${all_inputs}; do
+    for input_file in \${all_inputs:-}; do
         if [ -f "\${input_file}" ]; then
             # Check if file has actual content (not just header or placeholder)
             line_count=\$(wc -l < "\${input_file}" || echo "0")
