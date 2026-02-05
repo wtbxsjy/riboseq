@@ -68,10 +68,10 @@ process RIBOTISH_QUALITY {
         fi
     fi
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        ribotish: \$(ribotish --version | sed 's/ribotish //')
-    END_VERSIONS
+    printf '%s\n' \
+        "\"${task.process}\":" \
+        "    ribotish: \$(ribotish --version | sed 's/ribotish //')" \
+        > versions.yml
     """
 
     stub:
@@ -80,9 +80,9 @@ process RIBOTISH_QUALITY {
     """
     touch ${prefix}_qual.txt ${prefix}_qual.pdf ${prefix}.para.py
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        ribotish: \$(ribotish --version | sed 's/ribotish //')
-    END_VERSIONS
+    printf '%s\n' \
+        "\"${task.process}\":" \
+        "    ribotish: \$(ribotish --version | sed 's/ribotish //')" \
+        > versions.yml
     """
 }
