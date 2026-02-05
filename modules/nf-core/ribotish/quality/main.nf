@@ -46,18 +46,16 @@ process RIBOTISH_QUALITY {
             # Create placeholder quality distribution file
             echo "# Ribotish quality placeholder - insufficient reads/signal for sample ${prefix}" > ${prefix}_qual.txt
             echo "# No read length distribution available" >> ${prefix}_qual.txt
-            echo "read_length\tcount\tproportion" >> ${prefix}_qual.txt
+            echo "read_length	count	proportion" >> ${prefix}_qual.txt
             
             # Create placeholder PDF (empty file, as we can't generate a real PDF)
             echo "# Placeholder - no quality plot generated due to insufficient reads" > ${prefix}_qual.pdf
             
             # Create placeholder offset parameter file with default values
-            cat > ${prefix}.para.py << 'PYEOF'
-# Ribotish quality placeholder - insufficient reads/signal
-# Using default ribosome footprint parameters
-# These are typical values for ribosome profiling data
-offdict = {28: 12, 29: 12, 30: 12, 31: 12, 32: 12}
-PYEOF
+            echo "# Ribotish quality placeholder - insufficient reads/signal" > ${prefix}.para.py
+            echo "# Using default ribosome footprint parameters" >> ${prefix}.para.py
+            echo "# These are typical values for ribosome profiling data" >> ${prefix}.para.py
+            echo "offdict = {28: 12, 29: 12, 30: 12, 31: 12, 32: 12}" >> ${prefix}.para.py
             
             echo "Placeholder files created - downstream analysis will use default parameters"
         else
