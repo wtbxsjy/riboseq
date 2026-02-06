@@ -1157,22 +1157,54 @@ def main():
     
     all_candidates = []
     
+    # Track statistics by tool
+    tool_stats = defaultdict(lambda: {'count': 0, 'samples': set()})
+    sample_stats = defaultdict(lambda: {'ribotish': 0, 'ribotricer': 0, 'orfquant': 0})
+    
     if args.ribotish:
         for f in args.ribotish:
             sid = os.path.basename(f).split('.')[0].replace('_pred', '')
-            all_candidates.extend(parse_ribotish(f, gtf_index, sid, args.min_len))
+            orfs = parse_ribotish(f, gtf_index, sid, args.min_len)
+            all_candidates.extend(orfs)
+            tool_stats['ribotish']['count'] += len(orfs)
+            tool_stats['ribotish']['samples'].add(sid)
+            sample_stats[sid]['ribotish'] = len(orfs)
             
     if args.ribotricer:
         for f in args.ribotricer:
             sid = os.path.basename(f).split('.')[0].replace('_translating_ORFs', '')
-            all_candidates.extend(parse_ribotricer(f, gtf_index, sid, args.min_len))
+            orfs = parse_ribotricer(f, gtf_index, sid, args.min_len)
+            all_candidates.extend(orfs)
+            tool_stats['ribotricer']['count'] += len(orfs)
+            tool_stats['ribotricer']['samples'].add(sid)
+            sample_stats[sid]['ribotricer'] = len(orfs)
             
     if args.orfquant:
         for f in args.orfquant:
             sid = os.path.basename(f).split('.')[0].replace('_Detected_ORFs', '')
-            all_candidates.extend(parse_orfquant(f, gtf_index, sid, args.min_len))
+            orfs = parse_orfquant(f, gtf_index, sid, args.min_len)
+            all_candidates.extend(orfs)
+            tool_stats['orfquant']['count'] += len(orfs)
+            tool_stats['orfquant']['samples'].add(sid)
+            sample_stats[sid]['orfquant'] = len(orfs)
 
     print(f"Total raw candidates: {len(all_candidates)}", file=sys.stderr)
+    
+    # Print statistics before merging
+    print("\n=== ORF Prediction Statistics ===", file=sys.stderr)
+    print("By Tool:", file=sys.stderr)
+    for tool in ['ribotish', 'ribotricer', 'orfquant']:
+        if tool in tool_stats:
+            count = tool_stats[tool]['count']
+            samples = len(tool_stats[tool]['samples'])
+            print(f"  {tool:12s}: {count:5d} ORFs from {samples} sample(s)", file=sys.stderr)
+    
+    print("\nBy Sample:", file=sys.stderr)
+    for sample in sorted(sample_stats.keys()):
+        stats = sample_stats[sample]
+        total = stats['ribotish'] + stats['ribotricer'] + stats['orfquant']
+        if total > 0:
+            print(f"  {sample:20s}: ribotish={stats['ribotish']:5d}, ribotricer={stats['ribotricer']:5d}, orfquant={stats['orfquant']:5d}, total={total:5d}", file=sys.stderr)
     
     # Stage 1: Exact match merging (same chrom, strand, and exact block coordinates)
     merged_candidates = {} 
@@ -1183,6 +1215,7 @@ def main():
             merged_candidates[cand.id_key] = cand
     
     print(f"After exact-match merging: {len(merged_candidates)}", file=sys.stderr)
+    print(f"  Merged {len(all_candidates) - len(merged_candidates)} duplicates", file=sys.stderr)
     
     final_list = list(merged_candidates.values())
     
@@ -1197,6 +1230,37 @@ def main():
         print(f"Grouping overlapping ORFs (min_overlap={args.min_overlap})...", file=sys.stderr)
         final_list = process_overlap_groups(final_list, min_overlap_fraction=args.min_overlap)
         print(f"After overlap grouping: {len(final_list)} representative ORFs", file=sys.stderr)
+    
+    # Calculate final statistics by tool
+    print("\n=== Final ORF Statistics ===", file=sys.stderr)
+    final_tool_stats = defaultdict(int)
+    final_sample_stats = defaultdict(lambda: defaultdict(int))
+    
+    for cand in final_list:
+        tools_in_orf = set(t for t, s in cand.sources)
+        for tool in tools_in_orf:
+            final_tool_stats[tool] += 1
+        
+        samples_in_orf = set(s for t, s in cand.sources)
+        for sample in samples_in_orf:
+            for tool in tools_in_orf:
+                final_sample_stats[sample][tool] += 1
+    
+    print(f"Final unified ORFs: {len(final_list)}", file=sys.stderr)
+    print("By Tool in Final Set:", file=sys.stderr)
+    for tool in ['ribotish', 'ribotricer', 'orfquant']:
+        if tool in final_tool_stats:
+            print(f"  {tool:12s}: {final_tool_stats[tool]:5d} ORFs", file=sys.stderr)
+    
+    print("By Sample in Final Set:", file=sys.stderr)
+    for sample in sorted(final_sample_stats.keys()):
+        tool_counts = final_sample_stats[sample]
+        total = sum(tool_counts.values())
+        if total > 0:
+            ribotish_cnt = tool_counts.get('ribotish', 0)
+            ribotricer_cnt = tool_counts.get('ribotricer', 0)
+            orfquant_cnt = tool_counts.get('orfquant', 0)
+            print(f"  {sample:20s}: ribotish={ribotish_cnt:5d}, ribotricer={ribotricer_cnt:5d}, orfquant={orfquant_cnt:5d}, total={total:5d}", file=sys.stderr)
     
     # Calculate statistics from bedgraphs if provided (using optimized indexed version)
     if args.bedgraph_dir and args.sample_list:

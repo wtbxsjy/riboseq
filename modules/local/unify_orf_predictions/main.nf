@@ -26,6 +26,7 @@ process UNIFY_ORF_PREDICTIONS {
     path "${prefix}.metadata.tsv", emit: metadata
     path "${prefix}.bed"         , emit: bed
     path "${prefix}.gtf"         , emit: gtf
+    path "${prefix}.stats.txt"   , emit: stats
     path "versions.yml"          , emit: versions
 
     when:
@@ -124,6 +125,14 @@ process UNIFY_ORF_PREDICTIONS {
         # Create placeholder GTF file  
         echo "# Placeholder unified ORF GTF - no valid input data from ORF prediction tools" > ${prefix}.gtf
         
+        # Create stats file
+        {
+            echo "=== ORF Unification Statistics ==="
+            echo "WARNING: No valid input files found"
+            echo "All input files were empty or placeholder files"
+            echo "No ORF unification was performed"
+        } > ${prefix}.stats.txt
+        
         echo "WARNING: UNIFY_ORF_PREDICTIONS created placeholder outputs due to insufficient input data"
     else
         set +e
@@ -146,6 +155,12 @@ process UNIFY_ORF_PREDICTIONS {
         EXIT_CODE=\${PIPESTATUS[0]}
         set -e
         
+        # Extract statistics from the log and save to stats file
+        {
+            echo "=== ORF Unification Statistics ==="
+            grep -E "^By Tool:|^By Sample:|^Final|^After|^Total|^  (ribotish|ribotricer|orfquant|[A-Za-z0-9_])" unify_orf.log || true
+        } > ${prefix}.stats.txt
+        
         if [ \${EXIT_CODE} -ne 0 ]; then
             # Check for recoverable errors (no valid ORFs found, empty results, etc.)
             if grep -qiE "(no valid|no ORFs|zero ORFs|empty|no predictions|0 ORFs)" unify_orf.log || \\
@@ -163,6 +178,9 @@ process UNIFY_ORF_PREDICTIONS {
                 
                 # Create placeholder GTF file  
                 echo "# Placeholder unified ORF GTF - unification failed: insufficient valid ORF predictions" > ${prefix}.gtf
+                
+                # Add error note to stats
+                echo "ERROR: ORF unification failed due to insufficient valid ORF data" >> ${prefix}.stats.txt
             else
                 echo "ERROR: UNIFY_ORF_PREDICTIONS failed with unexpected error"
                 cat unify_orf.log
