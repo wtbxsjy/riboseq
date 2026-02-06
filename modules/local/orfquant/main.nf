@@ -121,6 +121,7 @@ orfquant_success <- tryCatch({
     # Check for common low-signal/quality errors that should allow pipeline to continue
     is_low_signal_error <- (
         grepl("no method.*coercing.*NULL.*GRanges", error_msg, ignore.case = TRUE) ||
+        grepl("summarizeOverlaps.*GRanges.*NULL", error_msg, ignore.case = TRUE) ||
         grepl("Not enough P_sites signal", error_msg, ignore.case = TRUE) ||
         grepl("Not enough P.sites signal", error_msg, ignore.case = TRUE) ||
         grepl("insufficient.*signal", error_msg, ignore.case = TRUE) ||
