@@ -534,6 +534,17 @@ class ORFCandidate:
 def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
     candidates = []
     print(f"Parsing Ribo-TISH: {file_path}", file=sys.stderr)
+    
+    # Check for placeholder file
+    try:
+        with open(file_path, 'r') as f:
+            first_line = f.readline().strip()
+            if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
+                print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
+                return []
+    except Exception:
+        pass
+    
     try:
         with open(file_path, 'r') as f:
             header = f.readline().strip().split('\t')
@@ -619,6 +630,17 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
 def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
     candidates = []
     print(f"Parsing Ribotricer: {file_path}", file=sys.stderr)
+    
+    # Check for placeholder file
+    try:
+        with open(file_path, 'r') as f:
+            first_line = f.readline().strip()
+            if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
+                print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
+                return []
+    except Exception:
+        pass
+    
     try:
         with open(file_path, 'r') as f:
             header_line = f.readline()
@@ -674,6 +696,17 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
 def parse_orfquant(file_path, gtf_index, sample_id, min_len=0):
     candidates = []
     print(f"Parsing ORFquant: {file_path}", file=sys.stderr)
+    
+    # Check for placeholder file
+    try:
+        with open(file_path, 'r') as f:
+            first_line = f.readline().strip()
+            if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
+                print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
+                return []
+    except Exception:
+        pass
+    
     try:
         current_orf = None
         current_blocks = []
@@ -1155,6 +1188,21 @@ def main():
     print(f"Loading Genome FASTA: {args.fasta}...", file=sys.stderr)
     genome_fasta = Fasta(args.fasta)
     
+    # Log which tools have input files
+    print("\n=== Input Files Summary ===", file=sys.stderr)
+    print(f"Ribo-TISH files: {len(args.ribotish) if args.ribotish else 0}", file=sys.stderr)
+    if args.ribotish:
+        for f in args.ribotish:
+            print(f"  - {f}", file=sys.stderr)
+    print(f"Ribotricer files: {len(args.ribotricer) if args.ribotricer else 0}", file=sys.stderr)
+    if args.ribotricer:
+        for f in args.ribotricer:
+            print(f"  - {f}", file=sys.stderr)
+    print(f"ORFquant files: {len(args.orfquant) if args.orfquant else 0}", file=sys.stderr)
+    if args.orfquant:
+        for f in args.orfquant:
+            print(f"  - {f}", file=sys.stderr)
+    
     all_candidates = []
     
     # Track statistics by tool
@@ -1198,6 +1246,8 @@ def main():
             count = tool_stats[tool]['count']
             samples = len(tool_stats[tool]['samples'])
             print(f"  {tool:12s}: {count:5d} ORFs from {samples} sample(s)", file=sys.stderr)
+        else:
+            print(f"  {tool:12s}: No input files provided", file=sys.stderr)
     
     print("\nBy Sample:", file=sys.stderr)
     for sample in sorted(sample_stats.keys()):
