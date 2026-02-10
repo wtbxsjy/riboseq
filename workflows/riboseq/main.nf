@@ -579,41 +579,45 @@ workflow RIBOSEQ {
                     .collect()
                     .map { it ?: [] }
 
-            // Combine three channels - use explicit flattening to avoid nested structure
-            // Note: chained combine() creates nested tuples like [[a,b],c] not [a,b,c]
+            // Combine three channels with robust handling for nested or flat structures
             ch_unify_inputs = ch_ribotish_list
                 .combine(ch_ribotricer_list)
                 .combine(ch_orfquant_list)
                 .map { combined ->
-                    // Handle the nested tuple structure from chained combine()
-                    // combined is [[ribotish_files, ribotricer_files], orfquant_files]
-                    def ribotish_files, ribotricer_files, orfquant_files
+                    def ribotish_files = []
+                    def ribotricer_files = []
+                    def orfquant_files = []
+
                     if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List) {
-                        // Nested structure: [[a, b], c]
+                        // Nested structure: [[ribotish_files, ribotricer_files], orfquant_files]
                         ribotish_files = combined[0][0]
                         ribotricer_files = combined[0][1]
                         orfquant_files = combined[1]
                     } else if (combined instanceof List && combined.size() == 3) {
-                        // Flat structure (shouldn't happen but handle it)
+                        // Flat structure: [ribotish_files, ribotricer_files, orfquant_files]
                         ribotish_files = combined[0]
                         ribotricer_files = combined[1]
                         orfquant_files = combined[2]
+                    } else if (combined instanceof List) {
+                        // Flat list of files - split by tool-specific suffix
+                        ribotish_files = combined.findAll { it.getName().endsWith('_pred.txt') }
+                        ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
+                        orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') }
                     } else {
-                        // Fallback - treat as single item
                         ribotish_files = combined
-                        ribotricer_files = []
-                        orfquant_files = []
                     }
-                    
+
+                    def ribotish_list = ribotish_files instanceof List ? ribotish_files : (ribotish_files ? [ribotish_files] : [])
+                    def ribotricer_list = ribotricer_files instanceof List ? ribotricer_files : (ribotricer_files ? [ribotricer_files] : [])
+                    def orfquant_list = orfquant_files instanceof List ? orfquant_files : (orfquant_files ? [orfquant_files] : [])
+
                     def all_files = []
-                    // Extract file objects for staging
-                    if (ribotish_files) { all_files.addAll(ribotish_files instanceof List ? ribotish_files : [ribotish_files]) }
-                    if (ribotricer_files) { all_files.addAll(ribotricer_files instanceof List ? ribotricer_files : [ribotricer_files]) }
-                    if (orfquant_files) { all_files.addAll(orfquant_files instanceof List ? orfquant_files : [orfquant_files]) }
-                    // Extract filenames as strings for command line arguments
-                    def ribotish_names = ribotish_files ? (ribotish_files instanceof List ? ribotish_files.collect{ it.getName() } : [ribotish_files.getName()]) : []
-                    def ribotricer_names = ribotricer_files ? (ribotricer_files instanceof List ? ribotricer_files.collect{ it.getName() } : [ribotricer_files.getName()]) : []
-                    def orfquant_names = orfquant_files ? (orfquant_files instanceof List ? orfquant_files.collect{ it.getName() } : [orfquant_files.getName()]) : []
+                    all_files.addAll(ribotish_list)
+                    all_files.addAll(ribotricer_list)
+                    all_files.addAll(orfquant_list)
+                    def ribotish_names = ribotish_list.collect{ it.getName() }
+                    def ribotricer_names = ribotricer_list.collect{ it.getName() }
+                    def orfquant_names = orfquant_list.collect{ it.getName() }
                     [ ribotish_names, ribotricer_names, orfquant_names, all_files ]
                 }
 

@@ -647,11 +647,13 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
                 chrom = parts[col_map.get('chrom', -1)] if 'chrom' in col_map else None
                 strand = parts[col_map.get('strand', -1)] if 'strand' in col_map else None
                 
-                # Parsing logic for Ribotricer ORF_ID: tid_start_end
-                match = re.search(r'_(\d+)_(\d+)$', orf_id)
+                # Parsing logic for Ribotricer ORF_ID: tid_start_end or tid_start_end_length
+                match = re.search(r'_(\d+)_(\d+)(?:_\d+)?$', orf_id)
                 if match:
-                    t_start = int(match.group(1))
-                    t_end = int(match.group(2))
+                    t_start_raw = int(match.group(1))
+                    t_end_raw = int(match.group(2))
+                    t_start = t_start_raw
+                    t_end = t_end_raw
                     
                     # Convert 1-based to 0-based
                     t_start -= 1
@@ -661,6 +663,10 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
                     c, s, b = gtf_index.get_genomic_blocks(tid, t_start, t_end, feature_type='exon')
                     if b:
                         chrom, strand, blocks = c, s, b
+                    elif chrom and strand and t_end_raw >= t_start_raw:
+                        length_nt = t_end_raw - t_start_raw + 1
+                        if length_nt // 3 >= min_len:
+                            blocks = [(t_start_raw, t_end_raw)]
                 
                 if blocks:
                     gid = gtf_index.gene_map.get(tid, 'NA')
