@@ -99,30 +99,30 @@ detect_build_method() {
         return
     fi
 
-    echo -e "${BLUE}[检测] 自动检测可用的构建方法...${NC}"
+    echo -e "${BLUE}[检测] 自动检测可用的构建方法...${NC}" >&2
 
     # 检查是否有 sudo 权限
     if sudo -n true 2>/dev/null; then
-        echo -e "${GREEN}  ✓ 检测到 sudo 权限${NC}"
+        echo -e "${GREEN}  ✓ 检测到 sudo 权限${NC}" >&2
         echo "sudo"
         return
     fi
 
     # 检查是否支持 fakeroot
     if singularity build --help 2>&1 | grep -q "fakeroot"; then
-        echo -e "${GREEN}  ✓ 检测到 fakeroot 支持${NC}"
+        echo -e "${GREEN}  ✓ 检测到 fakeroot 支持${NC}" >&2
         echo "fakeroot"
         return
     fi
 
     # 检查是否支持 remote build
     if singularity remote list 2>/dev/null | grep -q "SylabsCloud"; then
-        echo -e "${YELLOW}  ! 使用远程构建（需要 Sylabs Cloud 账户）${NC}"
+        echo -e "${YELLOW}  ! 使用远程构建（需要 Sylabs Cloud 账户）${NC}" >&2
         echo "remote"
         return
     fi
 
-    echo -e "${RED}  ✗ 未检测到可用的构建方法${NC}"
+    echo -e "${RED}  ✗ 未检测到可用的构建方法${NC}" >&2
     echo "none"
 }
 

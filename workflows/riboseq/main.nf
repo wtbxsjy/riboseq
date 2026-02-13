@@ -644,47 +644,53 @@ workflow RIBOSEQ {
             error "ORF classification requires unified ORF predictions. Please disable --skip_unify_orf_predictions."
         }
 
-        def classify_mode = (params.orf_classify_mode ?: 'orf_type').toLowerCase()
         def classify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
         def classify_wrapper = file("${workflow.projectDir}/scripts/classify_orfs_wrapper.py", checkIfExists: true)
         def class_orf_dir = file("${workflow.projectDir}/scripts/class_orf", checkIfExists: true)
         def gencode_orf_dir = file("${workflow.projectDir}/scripts/gencode-riboseqORFs", checkIfExists: true)
+        def base_classify_dir = params.orf_classify_output_dir ?: 'orf_classification'
+        def gencode_outdir = "${base_classify_dir}/gencode"
+        def orfquant_outdir = "${base_classify_dir}/orfquant"
+        def orftype_outdir = "${base_classify_dir}/orf_type"
 
-        if (classify_mode == 'gencode') {
-            if (!params.orf_classify_ensembl_dir) {
-                error "ORF classification mode 'gencode' requires --orf_classify_ensembl_dir."
-            }
-            CLASSIFY_ORFS_GENCODE(
-                ch_unify_bed,
-                ch_unify_metadata,
-                classify_prefix,
-                classify_wrapper,
-                class_orf_dir,
-                gencode_orf_dir,
-                file(params.orf_classify_ensembl_dir, checkIfExists: true)
-            )
-            ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE.out.versions)
-        } else if (classify_mode == 'orfquant') {
-            CLASSIFY_ORFS_ORFQUANT(
-                ch_unify_gtf,
-                classify_prefix,
-                classify_wrapper,
-                class_orf_dir,
-                ch_gtf
-            )
-            ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
-        } else if (classify_mode == 'orf_type') {
-            CLASSIFY_ORFS_ORF_TYPE(
-                ch_unify_metadata,
-                classify_prefix,
-                classify_wrapper,
-                class_orf_dir,
-                ch_gtf
-            )
-            ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
-        } else {
-            error "Unsupported orf_classify_mode: ${params.orf_classify_mode}. Use gencode, orfquant, or orf_type."
+        if (params.orf_classify_mode) {
+            log.warn "orf_classify_mode is ignored; running all ORF classification modes."
         }
+
+        if (!params.orf_classify_ensembl_dir) {
+            error "ORF classification requires --orf_classify_ensembl_dir to run gencode classification."
+        }
+        CLASSIFY_ORFS_GENCODE(
+            ch_unify_bed,
+            ch_unify_metadata,
+            classify_prefix,
+            classify_wrapper,
+            class_orf_dir,
+            gencode_orf_dir,
+            file(params.orf_classify_ensembl_dir, checkIfExists: true),
+            gencode_outdir
+        )
+        ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE.out.versions)
+
+        CLASSIFY_ORFS_ORFQUANT(
+            ch_unify_gtf,
+            classify_prefix,
+            classify_wrapper,
+            class_orf_dir,
+            ch_gtf,
+            orfquant_outdir
+        )
+        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
+
+        CLASSIFY_ORFS_ORF_TYPE(
+            ch_unify_metadata,
+            classify_prefix,
+            classify_wrapper,
+            class_orf_dir,
+            ch_gtf,
+            orftype_outdir
+        )
+        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
     }
 
     //

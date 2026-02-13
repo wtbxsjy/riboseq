@@ -50,6 +50,9 @@ RSCRIPT
 
     R --vanilla -q -f /tmp/install_orfquant.R
 
+    # Ensure optparse is available for ORFquant classification helpers
+    R --vanilla -q -e "if (!requireNamespace('optparse', quietly=TRUE)) install.packages('optparse', repos='https://cloud.r-project.org')"
+
 %runscript
     exec "$@"
 

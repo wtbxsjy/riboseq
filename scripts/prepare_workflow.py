@@ -77,6 +77,29 @@ REFERENCE_FILES = {
     ]
 }
 
+ENSEMBL_SPECIES_MAP = {
+    'human': 'homo_sapiens',
+    'mouse': 'mus_musculus',
+    'rice': 'oryza_sativa',
+    'maize': 'zea_mays',
+    'wheat': 'triticum_aestivum',
+    'soybean': 'glycine_max',
+}
+
+ENSEMBL_DIVISION_MAP = {
+    'human': 'ensembl',
+    'mouse': 'ensembl',
+    'rice': 'plants',
+    'maize': 'plants',
+    'wheat': 'plants',
+    'soybean': 'plants',
+}
+
+DEFAULT_ENSEMBL_RELEASE = {
+    'ensembl': 110,
+    'plants': 58,
+}
+
 
 def parse_args():
     """Parse command line arguments"""
@@ -135,6 +158,22 @@ Examples:
     parser.add_argument('--species', default='human',
                         choices=['human', 'mouse', 'rice', 'maize', 'wheat', 'soybean'],
                         help='Species name (default: human). Choices: human, mouse, rice, maize, wheat, soybean')
+
+    # ORF classification Ensembl annotation
+    parser.add_argument('--orf-classify-ensembl-dir', default=None,
+                        help='Existing Ensembl annotation directory for ORF classification')
+    parser.add_argument('--ensembl-release', type=int, default=None,
+                        help='Ensembl release for ORF classification (default depends on species)')
+    parser.add_argument('--ensembl-assembly', default=None,
+                        help='Genome assembly for Ensembl annotation (default: --genome)')
+    parser.add_argument('--ensembl-version-suffix', default=None,
+                        help='Ensembl GTF version suffix override (e.g., 110.38)')
+    parser.add_argument('--ensembl-base-url', default=None,
+                        help='Override Ensembl FTP base URL')
+    parser.add_argument('--skip-orf-classify-ensembl', action='store_false',
+                        dest='prepare_orf_classify_ensembl',
+                        help='Skip preparing Ensembl files for ORF classification (default: prepare)')
+    parser.set_defaults(prepare_orf_classify_ensembl=True)
     
     # Sample sheet options
     parser.add_argument('--strandedness', default='auto',
@@ -456,6 +495,80 @@ def setup_reference_directory(workdir, reference_dirs, species, dry_run=False):
     return linked_refs
 
 
+def prepare_orf_classify_ensembl_dir(workdir, args, dry_run=False):
+    """Prepare Ensembl annotation files for ORF classification"""
+    if args.orf_classify_ensembl_dir:
+        ensembl_dir = Path(args.orf_classify_ensembl_dir).resolve()
+        if not ensembl_dir.exists():
+            logger.error(f"Ensembl directory not found: {ensembl_dir}")
+            return None
+        return ensembl_dir
+
+    if not getattr(args, 'prepare_orf_classify_ensembl', True):
+        return None
+
+    if args.species not in ENSEMBL_SPECIES_MAP:
+        logger.warning(f"No Ensembl species mapping for: {args.species}")
+        return None
+
+    ensembl_species = ENSEMBL_SPECIES_MAP[args.species]
+    division = ENSEMBL_DIVISION_MAP.get(args.species, 'ensembl')
+    release = args.ensembl_release or DEFAULT_ENSEMBL_RELEASE.get(division)
+    assembly = args.ensembl_assembly or args.genome
+
+    if not release:
+        logger.error("Ensembl release not specified and no default available.")
+        return None
+    if not assembly:
+        logger.error("Ensembl assembly not specified.")
+        return None
+
+    if args.ensembl_base_url:
+        base_url = args.ensembl_base_url
+    elif division == 'plants':
+        base_url = f"https://ftp.ensemblgenomes.org/pub/plants/release-{release}"
+    else:
+        base_url = f"https://ftp.ensembl.org/pub/release-{release}"
+
+    ensembl_dir = Path(workdir) / 'reference' / 'ensembl' / f"Ens{release}_{ensembl_species}"
+    prep_script = Path(__file__).parent / 'retrieve_ensembl_data.sh'
+    if not prep_script.exists():
+        logger.error(f"retrieve_ensembl_data.sh not found at: {prep_script}")
+        return None
+
+    cmd = [
+        'bash', str(prep_script),
+        '--species', ensembl_species,
+        '--release', str(release),
+        '--assembly', str(assembly),
+        '--outdir', str(ensembl_dir),
+        '--base-url', base_url,
+    ]
+    if args.ensembl_version_suffix:
+        cmd.extend(['--version-suffix', args.ensembl_version_suffix])
+
+    logger.info("\n" + "=" * 60)
+    logger.info("Preparing Ensembl annotation for ORF classification")
+    logger.info("=" * 60)
+    logger.info(f"Ensembl species: {ensembl_species}")
+    logger.info(f"Release: {release}")
+    logger.info(f"Assembly: {assembly}")
+    logger.info(f"Base URL: {base_url}")
+    logger.info(f"Output: {ensembl_dir}")
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would execute: {' '.join(cmd)}")
+        return ensembl_dir
+
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to prepare Ensembl annotation: {e}")
+        return None
+
+    return ensembl_dir
+
+
 def setup_container_directory(workdir, container_dir, orfquant_container=None, 
                               rpbp_container=None, unify_orf_container=None, dry_run=False):
     """Setup container directory by copying specified images into workdir"""
@@ -571,8 +684,8 @@ def generate_sample_sheet(workdir, data_dir, strandedness='auto',
         return None
 
 
-def generate_nextflow_script(workdir, args, sample_sheet, containers, 
-                             references, dry_run=False):
+def generate_nextflow_script(workdir, args, sample_sheet, containers,
+                             references, orf_classify_ensembl_dir=None, dry_run=False):
     """Generate Nextflow execution shell script"""
     logger.info("\n" + "=" * 60)
     logger.info("Generating Nextflow execution script")
@@ -654,6 +767,9 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     # Skip contaminant filter if no contaminant FASTA provided
     if not contaminant_provided:
         nf_cmd_parts.append("--skip_contaminant_filter")
+
+    if orf_classify_ensembl_dir:
+        nf_cmd_parts.append(f"--orf_classify_ensembl_dir {orf_classify_ensembl_dir}")
     
     # Add pipeline options
     if args.run_prefilter_qc:
@@ -757,9 +873,9 @@ echo "=========================================="
     return script_path
 
 
-def create_config_summary(workdir, args, sample_sheet, containers, 
+def create_config_summary(workdir, args, sample_sheet, containers,
                           references, script_path, auto_reference_info=None,
-                          dry_run=False):
+                          orf_classify_ensembl_dir=None, dry_run=False):
     """Create a summary configuration file"""
     workdir = Path(workdir).resolve()
     summary_path = workdir / 'scripts' / 'workflow_config.json'
@@ -784,6 +900,13 @@ def create_config_summary(workdir, args, sample_sheet, containers,
             'auto_reference_base_dir': str(auto_reference_info.get('base_dir')) if auto_reference_info else None,
             'auto_reference_dirs': [str(auto_reference_info.get('reference_dir')), str(auto_reference_info.get('contaminant_dir'))] if auto_reference_info else None,
             'files': {k: [str(f) for f in v] for k, v in references.items()} if references else {}
+        },
+        'orf_classify_ensembl': {
+            'ensembl_dir': str(orf_classify_ensembl_dir) if orf_classify_ensembl_dir else None,
+            'ensembl_release': args.ensembl_release,
+            'ensembl_assembly': args.ensembl_assembly or args.genome,
+            'ensembl_base_url': args.ensembl_base_url,
+            'auto_prepared': bool(orf_classify_ensembl_dir),
         },
         'containers': {
             'source_directory': args.container_dir,
@@ -920,8 +1043,15 @@ def main():
     if final_missing:
         logger.warning(f"Could not find all required references. Missing: {final_missing}")
         logger.warning("Pipeline may fail. Consider providing explicit reference paths.")
-    
-    # Step 4: Setup container directory
+
+    # Step 4: Prepare Ensembl annotation for ORF classification
+    orf_classify_ensembl_dir = prepare_orf_classify_ensembl_dir(
+        workdir,
+        args,
+        args.dry_run
+    )
+
+    # Step 5: Setup container directory
     containers = setup_container_directory(
         workdir, 
         args.container_dir,
@@ -931,7 +1061,7 @@ def main():
         args.dry_run
     )
     
-    # Step 5: Generate sample sheet
+    # Step 6: Generate sample sheet
     sample_sheet = generate_sample_sheet(
         workdir,
         args.data_dir,
@@ -940,17 +1070,18 @@ def main():
         args.dry_run
     )
     
-    # Step 6: Generate execution script
+    # Step 7: Generate execution script
     script_path = generate_nextflow_script(
         workdir,
         args,
         sample_sheet,
         containers,
         references,
+        orf_classify_ensembl_dir,
         args.dry_run
     )
     
-    # Step 7: Create configuration summary
+    # Step 8: Create configuration summary
     create_config_summary(
         workdir,
         args,
@@ -959,6 +1090,7 @@ def main():
         references,
         script_path,
         auto_reference_info,
+        orf_classify_ensembl_dir,
         args.dry_run
     )
     

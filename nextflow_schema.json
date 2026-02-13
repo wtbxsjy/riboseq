@@ -567,6 +567,12 @@
                     "fa_icon": "fas fa-folder-open",
                     "description": "Ensembl annotation directory for gencode classification mode."
                 },
+                "gencode_orf_mapper_container": {
+                    "type": "string",
+                    "default": null,
+                    "fa_icon": "fas fa-box",
+                    "description": "Custom gencode-orf-mapper container image path (Singularity .sif or Docker image)."
+                },
                 "extra_orf_classify_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to classify_orfs_wrapper.py."

@@ -1,15 +1,11 @@
 process CLASSIFY_ORFS_GENCODE {
-    def output_dir = (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
-
-    tag "${output_dir}"
+    tag "${classify_output_dir}"
     label 'process_medium'
 
-    publishDir "${params.outdir}/orf_classification", mode: params.publish_dir_mode
+    publishDir { "${params.outdir}/${classify_output_dir}" }, mode: params.publish_dir_mode
 
     conda "${moduleDir}/environment_gencode.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/mulled-v2-8849acf39a43cdd6c839a369a74c0adc823e2f91:ab110436faf952a33575c64dd74615a84011450b-0' :
-        'quay.io/biocontainers/mulled-v2-8849acf39a43cdd6c839a369a74c0adc823e2f91:ab110436faf952a33575c64dd74615a84011450b-0' }"
+    container "${ params.gencode_orf_mapper_container ?: 'nfcore/gencode-orf-mapper:1.1.0' }"
 
     input:
     path unified_bed
@@ -19,16 +15,19 @@ process CLASSIFY_ORFS_GENCODE {
     path class_orf_dir
     path gencode_orf_dir
     path ensembl_dir
+    val classify_output_dir
 
     output:
-    path "${output_dir}/gencode_results.*", emit: results
+    path "${classify_output_dir}/gencode_results.*", emit: results
     path "versions.yml"              , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     def extra_args = params.extra_orf_classify_args ?: ''
+    def orfquant_script = "${class_orf_dir}/run_orfquant_classify.R"
     """
     set -uo pipefail
 
@@ -85,6 +84,7 @@ process CLASSIFY_ORFS_GENCODE {
     """
 
     stub:
+    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     """
     mkdir -p ${output_dir}
     touch ${output_dir}/gencode_results.orfs.gtf
@@ -98,17 +98,17 @@ process CLASSIFY_ORFS_GENCODE {
 }
 
 process CLASSIFY_ORFS_ORFQUANT {
-    def output_dir = (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
-
-    tag "${output_dir}"
+    tag "${classify_output_dir}"
     label 'process_medium'
 
-    publishDir "${params.outdir}/orf_classification", mode: params.publish_dir_mode
+    publishDir { "${params.outdir}/${classify_output_dir}" }, mode: params.publish_dir_mode
 
     conda "${moduleDir}/environment_orfquant.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/orfquant:1.1.0--r40_1' :
-        'quay.io/biocontainers/orfquant:1.1.0--r40_1' }"
+    container "${ params.orfquant_container ?
+        params.orfquant_container :
+        (workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+            'https://depot.galaxyproject.org/singularity/orfquant:1.1.0--r40_1' :
+            'quay.io/biocontainers/orfquant:1.1.0--r40_1') }"
 
     input:
     path unified_gtf
@@ -116,16 +116,19 @@ process CLASSIFY_ORFS_ORFQUANT {
     path classify_wrapper
     path class_orf_dir
     path ref_gtf
+    val classify_output_dir
 
     output:
-    path "${output_dir}/orfquant_classification.tsv", emit: results
+    path "${classify_output_dir}/orfquant_classification.tsv", emit: results
     path "versions.yml"                     , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     def extra_args = params.extra_orf_classify_args ?: ''
+    def orfquant_script = "${class_orf_dir}/run_orfquant_classify.R"
     """
     set -uo pipefail
 
@@ -152,12 +155,17 @@ process CLASSIFY_ORFS_ORFQUANT {
         echo -e "orf_id\\torf_type\\tclassification" >> ${output_dir}/orfquant_classification.tsv
     else
         set +e
-        python3 ${classify_wrapper} \\
-            --mode orfquant \\
-            --input ${input_prefix} \\
-            --output_dir ${output_dir} \\
-            --gtf ${ref_gtf} \\
-            --cpus ${task.cpus} \\
+        export R_LIBS_USER="\${PWD}/.Rlib"
+        mkdir -p "\${R_LIBS_USER}"
+        if ! Rscript -e "suppressPackageStartupMessages(library(optparse))" >/dev/null 2>&1; then
+            echo "INFO: Installing missing R package optparse"
+            Rscript -e "install.packages('optparse', repos='https://cloud.r-project.org')" || \\
+                { echo "ERROR: Failed to install optparse"; exit 1; }
+        fi
+        Rscript ${orfquant_script} \\
+            --input ${input_prefix}.gtf \\
+            --annotation ${ref_gtf} \\
+            --output ${output_dir}/orfquant_classification.tsv \\
             ${extra_args} 2>&1 | tee classify_orfquant.log
         EXIT_CODE=\${PIPESTATUS[0]}
         set -e
@@ -182,6 +190,7 @@ process CLASSIFY_ORFS_ORFQUANT {
     """
 
     stub:
+    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     """
     mkdir -p ${output_dir}
     touch ${output_dir}/orfquant_classification.tsv
@@ -194,12 +203,10 @@ process CLASSIFY_ORFS_ORFQUANT {
 }
 
 process CLASSIFY_ORFS_ORF_TYPE {
-    def output_dir = (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
-
-    tag "${output_dir}"
+    tag "${classify_output_dir}"
     label 'process_medium'
 
-    publishDir "${params.outdir}/orf_classification", mode: params.publish_dir_mode
+    publishDir { "${params.outdir}/${classify_output_dir}" }, mode: params.publish_dir_mode
 
     conda "${moduleDir}/environment_orf_type.yml"
     // Use unified container if provided, otherwise use biopython container
@@ -215,15 +222,17 @@ process CLASSIFY_ORFS_ORF_TYPE {
     path classify_wrapper
     path class_orf_dir
     path ref_gtf
+    val classify_output_dir
 
     output:
-    path "${output_dir}/orftype_classification.tsv", emit: results
+    path "${classify_output_dir}/orftype_classification.tsv", emit: results
     path "versions.yml"                  , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     def extra_args = params.extra_orf_classify_args ?: ''
     """
     set -uo pipefail
@@ -281,6 +290,7 @@ process CLASSIFY_ORFS_ORF_TYPE {
     """
 
     stub:
+    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     """
     mkdir -p ${output_dir}
     touch ${output_dir}/orftype_classification.tsv
