@@ -49,6 +49,30 @@ orfquant_classify_orfs <- function(orfs,
 
     if (inherits(x, "GRangesList")) {
       grl <- x
+      # Propagate per-range metadata to list level if missing.
+      # When split(gr, gr$orf_id) is used, only constant-per-group columns
+      # (like orf_id itself) are promoted to list-level mcols; gene_id/
+      # transcript_id may vary within a group and stay at range level only.
+      inner_gr  <- unlist(grl, use.names = TRUE)
+      inner_meta <- S4Vectors::mcols(inner_gr)
+      el_idx    <- rep(seq_along(grl), lengths(grl))
+      for (col in c("gene_id", "transcript_id")) {
+        if (!col %in% colnames(S4Vectors::mcols(grl))) {
+          if (col %in% colnames(inner_meta)) {
+            vals <- as.character(inner_meta[[col]])
+            S4Vectors::mcols(grl)[[col]] <- vapply(seq_along(grl), function(i) {
+              v <- vals[el_idx == i]
+              if (length(v) == 0 || all(is.na(v))) NA_character_ else v[!is.na(v)][1]
+            }, character(1))
+          } else {
+            S4Vectors::mcols(grl)[[col]] <- NA_character_
+          }
+        }
+      }
+      # Propagate orf_id from GRangesList names (= split key) before falling back to seq index.
+      if (!"orf_id" %in% colnames(S4Vectors::mcols(grl)) && !is.null(names(grl))) {
+        S4Vectors::mcols(grl)$orf_id <- names(grl)
+      }
     } else if (inherits(x, "GRanges")) {
       grl <- GenomicRanges::GRangesList(split(x, seq_len(length(x))))
     } else if (is.data.frame(x)) {
@@ -127,7 +151,20 @@ orfquant_classify_orfs <- function(orfs,
       }
       cds_genes <- GenomicRanges::reduce(split(cds, cds$gene_id))
       cds_txs <- split(cds, cds$transcript_id)
-      return(list(cds_genes = cds_genes, cds_txs = cds_txs))
+      # Build per-transcript CDS bounds in strand-normalised coordinates.
+      # For + strand: IRanges(start=min_genomic, end=max_genomic)
+      # For - strand: IRanges(start=-max_genomic, end=-min_genomic)
+      # Both ORF and reference include the stop codon in genomic coords,
+      # so no -3 adjustment is needed when comparing to orf coordinates.
+      cds_txs_coords <- lapply(cds_txs, function(tx_cds) {
+        if (length(tx_cds) == 0) return(IRanges::IRanges())
+        strd   <- as.character(GenomicRanges::strand(tx_cds)[1])
+        cds_lo <- min(IRanges::start(tx_cds))
+        cds_hi <- max(IRanges::end(tx_cds))
+        if (strd == "-") IRanges::IRanges(start = -cds_hi, end = -cds_lo)
+        else             IRanges::IRanges(start = cds_lo,  end = cds_hi)
+      })
+      return(list(cds_genes = cds_genes, cds_txs = cds_txs, cds_txs_coords = cds_txs_coords))
     }
     stop("Unsupported annotation input. Use ORFquant Annotation or GTF/GFF path.")
   }
@@ -318,10 +355,21 @@ orfquant_classify_orfs <- function(orfs,
       if (!is.na(tx_id) && tx_id %in% names(ann$cds_txs_coords)) {
         annotated_ORF <- ann$cds_txs_coords[[tx_id]]
         if (length(annotated_ORF) > 0) {
+          # cds_txs_coords stores strand-normalised coords (negated for - strand)
+          # so smaller value is always the 5' end; no -3 needed (genomic coords
+          # include stop codon in both ORF and reference).
           ann_sta <- IRanges::start(annotated_ORF)
-          ann_sto <- IRanges::end(annotated_ORF) - 3
-          orf_sta <- IRanges::start(orf_grl)[i]
-          orf_sto <- IRanges::end(orf_grl)[i]
+          ann_sto <- IRanges::end(annotated_ORF)
+          strd_orf <- strand_vec[i]
+          orf_lo  <- min(IRanges::start(orf_grl[[i]]))
+          orf_hi  <- max(IRanges::end(orf_grl[[i]]))
+          if (!is.na(strd_orf) && strd_orf == "-") {
+            orf_sta <- -orf_hi
+            orf_sto <- -orf_lo
+          } else {
+            orf_sta <- orf_lo
+            orf_sto <- orf_hi
+          }
           res$ORF_category_Tx[i] <- classify_transcript(orf_sta, orf_sto, ann_sta, ann_sto)
         } else {
           res$ORF_category_Tx[i] <- "novel"
@@ -338,7 +386,7 @@ orfquant_classify_orfs <- function(orfs,
             annotated_ORF_comp <- ann$cds_txs_coords[[comp_tx]]
             if (length(annotated_ORF_comp) > 0) {
               ann_sta <- IRanges::start(annotated_ORF_comp)
-              ann_sto <- IRanges::end(annotated_ORF_comp) - 3
+              ann_sto <- IRanges::end(annotated_ORF_comp)
               res$ORF_category_Tx_compatible[i] <- classify_transcript(comp_sta, comp_sto, ann_sta, ann_sto)
             } else {
               res$ORF_category_Tx_compatible[i] <- "novel"
@@ -388,6 +436,27 @@ orfquant_classify_orfs_py <- function(orfs,
 
     if (inherits(x, "GRangesList")) {
       grl <- x
+      # Propagate per-range metadata to list level if missing.
+      inner_gr  <- unlist(grl, use.names = TRUE)
+      inner_meta <- S4Vectors::mcols(inner_gr)
+      el_idx    <- rep(seq_along(grl), lengths(grl))
+      for (col in c("gene_id", "transcript_id")) {
+        if (!col %in% colnames(S4Vectors::mcols(grl))) {
+          if (col %in% colnames(inner_meta)) {
+            vals <- as.character(inner_meta[[col]])
+            S4Vectors::mcols(grl)[[col]] <- vapply(seq_along(grl), function(i) {
+              v <- vals[el_idx == i]
+              if (length(v) == 0 || all(is.na(v))) NA_character_ else v[!is.na(v)][1]
+            }, character(1))
+          } else {
+            S4Vectors::mcols(grl)[[col]] <- NA_character_
+          }
+        }
+      }
+      # Propagate orf_id from GRangesList names (= split key) before falling back to seq index.
+      if (!"orf_id" %in% colnames(S4Vectors::mcols(grl)) && !is.null(names(grl))) {
+        S4Vectors::mcols(grl)$orf_id <- names(grl)
+      }
     } else if (inherits(x, "GRanges")) {
       grl <- GenomicRanges::GRangesList(split(x, seq_len(length(x))))
     } else if (is.data.frame(x)) {
@@ -465,7 +534,20 @@ orfquant_classify_orfs_py <- function(orfs,
       }
       cds_genes <- GenomicRanges::reduce(split(cds, cds$gene_id))
       cds_txs <- split(cds, cds$transcript_id)
-      return(list(cds_genes = cds_genes, cds_txs = cds_txs))
+      # Build per-transcript CDS bounds in strand-normalised coordinates.
+      # For + strand: IRanges(start=min_genomic, end=max_genomic)
+      # For - strand: IRanges(start=-max_genomic, end=-min_genomic)
+      # Both ORF and reference include the stop codon in genomic coords,
+      # so no -3 adjustment is needed when comparing to orf coordinates.
+      cds_txs_coords <- lapply(cds_txs, function(tx_cds) {
+        if (length(tx_cds) == 0) return(IRanges::IRanges())
+        strd   <- as.character(GenomicRanges::strand(tx_cds)[1])
+        cds_lo <- min(IRanges::start(tx_cds))
+        cds_hi <- max(IRanges::end(tx_cds))
+        if (strd == "-") IRanges::IRanges(start = -cds_hi, end = -cds_lo)
+        else             IRanges::IRanges(start = cds_lo,  end = cds_hi)
+      })
+      return(list(cds_genes = cds_genes, cds_txs = cds_txs, cds_txs_coords = cds_txs_coords))
     }
     stop("Unsupported annotation input. Use ORFquant Annotation or GTF/GFF path.")
   }
