@@ -1302,20 +1302,23 @@ def main():
             for tool in tools_in_orf:
                 final_sample_stats[sample][tool] += 1
     
+    # Map canonical tool names used in ORFCandidate.sources to display names
+    TOOL_KEYS = {'Ribo-TISH': 'ribotish', 'Ribotricer': 'ribotricer', 'ORFquant': 'orfquant'}
+
     print(f"Final unified ORFs: {len(final_list)}", file=sys.stderr)
     print("By Tool in Final Set:", file=sys.stderr)
-    for tool in ['ribotish', 'ribotricer', 'orfquant']:
-        if tool in final_tool_stats:
-            print(f"  {tool:12s}: {final_tool_stats[tool]:5d} ORFs", file=sys.stderr)
-    
+    for tool_key, tool_label in TOOL_KEYS.items():
+        if tool_key in final_tool_stats:
+            print(f"  {tool_label:12s}: {final_tool_stats[tool_key]:5d} ORFs", file=sys.stderr)
+
     print("By Sample in Final Set:", file=sys.stderr)
     for sample in sorted(final_sample_stats.keys()):
         tool_counts = final_sample_stats[sample]
-        total = sum(tool_counts.values())
+        ribotish_cnt   = tool_counts.get('Ribo-TISH', 0)
+        ribotricer_cnt = tool_counts.get('Ribotricer', 0)
+        orfquant_cnt   = tool_counts.get('ORFquant', 0)
+        total = ribotish_cnt + ribotricer_cnt + orfquant_cnt
         if total > 0:
-            ribotish_cnt = tool_counts.get('ribotish', 0)
-            ribotricer_cnt = tool_counts.get('ribotricer', 0)
-            orfquant_cnt = tool_counts.get('orfquant', 0)
             print(f"  {sample:20s}: ribotish={ribotish_cnt:5d}, ribotricer={ribotricer_cnt:5d}, orfquant={orfquant_cnt:5d}, total={total:5d}", file=sys.stderr)
     
     # Calculate statistics from bedgraphs if provided (using optimized indexed version)
