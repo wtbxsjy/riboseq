@@ -146,6 +146,40 @@ The pipeline integrates multiple ORF prediction tools:
 
 **Design principle**: All ORF predictors run in **per-sample mode only** (no pooled/all-samples mode) to maintain runtime/memory control at scale.
 
+### ORF Unification and Classification (Post-Processing)
+
+After per-sample ORF prediction, the pipeline runs two additional stages:
+
+**ORF Unification** (`scripts/unify_orf_predictions.py`):
+- Merges Ribo-TISH / Ribotricer / ORFquant results across all samples into a single non-redundant set.
+- Deduplication order: exact-match → frame-aware → overlap grouping (selects representative per group).
+- Outputs: `unified_orfs.bed` (BED12), `unified_orfs.gtf`, `unified_orfs.metadata.tsv`, `unified_orfs.stats.txt`.
+- Tool names stored in `ORFCandidate.sources` use **capitalised/hyphenated** forms: `'Ribo-TISH'`, `'Ribotricer'`, `'ORFquant'` — use these exact strings when parsing the `sources` set or `tools` metadata column.
+- Skip with `--skip_unify_orf_predictions true`.
+
+**ORF Classification** (`modules/local/classify_orfs/`, `scripts/classify_orfs_wrapper.py`):
+Three classifiers run in parallel (all enabled by default):
+
+1. **GENCODE/Ensembl mode** (`CLASSIFY_ORFS_GENCODE`, `scripts/gencode-riboseqORFs/ORF_mapper_to_GENCODE_v1.1.py`):
+   - Maps ORFs against transcriptome; assigns `orf_biotype`: `CDS`, `dORF`, `uORF`, `doORF`, `uoORF`, `intORF`, `lncRNA`.
+   - Requires `--orf_classify_ensembl_dir` pointing to a directory with standardised symlinks (`TRANSCRIPTOME_FASTA`, `SORTED_TRANSCRIPTOME_GTF`, `PROTEOME_FASTA`, `TRANSCRIPT_SUPPORT`, `PSITES_BED`).
+   - Container: `--gencode_orf_mapper_container` (needs bedtools + BioPython).
+   - **Input format**: `classify_orfs_wrapper.py` auto-converts the BED12 output to BED6 (sample ID in col[4]) and translates nucleotide sequences to protein FASTA with key `{orf_id}--{sample_id}` as required by the mapper.
+   - Output: `gencode_results.orfs.out`, `gencode_results.orfs.gtf`.
+
+2. **ORFquant mode** (`CLASSIFY_ORFS_ORFQUANT`, `scripts/class_orf/run_orfquant_classify.R` → `orfquant_orf_classify.R`):
+   - Classifies ORFs against the reference GTF at genomic (`ORF_category_Gen`), transcript (`ORF_category_Tx`), and best-isoform (`ORF_category_Tx_compatible`) levels.
+   - **Transcript-space projection**: `project_to_tx_coords()` (top-level function in `orfquant_orf_classify.R`) maps ORF genomic blocks through the transcript exon chain to 1-based transcript coordinates, correctly handling multi-exon ORFs for both strands. This replaces a previous genomic-approximation that was wrong for ~18% of ORFs.
+   - `normalize_annotation()` loads both `exon` and `CDS` features; returns `exon_txs` (per-transcript exon GRanges) and `cds_txs_tx_coords` (CDS bounds in transcript space).
+   - `ORF_category_Tx_compatible` = best classification across all transcripts of the gene.
+   - Output: `orfquant_classification.tsv`.
+
+3. **ORF-type mode** (`CLASSIFY_ORFS_ORF_TYPE`, `scripts/class_orf/class_ORFtype.py`):
+   - Gene-level classification: `canonical_CDS`, `uORF`, `dORF`, `overlap_uORF`, etc.
+   - Output: `orftype_classification.tsv`.
+
+Skip all classification with `--skip_orf_classification true`.
+
 ## Key Configuration Files
 
 - `nextflow.config`: Main pipeline configuration with all parameters
@@ -223,10 +257,18 @@ The default `--sorf_exclude_contigs_regex` targets common mitochondrial/chloropl
 5. **Gencode references**: Set `--gencode true` to handle Gencode-specific GTF attributes
 6. **Nextflow version**: Requires Nextflow >= 24.04.2 (specified in manifest)
 7. **BAM input strandedness**: Cannot use `auto` - must specify `forward`, `reverse`, or `unstranded`
+8. **GENCODE classifier requires its own container** (`--gencode_orf_mapper_container`): needs bedtools and BioPython; the `unify_orf` container does NOT include bedtools.
+9. **GENCODE Ensembl directory** (`--orf_classify_ensembl_dir`): must contain five standardised symlinks — `TRANSCRIPTOME_FASTA`, `SORTED_TRANSCRIPTOME_GTF`, `PROTEOME_FASTA`, `TRANSCRIPT_SUPPORT`, `PSITES_BED` — created by the reference-preparation scripts.
+10. **ORF tool name capitalisation**: `ORFCandidate.sources` and the unified metadata `tools` column use `'Ribo-TISH'`, `'Ribotricer'`, `'ORFquant'` (not lowercase). Use these exact strings when filtering or counting by tool.
 
 ## File Locations Reference
 
 - Custom scripts: `bin/` (e.g., `filter_gtf.py`, `gtf2bed`)
+- ORF unification: `scripts/unify_orf_predictions.py`
+- ORF classification wrapper: `scripts/classify_orfs_wrapper.py`
+- ORFquant classification library: `scripts/class_orf/orfquant_orf_classify.R`
+- GENCODE mapper: `scripts/gencode-riboseqORFs/ORF_mapper_to_GENCODE_v1.1.py` + `functions.py`
+- ORF-type classifier: `scripts/class_orf/class_ORFtype.py`
 - Helper test scripts: `scripts/singularity_single_tool_tests/`
 - Pipeline tests: `tests/` and `*.nf.test` files throughout
 - Example data: `example/` directory

@@ -151,43 +151,40 @@ flowchart TB
 
 ### Unified ORF predictions and classification (experimental)
 
-本流程已集成单工具脚本中的 **ORF 预测合并** 与 **ORF 分类** 功能（对应脚本 17/18）。
+After per-sample ORF prediction, the pipeline merges results across tools and classifies the final ORF set.
 
-- **统一 ORF 预测**：调用 [scripts/unify_orf_predictions.py](scripts/unify_orf_predictions.py) 合并 Ribo-TISH/Ribotricer/ORFquant 的 ORF 结果，产出统一的 `.bed/.gtf/.metadata.tsv`。
-- **ORF 分类**：调用 [scripts/classify_orfs_wrapper.py](scripts/classify_orfs_wrapper.py) 进行三种模式的分类（`gencode` / `orfquant` / `orf_type`）。
+#### ORF Unification (`scripts/unify_orf_predictions.py`)
 
-默认开启。如需关闭：
+Merges Ribo-TISH / Ribotricer / ORFquant predictions into a single non-redundant set via three deduplication rounds: exact-match → frame-aware overlap → representative-selection within overlap groups.
 
-- `--skip_unify_orf_predictions true`
-- `--skip_orf_classification true`
+Outputs written to `results/orf_unification/`:
+- `unified_orfs.bed` — BED12 coordinates
+- `unified_orfs.gtf` — GTF with CDS/exon features
+- `unified_orfs.metadata.tsv` — orf_id, tools, samples, scores, sequences, P-site stats, …
+- `unified_orfs.stats.txt` — per-tool/per-sample ORF counts before and after merging
 
-可用参数（节选）：
+Disable with `--skip_unify_orf_predictions true`.  Key parameters:
+- `--unify_orf_min_len` — minimum ORF length in amino acids (default `10`)
+- `--unify_orf_merge_tolerance` — positional tolerance for frame-aware merging (default `3`)
+- `--unify_orf_min_overlap` — minimum overlap fraction for grouping (default `0.5`)
 
-- `--unify_orf_predictions_prefix`：统一 ORF 输出前缀（默认 `unified_orfs`）
-- `--unify_orf_min_len`：最小 ORF 长度（AA，默认 `10`）
-- `--orf_classify_mode`：分类模式（`gencode` / `orfquant` / `orf_type`，默认 `orf_type`）
-- `--orf_classify_ensembl_dir`：仅 `gencode` 模式需要，指向 Ensembl 注释目录
+#### ORF Classification (`scripts/classify_orfs_wrapper.py`)
 
-输出位置：
+Three classifiers run in parallel on the unified ORF set:
 
-- `results/orf_unification/`：统一 ORF 结果（`.bed/.gtf/.metadata.tsv`）
-- `results/orf_classification/`：分类结果（按模式输出）
+| Mode | Process | Output | Description |
+|------|---------|--------|-------------|
+| `gencode` | `CLASSIFY_ORFS_GENCODE` | `gencode_results.orfs.out`, `.gtf` | Transcriptome-based; assigns `orf_biotype` (CDS, dORF, uORF, …). Requires `--orf_classify_ensembl_dir` and `--gencode_orf_mapper_container`. |
+| `orfquant` | `CLASSIFY_ORFS_ORFQUANT` | `orfquant_classification.tsv` | Gene- and transcript-level categories (`ORF_category_Gen`, `ORF_category_Tx`, `ORF_category_Tx_compatible`). Uses transcript-space projection for multi-exon ORF accuracy. |
+| `orf_type` | `CLASSIFY_ORFS_ORF_TYPE` | `orftype_classification.tsv` | Gene-level categories (canonical_CDS, uORF, dORF, …). |
 
-结果文件明细（基于默认 `--unify_orf_predictions_prefix unified_orfs`）：
+All classification outputs are written under `results/orf_classification/<mode>/`.
 
-- `results/orf_unification/unified_orfs.metadata.tsv`：统一 ORF 元数据表（含 ORF ID、来源工具、序列等）
-- `results/orf_unification/unified_orfs.bed`：统一 ORF 坐标（BED12）
-- `results/orf_unification/unified_orfs.gtf`：统一 ORF 注释（GTF）
+Disable with `--skip_orf_classification true`.
 
-分类模式输出：
-
-- `orf_classify_mode=gencode`：
-    - `results/orf_classification/gencode_results.orfs.out`
-    - `results/orf_classification/gencode_results.orfs.gtf`
-- `orf_classify_mode=orfquant`：
-    - `results/orf_classification/orfquant_classification.tsv`
-- `orf_classify_mode=orf_type`（默认）：
-    - `results/orf_classification/orftype_classification.tsv`
+Key parameters:
+- `--orf_classify_ensembl_dir` — path to Ensembl annotation directory (required for `gencode` mode; must contain `TRANSCRIPTOME_FASTA`, `SORTED_TRANSCRIPTOME_GTF`, `PROTEOME_FASTA`, `TRANSCRIPT_SUPPORT`, `PSITES_BED`)
+- `--gencode_orf_mapper_container` — Singularity/Docker image with bedtools + BioPython for GENCODE classification
 
 ## Usage
 
