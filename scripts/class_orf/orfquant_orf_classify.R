@@ -19,6 +19,56 @@
 #' @param exons_col Optional column containing exon coordinates as
 #'        "start-end,start-end". If provided, multi-exon ORFs are built from this column.
 #' @param orf_id_col Optional ORF id column; if missing, row index is used.
+
+#' Project genomic ORF blocks to 1-based transcript-space coordinates.
+#'
+#' Handles multi-exon ORFs correctly by walking through the exon chain.
+#' For "+" strand the transcript runs 5'→3' from low to high genomic coordinate;
+#' for "-" strand it runs from high to low.
+#'
+#' @param orf_gr  GRanges of ORF CDS exons (1-based genomic coordinates).
+#' @param exon_gr GRanges of transcript exons (1-based genomic coordinates).
+#' @param strand  Character "+" or "-".
+#' @return Integer vector c(tx_start, tx_stop) 1-based (tx_start <= tx_stop),
+#'         or NULL when no exon overlap is found.
+#' @export
+project_to_tx_coords <- function(orf_gr, exon_gr, strand) {
+  if (is.null(exon_gr) || length(exon_gr) == 0 ||
+      is.null(orf_gr)  || length(orf_gr)  == 0) return(NULL)
+
+  ord  <- order(IRanges::start(exon_gr))
+  ex_s <- IRanges::start(exon_gr)[ord]
+  ex_e <- IRanges::end(exon_gr)[ord]
+  n_ex <- length(ex_s)
+
+  # For "-" strand the 5' end is at the highest genomic coordinate, so we
+  # traverse exons from right to left.
+  if (identical(strand, "-")) {
+    ex_s <- rev(ex_s)
+    ex_e <- rev(ex_e)
+  }
+
+  ex_len     <- ex_e - ex_s + 1L
+  cum_before <- c(0L, cumsum(ex_len[-n_ex]))  # cumulative tx length before exon j
+
+  # Map one genomic position to a 1-based transcript position.
+  gpos_to_tx <- function(gpos) {
+    for (j in seq_len(n_ex)) {
+      s <- ex_s[j]; e <- ex_e[j]
+      if (gpos >= s && gpos <= e) {
+        offset <- if (identical(strand, "-")) (e - gpos) else (gpos - s)
+        return(cum_before[j] + offset + 1L)
+      }
+    }
+    NA_integer_
+  }
+
+  tx_pos <- vapply(c(IRanges::start(orf_gr), IRanges::end(orf_gr)), gpos_to_tx, integer(1))
+  tx_pos <- tx_pos[!is.na(tx_pos)]
+  if (length(tx_pos) == 0) return(NULL)
+  c(min(tx_pos), max(tx_pos))
+}
+
 #' @return data.frame with ORF_category_Gen and (when possible) ORF_category_Tx / ORF_category_Tx_compatible.
 #' @export
 
@@ -134,37 +184,46 @@ orfquant_classify_orfs <- function(orfs,
   }
 
   normalize_annotation <- function(a) {
-    if (is.list(a) && !is.null(a$cds_genes) && !is.null(a$cds_txs)) {
+    # Allow a pre-built annotation list only if it already has all required fields.
+    if (is.list(a) && !is.null(a$cds_genes) && !is.null(a$cds_txs) &&
+        !is.null(a$exon_txs) && !is.null(a$cds_txs_tx_coords)) {
       return(a)
     }
     if (is.character(a) && length(a) == 1 && file.exists(a)) {
       ann <- rtracklayer::import(a)
       cds <- ann[ann$type == "CDS"]
-      if (length(cds) == 0) {
-        stop("No CDS features found in annotation.")
-      }
-      if (is.null(cds$gene_id)) {
-        stop("CDS annotation must contain gene_id.")
-      }
-      if (is.null(cds$transcript_id)) {
-        cds$transcript_id <- cds$gene_id
-      }
+      if (length(cds) == 0) stop("No CDS features found in annotation.")
+      if (is.null(cds$gene_id))    stop("CDS annotation must contain gene_id.")
+      if (is.null(cds$transcript_id)) cds$transcript_id <- cds$gene_id
+
       cds_genes <- GenomicRanges::reduce(split(cds, cds$gene_id))
-      cds_txs <- split(cds, cds$transcript_id)
-      # Build per-transcript CDS bounds in strand-normalised coordinates.
-      # For + strand: IRanges(start=min_genomic, end=max_genomic)
-      # For - strand: IRanges(start=-max_genomic, end=-min_genomic)
-      # Both ORF and reference include the stop codon in genomic coords,
-      # so no -3 adjustment is needed when comparing to orf coordinates.
-      cds_txs_coords <- lapply(cds_txs, function(tx_cds) {
-        if (length(tx_cds) == 0) return(IRanges::IRanges())
-        strd   <- as.character(GenomicRanges::strand(tx_cds)[1])
-        cds_lo <- min(IRanges::start(tx_cds))
-        cds_hi <- max(IRanges::end(tx_cds))
-        if (strd == "-") IRanges::IRanges(start = -cds_hi, end = -cds_lo)
-        else             IRanges::IRanges(start = cds_lo,  end = cds_hi)
+      cds_txs   <- split(cds, cds$transcript_id)
+
+      # Build per-transcript exon structure for coordinate projection.
+      exon <- ann[ann$type == "exon"]
+      exon_txs <- if (!is.null(exon$transcript_id) && length(exon) > 0) {
+        split(exon, exon$transcript_id)
+      } else {
+        cds_txs  # fall back to CDS exons as proxy
+      }
+
+      # Build per-transcript CDS bounds in TRANSCRIPT space by projecting
+      # CDS genomic exons through the exon chain.  This correctly handles
+      # multi-exon ORFs (unlike the previous genomic-strand-normalised
+      # approximation which collapsed multi-exon structures to a single span).
+      cds_txs_tx_coords <- lapply(names(cds_txs), function(tid) {
+        cds_gr  <- cds_txs[[tid]]
+        exon_gr <- if (tid %in% names(exon_txs)) exon_txs[[tid]] else cds_gr
+        if (length(cds_gr) == 0 || length(exon_gr) == 0) return(IRanges::IRanges())
+        strd <- as.character(GenomicRanges::strand(cds_gr)[1])
+        tx_c <- project_to_tx_coords(cds_gr, exon_gr, strd)
+        if (is.null(tx_c)) return(IRanges::IRanges())
+        IRanges::IRanges(start = tx_c[1], end = tx_c[2])
       })
-      return(list(cds_genes = cds_genes, cds_txs = cds_txs, cds_txs_coords = cds_txs_coords))
+      names(cds_txs_tx_coords) <- names(cds_txs)
+
+      return(list(cds_genes = cds_genes, cds_txs = cds_txs,
+                  exon_txs = exon_txs, cds_txs_tx_coords = cds_txs_tx_coords))
     }
     stop("Unsupported annotation input. Use ORFquant Annotation or GTF/GFF path.")
   }
@@ -321,7 +380,7 @@ orfquant_classify_orfs <- function(orfs,
   )
 
   # Build gene → transcript_id lookup (used for ORF_category_Tx_compatible)
-  gene_to_txids <- if (!is.null(ann$cds_txs_coords)) {
+  gene_to_txids <- if (!is.null(ann$cds_txs_tx_coords)) {
     tx_gene_map <- vapply(cds_txs, function(tx) {
       gids <- unique(tx$gene_id)
       if (length(gids) > 0) as.character(gids[1]) else NA_character_
@@ -377,57 +436,45 @@ orfquant_classify_orfs <- function(orfs,
 
     res$ORF_category_Gen[i] <- classify_genomic(orf_gen, cds_gene, max_cdsok)
 
-    # Transcript-level categories (requires transcript coordinates)
-    if (!is.null(ann$cds_txs_coords)) {
+    # Transcript-level categories using proper transcript-space projection.
+    # project_to_tx_coords() maps the ORF's genomic blocks through the
+    # transcript exon chain to get 1-based transcript coordinates.  This is
+    # correct for both single-exon and multi-exon ORFs and matches the
+    # coordinate system used natively by ORFquant (ORF_id_tr format:
+    # transcript_id_txstart_txstop).
+    if (!is.null(ann$cds_txs_tx_coords) && !is.null(ann$exon_txs)) {
       tx_id <- S4Vectors::mcols(orf_grl)$transcript_id[i]
-      if (!is.na(tx_id) && tx_id %in% names(ann$cds_txs_coords)) {
-        annotated_ORF <- ann$cds_txs_coords[[tx_id]]
-        if (length(annotated_ORF) > 0) {
-          # cds_txs_coords stores strand-normalised coords (negated for - strand)
-          # so smaller value is always the 5' end; no -3 needed (genomic coords
-          # include stop codon in both ORF and reference).
-          ann_sta <- IRanges::start(annotated_ORF)
-          ann_sto <- IRanges::end(annotated_ORF)
-          strd_orf <- strand_vec[i]
-          orf_lo  <- min(IRanges::start(orf_grl[[i]]))
-          orf_hi  <- max(IRanges::end(orf_grl[[i]]))
-          if (!is.na(strd_orf) && strd_orf == "-") {
-            orf_sta <- -orf_hi
-            orf_sto <- -orf_lo
+
+      # ── ORF_category_Tx: classify against the ORF's own transcript ──────────
+      if (!is.na(tx_id) && tx_id %in% names(ann$exon_txs)) {
+        orf_tx <- project_to_tx_coords(orf_grl[[i]], ann$exon_txs[[tx_id]], strand_vec[i])
+        if (!is.null(orf_tx) && tx_id %in% names(ann$cds_txs_tx_coords)) {
+          ref_tx <- ann$cds_txs_tx_coords[[tx_id]]
+          if (length(ref_tx) > 0) {
+            res$ORF_category_Tx[i] <- classify_transcript(
+              orf_tx[1], orf_tx[2],
+              IRanges::start(ref_tx), IRanges::end(ref_tx))
           } else {
-            orf_sta <- orf_lo
-            orf_sto <- orf_hi
+            res$ORF_category_Tx[i] <- "novel"
           }
-          res$ORF_category_Tx[i] <- classify_transcript(orf_sta, orf_sto, ann_sta, ann_sto)
-        } else {
-          res$ORF_category_Tx[i] <- "novel"
         }
       }
 
-      # ORF_category_Tx_compatible: best classification across all transcripts
-      # of the same gene.  Replaces the original ORFquant-native
-      # compatible_ORF_id_tr approach (a private field absent from unified GTF)
-      # with a more general "best isoform match": for each annotated transcript
-      # of the gene, compute the classification and keep the highest-priority one.
+      # ── ORF_category_Tx_compatible: best across all transcripts of the gene ─
+      # For each annotated transcript of the gene, project the ORF into that
+      # transcript's coordinate system and keep the highest-priority category.
       if (!is.na(gene_id) && gene_id %in% names(gene_to_txids)) {
-        strd_orf  <- strand_vec[i]
-        orf_lo    <- min(IRanges::start(orf_grl[[i]]))
-        orf_hi    <- max(IRanges::end(orf_grl[[i]]))
-        if (!is.na(strd_orf) && strd_orf == "-") {
-          orf_sta_c <- -orf_hi
-          orf_sto_c <- -orf_lo
-        } else {
-          orf_sta_c <- orf_lo
-          orf_sto_c <- orf_hi
-        }
         best_class    <- "novel"
         best_priority <- TX_CLASS_PRIORITY["novel"]
         for (tx_id_c in gene_to_txids[[gene_id]]) {
-          if (!tx_id_c %in% names(ann$cds_txs_coords)) next
-          ref_ir <- ann$cds_txs_coords[[tx_id_c]]
-          if (length(ref_ir) == 0) next
-          cls <- classify_transcript(orf_sta_c, orf_sto_c,
-                                     IRanges::start(ref_ir), IRanges::end(ref_ir))
+          if (!tx_id_c %in% names(ann$exon_txs) ||
+              !tx_id_c %in% names(ann$cds_txs_tx_coords)) next
+          ref_tx_c <- ann$cds_txs_tx_coords[[tx_id_c]]
+          if (length(ref_tx_c) == 0) next
+          orf_tx_c <- project_to_tx_coords(orf_grl[[i]], ann$exon_txs[[tx_id_c]], strand_vec[i])
+          if (is.null(orf_tx_c)) next
+          cls <- classify_transcript(orf_tx_c[1], orf_tx_c[2],
+                                     IRanges::start(ref_tx_c), IRanges::end(ref_tx_c))
           if (!is.na(cls)) {
             prio <- TX_CLASS_PRIORITY[cls]
             if (is.na(prio)) prio <- TX_CLASS_PRIORITY["novel"]
