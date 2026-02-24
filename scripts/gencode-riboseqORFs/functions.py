@@ -1286,25 +1286,15 @@ def write_output(
                         bio2 = elemento[1]
         else:
             if int(line.split("\t")[13]) == 1:
-                id2 = (
-                    "c"
-                    + id.split("_")[1].split(":")[0]
-                    + "norep"
-                    + str(codes[id.split("_")[1].split(":")[0] + "norep"] + 1)
-                )
-                codes[id.split("_")[1].split(":")[0] + "norep"] = (
-                    codes[id.split("_")[1].split(":")[0] + "norep"] + 1
-                )
+                key = id.split("_")[1].split(":")[0] + "norep"
+                codes.setdefault(key, 0)
+                id2 = "c" + id.split("_")[1].split(":")[0] + "norep" + str(codes[key] + 1)
+                codes[key] += 1
             else:
-                id2 = (
-                    "c"
-                    + id.split("_")[1].split(":")[0]
-                    + "riboseqorf"
-                    + str(codes[id.split("_")[1].split(":")[0] + "riboseqorf"] + 1)
-                )
-                codes[id.split("_")[1].split(":")[0] + "riboseqorf"] = (
-                    codes[id.split("_")[1].split(":")[0] + "riboseqorf"] + 1
-                )
+                key = id.split("_")[1].split(":")[0] + "riboseqorf"
+                codes.setdefault(key, 0)
+                id2 = "c" + id.split("_")[1].split(":")[0] + "riboseqorf" + str(codes[key] + 1)
+                codes[key] += 1
             bio2 = "novel"
             new_cases[id2] = line.split("\t")[11]
 
@@ -1327,13 +1317,13 @@ def write_output(
             cds_cases == "yes"
         ):  # Not include CDS and non-unitary pseudogenes in GTF
             out3b.write(line2)
+    others = "none"  # default; overwritten per-orf inside riboseq_orfs loop
     for orf in riboseq_orfs:
         for orf2 in riboseq_orfs[orf]:
             if "_var" in orf2[0]:
                 continue
             others = "none"
             if orf in variants:
-                if len(variants[orf]) > 0:
                     others = ";".join(variants[orf])
 
             if not orf2[0] in done:

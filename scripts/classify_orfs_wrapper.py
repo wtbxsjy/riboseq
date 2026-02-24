@@ -58,49 +58,110 @@ def main():
         if not args.ensembl_dir:
             print("Error: --ensembl_dir is required for gencode mode", file=sys.stderr)
             sys.exit(1)
-            
+
         script = get_script_path("ORF_mapper_to_GENCODE_v1.1.py")
-        
-        # Gencode mapper expects FASTA and BED.
-        # Assume input is the prefix from unify_orf_predictions
-        # If input is a file, try to deduce others or complain.
-        
-        # Let's assume input is the prefix "X" and we look for X.bed and X.metadata.tsv (to extract fasta?)
-        # Actually gencode mapper needs FASTA with sequences.
-        # unify_orf_predictions produces .bed and .metadata.tsv (which has sequences).
-        # We might need to generate a fasta from metadata if not present.
-        # Or if unify_orf_predictions produces sequences in metadata, we can generate it.
-        # But wait, unify_orf_predictions doesn't produce .fa output by default in my new script?
-        # Ah, I missed adding .fa output to unify_orf_predictions.
-        # However, gencode mapper needs -f (fasta) and -b (bed).
-        # The unified BED12 is suitable for -b.
-        # The FASTA needs to be generated.
-        
-        # Helper: Generate FASTA from metadata if input is prefix
-        # If input is a prefix like "out/unified", we look for "out/unified.metadata.tsv"
+
         metadata_file = f"{input_base}.metadata.tsv"
-        fasta_file = f"{input_base}.orfs.fa"
-        bed_file = f"{input_base}.bed"
-        
-        if not os.path.exists(fasta_file) and os.path.exists(metadata_file):
-            print(f"Generating FASTA from {metadata_file}...", file=sys.stderr)
-            with open(metadata_file, 'r') as m, open(fasta_file, 'w') as f:
-                header = m.readline().strip().split('\t')
+        fasta_file    = f"{input_base}.orfs.fa"   # protein (AA) FASTA for the mapper
+        bed12_file    = f"{input_base}.bed"        # our BED12 output
+        bed6_file     = f"{input_base}.orfs.bed6"  # BED6 required by the mapper
+
+        # ── Step 1: read metadata to build orf_id → study_id mapping ──────────
+        # The GENCODE mapper uses BED col[4] as the "study" identifier and
+        # constructs FASTA keys as "{orf_id}--{study_id}".  We derive study_id
+        # from the first sample in the metadata `samples` column.
+        orf_to_study = {}
+        if os.path.exists(metadata_file):
+            with open(metadata_file) as mf:
+                hdr = mf.readline().strip().split('\t')
+                id_idx  = hdr.index('orf_id')
                 try:
-                    seq_idx = header.index('sequence')
-                    id_idx = header.index('orf_id')
-                    for line in m:
-                        parts = line.strip().split('\t')
-                        f.write(f">{parts[id_idx]}\n{parts[seq_idx]}\n")
+                    smp_idx = hdr.index('samples')
                 except ValueError:
-                    print("Error: Metadata missing sequence or orf_id column", file=sys.stderr)
+                    smp_idx = -1
+                for line in mf:
+                    parts = line.strip().split('\t')
+                    if len(parts) <= id_idx:
+                        continue
+                    orf_id   = parts[id_idx]
+                    study_id = (parts[smp_idx].split(',')[0]
+                                if smp_idx >= 0 and smp_idx < len(parts) and parts[smp_idx]
+                                else 'unified')
+                    orf_to_study[orf_id] = study_id
+
+        # ── Step 2: generate BED6 from BED12 ──────────────────────────────────
+        # The mapper expects BED6: chr start end name study_id strand
+        # (col[4] = study ID, not numeric score; col[5] = strand).
+        # Our BED12 has col[5]=strand but col[4]="0" (score); we replace it.
+        print(f"Generating BED6 for GENCODE mapper from {bed12_file}...", file=sys.stderr)
+        with open(bed12_file) as bf, open(bed6_file, 'w') as b6:
+            for line in bf:
+                parts = line.rstrip('\n').split('\t')
+                if len(parts) < 6:
+                    continue
+                chrom, start, end, name, _, strand = parts[:6]
+                study_id = orf_to_study.get(name, 'unified')
+                b6.write(f"{chrom}\t{start}\t{end}\t{name}\t{study_id}\t{strand}\n")
+
+        # ── Step 3: generate protein FASTA ────────────────────────────────────
+        # The mapper looks up sequences as orfs_fa["{orf_id}--{study_id}"] and
+        # compares them against translated transcript sequences, so the FASTA
+        # must contain amino-acid (protein) sequences.
+        # Nucleotide sequences are in the metadata `sequence` column; we
+        # translate in-frame (frame 0) and represent the stop codon as '*'.
+        CODON_TABLE = {
+            'TTT':'F','TTC':'F','TTA':'L','TTG':'L',
+            'CTT':'L','CTC':'L','CTA':'L','CTG':'L',
+            'ATT':'I','ATC':'I','ATA':'I','ATG':'M',
+            'GTT':'V','GTC':'V','GTA':'V','GTG':'V',
+            'TCT':'S','TCC':'S','TCA':'S','TCG':'S',
+            'CCT':'P','CCC':'P','CCA':'P','CCG':'P',
+            'ACT':'T','ACC':'T','ACA':'T','ACG':'T',
+            'GCT':'A','GCC':'A','GCA':'A','GCG':'A',
+            'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*',
+            'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',
+            'AAT':'N','AAC':'N','AAA':'K','AAG':'K',
+            'GAT':'D','GAC':'D','GAA':'E','GAG':'E',
+            'TGT':'C','TGC':'C','TGA':'*','TGG':'W',
+            'CGT':'R','CGC':'R','CGA':'R','CGG':'R',
+            'AGT':'S','AGC':'S','AGA':'R','AGG':'R',
+            'GGT':'G','GGC':'G','GGA':'G','GGG':'G',
+        }
+
+        def translate_nt(nt_seq):
+            nt_seq = nt_seq.upper().replace('U', 'T')
+            aa = []
+            for i in range(0, len(nt_seq) - 2, 3):
+                codon = nt_seq[i:i+3]
+                aa.append(CODON_TABLE.get(codon, 'X'))
+            return ''.join(aa)
+
+        if os.path.exists(metadata_file):
+            print(f"Generating protein FASTA for GENCODE mapper from {metadata_file}...", file=sys.stderr)
+            with open(metadata_file) as mf, open(fasta_file, 'w') as ff:
+                hdr = mf.readline().strip().split('\t')
+                id_idx = hdr.index('orf_id')
+                try:
+                    seq_idx = hdr.index('sequence')
+                except ValueError:
+                    print("Error: Metadata missing sequence column", file=sys.stderr)
                     sys.exit(1)
-        
+                for line in mf:
+                    parts = line.strip().split('\t')
+                    if len(parts) <= max(id_idx, seq_idx):
+                        continue
+                    orf_id   = parts[id_idx]
+                    nt_seq   = parts[seq_idx]
+                    study_id = orf_to_study.get(orf_id, 'unified')
+                    aa_seq   = translate_nt(nt_seq)
+                    # Key format expected by the mapper: "{orf_id}--{study_id}"
+                    ff.write(f">{orf_id}--{study_id}\n{aa_seq}\n")
+
         cmd = [
             "python3", script,
             "-d", args.ensembl_dir,
             "-f", fasta_file,
-            "-b", bed_file,
+            "-b", bed6_file,
             "-o", os.path.join(args.output_dir, "gencode_results")
         ]
         run_command(cmd, "GENCODE Classifier")
