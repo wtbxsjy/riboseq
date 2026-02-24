@@ -303,6 +303,34 @@ orfquant_classify_orfs <- function(orfs,
   cds_txs <- ann$cds_txs
   max_cds_by_gene <- get_max_cds_by_gene(cds_txs)
 
+  # Priority order for ORF_category_Tx_compatible: lower number = better match.
+  TX_CLASS_PRIORITY <- c(
+    ORF_annotated    = 1L,
+    N_extension      = 2L,
+    C_extension      = 3L,
+    N_truncation     = 4L,
+    C_truncation     = 5L,
+    NC_extension     = 6L,
+    overl_uORF       = 7L,
+    overl_dORF       = 8L,
+    nested_ORF       = 9L,
+    uORF             = 10L,
+    dORF             = 11L,
+    novel            = 12L,
+    novel_antisense  = 13L
+  )
+
+  # Build gene → transcript_id lookup (used for ORF_category_Tx_compatible)
+  gene_to_txids <- if (!is.null(ann$cds_txs_coords)) {
+    tx_gene_map <- vapply(cds_txs, function(tx) {
+      gids <- unique(tx$gene_id)
+      if (length(gids) > 0) as.character(gids[1]) else NA_character_
+    }, character(1))
+    split(names(tx_gene_map), tx_gene_map)
+  } else {
+    list()
+  }
+
   seqnames_vec <- vapply(orf_grl, function(x) {
     if (length(x) == 0) return(NA_character_)
     as.character(GenomicRanges::seqnames(x)[1])
@@ -376,23 +404,40 @@ orfquant_classify_orfs <- function(orfs,
         }
       }
 
-      if ("compatible_ORF_id_tr" %in% colnames(S4Vectors::mcols(orf_grl))) {
-        comp_id <- S4Vectors::mcols(orf_grl)$compatible_ORF_id_tr[i]
-        if (!is.na(comp_id) && grepl("_", comp_id)) {
-          comp_tx <- paste(strsplit(comp_id, "_")[[1]][-((length(strsplit(comp_id, "_")[[1]])-1):length(strsplit(comp_id, "_")[[1]]))], collapse = "_")
-          comp_sta <- as.numeric(strsplit(comp_id, "_")[[1]][length(strsplit(comp_id, "_")[[1]])-1])
-          comp_sto <- as.numeric(strsplit(comp_id, "_")[[1]][length(strsplit(comp_id, "_")[[1]])])
-          if (!is.na(comp_tx) && comp_tx %in% names(ann$cds_txs_coords)) {
-            annotated_ORF_comp <- ann$cds_txs_coords[[comp_tx]]
-            if (length(annotated_ORF_comp) > 0) {
-              ann_sta <- IRanges::start(annotated_ORF_comp)
-              ann_sto <- IRanges::end(annotated_ORF_comp)
-              res$ORF_category_Tx_compatible[i] <- classify_transcript(comp_sta, comp_sto, ann_sta, ann_sto)
-            } else {
-              res$ORF_category_Tx_compatible[i] <- "novel"
+      # ORF_category_Tx_compatible: best classification across all transcripts
+      # of the same gene.  Replaces the original ORFquant-native
+      # compatible_ORF_id_tr approach (a private field absent from unified GTF)
+      # with a more general "best isoform match": for each annotated transcript
+      # of the gene, compute the classification and keep the highest-priority one.
+      if (!is.na(gene_id) && gene_id %in% names(gene_to_txids)) {
+        strd_orf  <- strand_vec[i]
+        orf_lo    <- min(IRanges::start(orf_grl[[i]]))
+        orf_hi    <- max(IRanges::end(orf_grl[[i]]))
+        if (!is.na(strd_orf) && strd_orf == "-") {
+          orf_sta_c <- -orf_hi
+          orf_sto_c <- -orf_lo
+        } else {
+          orf_sta_c <- orf_lo
+          orf_sto_c <- orf_hi
+        }
+        best_class    <- "novel"
+        best_priority <- TX_CLASS_PRIORITY["novel"]
+        for (tx_id_c in gene_to_txids[[gene_id]]) {
+          if (!tx_id_c %in% names(ann$cds_txs_coords)) next
+          ref_ir <- ann$cds_txs_coords[[tx_id_c]]
+          if (length(ref_ir) == 0) next
+          cls <- classify_transcript(orf_sta_c, orf_sto_c,
+                                     IRanges::start(ref_ir), IRanges::end(ref_ir))
+          if (!is.na(cls)) {
+            prio <- TX_CLASS_PRIORITY[cls]
+            if (is.na(prio)) prio <- TX_CLASS_PRIORITY["novel"]
+            if (prio < best_priority) {
+              best_priority <- prio
+              best_class    <- cls
             }
           }
         }
+        res$ORF_category_Tx_compatible[i] <- best_class
       }
     }
   }
