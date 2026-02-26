@@ -84,9 +84,32 @@ if (is.null(ann_gr$orf_id)) {
   ann_gr$orf_id <- rep(names(orfs_grl), lengths(orfs_grl))
 }
 # Annotate with classification results
-orf_class_map <- setNames(results$ORF_type_py, results$orf_id)
-ann_gr$orf_category <- orf_class_map[ann_gr$orf_id]
-rtracklayer::export(ann_gr, con=paste0(prefix, ".orfs.gtf"), format="GTF")
+if (!is.null(results) && "ORF_category_Gen" %in% colnames(results) && nrow(results) > 0) {
+  orf_class_map <- setNames(results$ORF_category_Gen, results$orf_id)
+  ann_gr$orf_category <- orf_class_map[ann_gr$orf_id]
+}
+tryCatch(
+  rtracklayer::export(ann_gr, con=paste0(prefix, ".orfs.gtf"), format="GTF"),
+  error = function(e) {
+    message("Warning: rtracklayer GTF export failed (", conditionMessage(e),
+            "); writing manual GTF fallback")
+    gtf_lines <- character(0)
+    for (nm in names(orfs_grl)) {
+      gr <- orfs_grl[[nm]]
+      if (length(gr) == 0) next
+      chrom  <- as.character(GenomicRanges::seqnames(gr)[1])
+      strand <- as.character(GenomicRanges::strand(gr)[1])
+      gid    <- if (!is.null(gr$gene_id)) gr$gene_id[1] else "NA"
+      for (j in seq_along(gr)) {
+        s <- IRanges::start(gr)[j]; en <- IRanges::end(gr)[j]
+        gtf_lines <- c(gtf_lines, paste(
+          chrom, "orfquant_classify", "CDS", s, en, ".", strand, "0",
+          sprintf('gene_id "%s"; orf_id "%s";', gid, nm), sep="\t"))
+      }
+    }
+    writeLines(gtf_lines, paste0(prefix, ".orfs.gtf"))
+  }
+)
 
 # -- Nucleotide and protein FASTA (from metadata) -------------
 if (!is.null(opt$metadata) && file.exists(opt$metadata)) {
@@ -135,7 +158,7 @@ if (!is.null(opt$metadata) && file.exists(opt$metadata)) {
     all_samples <- all_samples[all_samples != ""]
 
     # Merge classification into metadata
-    class_cols <- results[, c("orf_id", "ORF_type_py",
+    class_cols <- results[, c("orf_id", "ORF_category_Gen",
                                if ("ORF_category_Tx" %in% colnames(results)) "ORF_category_Tx" else NULL,
                                if ("ORF_category_Tx_compatible" %in% colnames(results)) "ORF_category_Tx_compatible" else NULL),
                           drop=FALSE]
@@ -151,7 +174,7 @@ if (!is.null(opt$metadata) && file.exists(opt$metadata)) {
 
     base_cols <- c("orf_id", "chrom", "start", "end", "strand",
                    "gene_id", "transcript_id", "length_aa", "tools")
-    class_col_names <- c("ORF_type_py",
+    class_col_names <- c("ORF_category_Gen",
                          if ("ORF_category_Tx" %in% colnames(merged)) "ORF_category_Tx" else NULL,
                          if ("ORF_category_Tx_compatible" %in% colnames(merged)) "ORF_category_Tx_compatible" else NULL)
     avail_cols <- base_cols[base_cols %in% colnames(merged)]
