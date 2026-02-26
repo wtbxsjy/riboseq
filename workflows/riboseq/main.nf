@@ -676,6 +676,7 @@ workflow RIBOSEQ {
 
         CLASSIFY_ORFS_ORFQUANT(
             ch_unify_gtf,
+            ch_unify_metadata,
             classify_prefix,
             classify_wrapper,
             class_orf_dir,

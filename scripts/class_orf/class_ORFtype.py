@@ -185,11 +185,131 @@ def process_chunk(chunk_orfs: List[Dict], cds_data: Dict[str, Dict]) -> List[Tup
 
 # --- 3. Main ---
 
+CODON_TABLE = {
+    'TTT':'F','TTC':'F','TTA':'L','TTG':'L',
+    'CTT':'L','CTC':'L','CTA':'L','CTG':'L',
+    'ATT':'I','ATC':'I','ATA':'I','ATG':'M',
+    'GTT':'V','GTC':'V','GTA':'V','GTG':'V',
+    'TCT':'S','TCC':'S','TCA':'S','TCG':'S',
+    'CCT':'P','CCC':'P','CCA':'P','CCG':'P',
+    'ACT':'T','ACC':'T','ACA':'T','ACG':'T',
+    'GCT':'A','GCC':'A','GCA':'A','GCG':'A',
+    'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*',
+    'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',
+    'AAT':'N','AAC':'N','AAA':'K','AAG':'K',
+    'GAT':'D','GAC':'D','GAA':'E','GAG':'E',
+    'TGT':'C','TGC':'C','TGA':'*','TGG':'W',
+    'CGT':'R','CGC':'R','CGA':'R','CGG':'R',
+    'AGT':'S','AGC':'S','AGA':'R','AGG':'R',
+    'GGT':'G','GGC':'G','GGA':'G','GGG':'G',
+}
+
+def translate_nt(nt_seq: str) -> str:
+    nt_seq = nt_seq.upper().replace('U', 'T')
+    aa = []
+    for i in range(0, len(nt_seq) - 2, 3):
+        codon = nt_seq[i:i+3]
+        aa.append(CODON_TABLE.get(codon, 'X'))
+    return ''.join(aa)
+
+
+def write_extra_outputs(orfs: List[Dict], classification_map: Dict[str, str], prefix: str, args) -> None:
+    """Write BED12, GTF, nucleotide FASTA, protein FASTA, logs, and per-sample stats."""
+
+    # Collect all unique samples across all ORFs
+    all_samples: List[str] = []
+    seen: set = set()
+    for orf in orfs:
+        for s in orf.get('samples', '').split(','):
+            s = s.strip()
+            if s and s not in seen:
+                seen.add(s)
+                all_samples.append(s)
+    all_samples.sort()
+
+    with open(f"{prefix}.orfs.bed", 'w') as bed_f, \
+         open(f"{prefix}.orfs.gtf", 'w') as gtf_f, \
+         open(f"{prefix}.orfs.fa", 'w') as fa_nt_f, \
+         open(f"{prefix}.orfs.pep.fa", 'w') as fa_pep_f, \
+         open(f"{prefix}.orfs.out", 'w') as out_f:
+
+        # Write out header
+        out_header = ['orf_id', 'chrom', 'start', 'end', 'strand',
+                      'gene_id', 'transcript_id', 'length_aa',
+                      'tools', 'n_samples', 'orf_type_category'] + all_samples
+        out_f.write('\t'.join(out_header) + '\n')
+
+        for orf in orfs:
+            orf_id = orf.get('orf_id', 'NA')
+            chrom = orf.get('chrom', 'NA')
+            strand = orf.get('strand', '+')
+            gene_id = orf.get('gene_id', 'NA')
+            transcript_id = orf.get('transcript_id', 'NA')
+            length_aa = orf.get('length_aa', '0')
+            tools = orf.get('tools', 'NA')
+            sequence = orf.get('sequence', '')
+            classification = classification_map.get(orf_id, 'unknown')
+
+            # Parse exon blocks (1-based inclusive genomic coords)
+            blocks = parse_coords(orf.get('exon_blocks', ''))
+            if not blocks:
+                try:
+                    start_1 = int(orf.get('start', 0))
+                    end_1 = int(orf.get('end', 0))
+                    blocks = [(start_1, end_1)]
+                except (ValueError, TypeError):
+                    continue
+
+            # BED12: chromStart is 0-based, chromEnd is 0-based exclusive
+            chrom_start = min(s for s, e in blocks) - 1
+            chrom_end = max(e for s, e in blocks)
+            block_count = len(blocks)
+            block_sizes = ','.join(str(e - s + 1) for s, e in blocks)
+            block_starts = ','.join(str(s - 1 - chrom_start) for s, e in blocks)
+
+            bed_f.write(f"{chrom}\t{chrom_start}\t{chrom_end}\t{orf_id}\t0\t{strand}\t"
+                        f"{chrom_start}\t{chrom_end}\t0,0,0\t{block_count}\t{block_sizes}\t{block_starts}\n")
+
+            # GTF: CDS feature per exon block (1-based inclusive)
+            for s, e in blocks:
+                attrs = (f'gene_id "{gene_id}"; transcript_id "{transcript_id}"; '
+                         f'orf_id "{orf_id}"; orf_type_category "{classification}";')
+                gtf_f.write(f"{chrom}\torf_type\tCDS\t{s}\t{e}\t.\t{strand}\t0\t{attrs}\n")
+
+            # Nucleotide FASTA
+            if sequence:
+                fa_nt_f.write(f">{orf_id} {chrom}:{chrom_start+1}-{chrom_end}({strand})\n{sequence}\n")
+                pep = translate_nt(sequence)
+                fa_pep_f.write(f">{orf_id} {chrom}:{chrom_start+1}-{chrom_end}({strand})\n{pep}\n")
+
+            # Per-sample stats row
+            sample_set = set(s.strip() for s in orf.get('samples', '').split(',') if s.strip())
+            n_samples = len(sample_set)
+            sample_cols = [('1' if s in sample_set else '0') for s in all_samples]
+            out_row = [orf_id, chrom, orf.get('start',''), orf.get('end',''), strand,
+                       gene_id, transcript_id, length_aa,
+                       tools, str(n_samples), classification] + sample_cols
+            out_f.write('\t'.join(out_row) + '\n')
+
+    # Logs file
+    with open(f"{prefix}.logs", 'w') as log_f:
+        log_f.write(f"#input metadata: {args.input}\n")
+        log_f.write(f"#reference gtf: {args.gtf}\n")
+        log_f.write(f"#cpus: {args.cpus}\n")
+        log_f.write(f"#total_orfs: {len(orfs)}\n")
+        log_f.write(f"#total_samples: {len(all_samples)}\n")
+        log_f.write(f"#samples: {';'.join(all_samples)}\n")
+
+    print(f"Extra outputs written with prefix: {prefix}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Classify ORFs based on Gene-level CDS overlap (ORFtype)")
     parser.add_argument("--input", required=True, help="Unified Metadata TSV file")
     parser.add_argument("--gtf", required=True, help="Reference GTF file (to build gene CDS)")
     parser.add_argument("--output", required=True, help="Output file path")
+    parser.add_argument("--output_prefix", default="orftype_results",
+                        help="Prefix for extra output files (BED/GTF/FA/logs/out). Default: orftype_results")
     parser.add_argument("--cpus", type=int, default=1, help="Number of CPUs")
     
     args = parser.parse_args()
@@ -247,6 +367,9 @@ def main():
             # Remove the temporary 'exons' field before writing
             orf_copy = {k: v for k, v in orf.items() if k != 'exons'}
             writer.writerow(orf_copy)
+
+    # 5. Write extra outputs (BED, GTF, FA, logs, per-sample out)
+    write_extra_outputs(orfs, classification_map, args.output_prefix, args)
 
     print("Done.", file=sys.stderr)
 

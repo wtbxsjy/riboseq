@@ -202,6 +202,7 @@ def main():
             "--input", input_tsv,
             "--gtf", args.gtf,
             "--output", output_file,
+            "--output_prefix", os.path.join(args.output_dir, "orftype_results"),
             "--cpus", args.cpus
         ]
         run_command(cmd, "ORFtype Classifier")

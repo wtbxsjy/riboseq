@@ -18,7 +18,7 @@ process CLASSIFY_ORFS_GENCODE {
     val classify_output_dir
 
     output:
-    path "${classify_output_dir}/gencode_results.*", emit: results
+    path "gencode_results.*", emit: results
     path "versions.yml"              , emit: versions
 
     when:
@@ -30,8 +30,6 @@ process CLASSIFY_ORFS_GENCODE {
     def orfquant_script = "${class_orf_dir}/run_orfquant_classify.R"
     """
     set -uo pipefail
-
-    mkdir -p ${output_dir}
 
     # Check if input is a placeholder file
     is_placeholder=false
@@ -50,14 +48,14 @@ process CLASSIFY_ORFS_GENCODE {
 
     if [ "\${is_placeholder}" = "true" ]; then
         echo "WARNING: Input is placeholder/empty - creating placeholder classification output"
-        echo "# Placeholder GENCODE classification - input unified ORFs were empty/placeholder" > ${output_dir}/gencode_results.orfs.gtf
-        echo "# Placeholder GENCODE classification - input unified ORFs were empty/placeholder" > ${output_dir}/gencode_results.orfs.out
+        echo "# Placeholder GENCODE classification - input unified ORFs were empty/placeholder" > gencode_results.orfs.gtf
+        echo "# Placeholder GENCODE classification - input unified ORFs were empty/placeholder" > gencode_results.orfs.out
     else
         set +e
         python3 ${classify_wrapper} \\
             --mode gencode \\
             --input ${input_prefix} \\
-            --output_dir ${output_dir} \\
+            --output_dir . \\
             --ensembl_dir ${ensembl_dir} \\
             --cpus ${task.cpus} \\
             ${extra_args} 2>&1 | tee classify_gencode.log
@@ -67,8 +65,8 @@ process CLASSIFY_ORFS_GENCODE {
         if [ \${EXIT_CODE} -ne 0 ]; then
             if grep -qiE "(no valid|no ORFs|zero|empty|no input|no data|IndexError|KeyError|ValueError)" classify_gencode.log; then
                 echo "WARNING: GENCODE classification failed due to insufficient data - creating placeholder output"
-                echo "# Placeholder GENCODE classification - classification failed: no valid ORFs" > ${output_dir}/gencode_results.orfs.gtf
-                echo "# Placeholder GENCODE classification - classification failed: no valid ORFs" > ${output_dir}/gencode_results.orfs.out
+                echo "# Placeholder GENCODE classification - classification failed: no valid ORFs" > gencode_results.orfs.gtf
+                echo "# Placeholder GENCODE classification - classification failed: no valid ORFs" > gencode_results.orfs.out
             else
                 echo "ERROR: GENCODE classification failed with unexpected error"
                 cat classify_gencode.log
@@ -84,11 +82,9 @@ process CLASSIFY_ORFS_GENCODE {
     """
 
     stub:
-    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     """
-    mkdir -p ${output_dir}
-    touch ${output_dir}/gencode_results.orfs.gtf
-    touch ${output_dir}/gencode_results.orfs.out
+    touch gencode_results.orfs.gtf
+    touch gencode_results.orfs.out
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -112,6 +108,7 @@ process CLASSIFY_ORFS_ORFQUANT {
 
     input:
     path unified_gtf
+    path unified_metadata
     val input_prefix
     path classify_wrapper
     path class_orf_dir
@@ -119,8 +116,9 @@ process CLASSIFY_ORFS_ORFQUANT {
     val classify_output_dir
 
     output:
-    path "${classify_output_dir}/orfquant_classification.tsv", emit: results
-    path "versions.yml"                     , emit: versions
+    path "orfquant_classification.tsv", emit: results
+    path "orfquant_results.*"          , emit: extra_results, optional: true
+    path "versions.yml"                , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -131,8 +129,6 @@ process CLASSIFY_ORFS_ORFQUANT {
     def orfquant_script = "${class_orf_dir}/run_orfquant_classify.R"
     """
     set -uo pipefail
-
-    mkdir -p ${output_dir}
 
     # Check if input is a placeholder file
     is_placeholder=false
@@ -151,8 +147,10 @@ process CLASSIFY_ORFS_ORFQUANT {
 
     if [ "\${is_placeholder}" = "true" ]; then
         echo "WARNING: Input is placeholder/empty - creating placeholder classification output"
-        echo -e "# Placeholder ORFquant classification - input unified ORFs were empty/placeholder" > ${output_dir}/orfquant_classification.tsv
-        echo -e "orf_id\\torf_type\\tclassification" >> ${output_dir}/orfquant_classification.tsv
+        echo -e "# Placeholder ORFquant classification - input unified ORFs were empty/placeholder" > orfquant_classification.tsv
+        echo -e "orf_id\\torf_type\\tclassification" >> orfquant_classification.tsv
+        touch orfquant_results.logs orfquant_results.orfs.bed orfquant_results.orfs.gtf \\
+              orfquant_results.orfs.fa orfquant_results.orfs.pep.fa orfquant_results.orfs.out
     else
         set +e
         export R_LIBS_USER="\${PWD}/.Rlib"
@@ -165,7 +163,9 @@ process CLASSIFY_ORFS_ORFQUANT {
         Rscript ${orfquant_script} \\
             --input ${input_prefix}.gtf \\
             --annotation ${ref_gtf} \\
-            --output ${output_dir}/orfquant_classification.tsv \\
+            --output orfquant_classification.tsv \\
+            --metadata ${unified_metadata} \\
+            --output_prefix orfquant_results \\
             ${extra_args} 2>&1 | tee classify_orfquant.log
         EXIT_CODE=\${PIPESTATUS[0]}
         set -e
@@ -173,8 +173,10 @@ process CLASSIFY_ORFS_ORFQUANT {
         if [ \${EXIT_CODE} -ne 0 ]; then
             if grep -qiE "(no valid|no ORFs|zero|empty|no input|no data|IndexError|KeyError|ValueError)" classify_orfquant.log; then
                 echo "WARNING: ORFquant classification failed due to insufficient data - creating placeholder output"
-                echo -e "# Placeholder ORFquant classification - classification failed: no valid ORFs" > ${output_dir}/orfquant_classification.tsv
-                echo -e "orf_id\\torf_type\\tclassification" >> ${output_dir}/orfquant_classification.tsv
+                echo -e "# Placeholder ORFquant classification - classification failed: no valid ORFs" > orfquant_classification.tsv
+                echo -e "orf_id\\torf_type\\tclassification" >> orfquant_classification.tsv
+                touch orfquant_results.logs orfquant_results.orfs.bed orfquant_results.orfs.gtf \
+                      orfquant_results.orfs.fa orfquant_results.orfs.pep.fa orfquant_results.orfs.out
             else
                 echo "ERROR: ORFquant classification failed with unexpected error"
                 cat classify_orfquant.log
@@ -190,10 +192,10 @@ process CLASSIFY_ORFS_ORFQUANT {
     """
 
     stub:
-    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     """
-    mkdir -p ${output_dir}
-    touch ${output_dir}/orfquant_classification.tsv
+    touch orfquant_classification.tsv
+    touch orfquant_results.logs orfquant_results.orfs.bed orfquant_results.orfs.gtf
+    touch orfquant_results.orfs.fa orfquant_results.orfs.pep.fa orfquant_results.orfs.out
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -225,8 +227,9 @@ process CLASSIFY_ORFS_ORF_TYPE {
     val classify_output_dir
 
     output:
-    path "${classify_output_dir}/orftype_classification.tsv", emit: results
-    path "versions.yml"                  , emit: versions
+    path "orftype_classification.tsv", emit: results
+    path "orftype_results.*"          , emit: extra_results, optional: true
+    path "versions.yml"               , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -236,8 +239,6 @@ process CLASSIFY_ORFS_ORF_TYPE {
     def extra_args = params.extra_orf_classify_args ?: ''
     """
     set -uo pipefail
-
-    mkdir -p ${output_dir}
 
     # Check if input is a placeholder file
     is_placeholder=false
@@ -256,14 +257,16 @@ process CLASSIFY_ORFS_ORF_TYPE {
 
     if [ "\${is_placeholder}" = "true" ]; then
         echo "WARNING: Input is placeholder/empty - creating placeholder classification output"
-        echo -e "# Placeholder ORF type classification - input unified ORFs were empty/placeholder" > ${output_dir}/orftype_classification.tsv
-        echo -e "orf_id\\torf_type\\tclassification\\tgene_biotype" >> ${output_dir}/orftype_classification.tsv
+        echo -e "# Placeholder ORF type classification - input unified ORFs were empty/placeholder" > orftype_classification.tsv
+        echo -e "orf_id\\torf_type\\tclassification\\tgene_biotype" >> orftype_classification.tsv
+        touch orftype_results.logs orftype_results.orfs.bed orftype_results.orfs.gtf \
+              orftype_results.orfs.fa orftype_results.orfs.pep.fa orftype_results.orfs.out
     else
         set +e
         python3 ${classify_wrapper} \\
             --mode orf_type \\
             --input ${input_prefix} \\
-            --output_dir ${output_dir} \\
+            --output_dir . \\
             --gtf ${ref_gtf} \\
             --cpus ${task.cpus} \\
             ${extra_args} 2>&1 | tee classify_orftype.log
@@ -273,8 +276,10 @@ process CLASSIFY_ORFS_ORF_TYPE {
         if [ \${EXIT_CODE} -ne 0 ]; then
             if grep -qiE "(no valid|no ORFs|zero|empty|no input|no data|IndexError|KeyError|ValueError)" classify_orftype.log; then
                 echo "WARNING: ORF type classification failed due to insufficient data - creating placeholder output"
-                echo -e "# Placeholder ORF type classification - classification failed: no valid ORFs" > ${output_dir}/orftype_classification.tsv
-                echo -e "orf_id\\torf_type\\tclassification\\tgene_biotype" >> ${output_dir}/orftype_classification.tsv
+                echo -e "# Placeholder ORF type classification - classification failed: no valid ORFs" > orftype_classification.tsv
+                echo -e "orf_id\\torf_type\\tclassification\\tgene_biotype" >> orftype_classification.tsv
+                touch orftype_results.logs orftype_results.orfs.bed orftype_results.orfs.gtf \
+                      orftype_results.orfs.fa orftype_results.orfs.pep.fa orftype_results.orfs.out
             else
                 echo "ERROR: ORF type classification failed with unexpected error"
                 cat classify_orftype.log
@@ -290,10 +295,10 @@ process CLASSIFY_ORFS_ORF_TYPE {
     """
 
     stub:
-    def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     """
-    mkdir -p ${output_dir}
-    touch ${output_dir}/orftype_classification.tsv
+    touch orftype_classification.tsv
+    touch orftype_results.logs orftype_results.orfs.bed orftype_results.orfs.gtf
+    touch orftype_results.orfs.fa orftype_results.orfs.pep.fa orftype_results.orfs.out
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
