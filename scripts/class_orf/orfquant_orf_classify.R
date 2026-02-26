@@ -457,6 +457,9 @@ orfquant_classify_orfs <- function(orfs,
           } else {
             res$ORF_category_Tx[i] <- "novel"
           }
+        } else if (!is.null(orf_tx)) {
+          # transcript exists in annotation but has no CDS (non-coding) → novel
+          res$ORF_category_Tx[i] <- "novel"
         }
       }
 
@@ -485,6 +488,9 @@ orfquant_classify_orfs <- function(orfs,
           }
         }
         res$ORF_category_Tx_compatible[i] <- best_class
+      } else if (!is.na(gene_id)) {
+        # Gene has no CDS-containing transcripts (non-coding gene) → novel
+        res$ORF_category_Tx_compatible[i] <- "novel"
       }
     }
   }

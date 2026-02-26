@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 import csv
+csv.field_size_limit(sys.maxsize)
 from typing import List, Dict, Tuple, Any
 from multiprocessing import Pool, cpu_count
 from functools import partial
