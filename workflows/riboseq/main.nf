@@ -308,10 +308,11 @@ workflow RIBOSEQ {
 
     ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_genome_bam_index)
     // Create fasta+gtf tuple with a meaningful meta id for tools that need it (e.g., ribotricer)
+    // Use .first() to convert to a value channel so it broadcasts to all per-sample invocations
     ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> 
         def genome_name = fasta.simpleName.replaceAll(/\.(genome|transcripts|dna|cdna).*/, '')
         [ [id: genome_name], fasta, gtf ] 
-    }
+    }.first()
 
     // Pre-filter: using unfiltered BAMs (with MT reads) - suffix 'prefilter' for output organization
     ch_bams_for_prefilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ filter_status: 'prefilter' ], bam, bai ] }
@@ -438,16 +439,17 @@ workflow RIBOSEQ {
         if (params.run_prefilter_qc) {
             RIBOTRICER_DETECTORFS_PREFILTER(
                 ch_bams_for_prefilter,
-                RIBOTRICER_PREPAREORFS.out.candidate_orfs
+                RIBOTRICER_PREPAREORFS.out.candidate_orfs.first()
             )
             ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_PREFILTER.out.versions)
         }
 
         // Postfilter: using filtered BAMs (MT removed)
         // ch_bams_for_postfilter already has filter_status set
+        // Use .first() on candidate_orfs to broadcast the single genome-level file to all per-sample BAMs
         RIBOTRICER_DETECTORFS_POSTFILTER(
             ch_bams_for_postfilter,
-            RIBOTRICER_PREPAREORFS.out.candidate_orfs
+            RIBOTRICER_PREPAREORFS.out.candidate_orfs.first()
         )
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_POSTFILTER.out.versions)
         ch_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs
