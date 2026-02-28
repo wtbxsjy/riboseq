@@ -158,7 +158,7 @@ process UNIFY_ORF_PREDICTIONS {
         # Extract statistics from the log and save to stats file
         {
             echo "=== ORF Unification Statistics ==="
-            grep -E "^By Tool:|^By Sample:|^Final|^After|^Total|^  (ribotish|ribotricer|orfquant|[A-Za-z0-9_])" unify_orf.log || true
+            grep -E "^===|^By Tool:|^By Sample:|^Final|^After|^Total|^Note:|^  (ribotish|ribotricer|orfquant|[A-Za-z0-9_])" unify_orf.log || true
         } > ${prefix}.stats.txt
         
         if [ \${EXIT_CODE} -ne 0 ]; then
