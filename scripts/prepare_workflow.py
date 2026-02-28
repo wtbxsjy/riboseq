@@ -100,6 +100,15 @@ DEFAULT_ENSEMBL_RELEASE = {
     'plants': 58,
 }
 
+DEFAULT_ENSEMBL_ASSEMBLY = {
+    'human':   'GRCh38',
+    'mouse':   'GRCm39',
+    'rice':    'IRGSP-1.0',
+    'maize':   'Zm-B73-REFERENCE-NAM-5.0',
+    'wheat':   'IWGSC',
+    'soybean': 'Soybean_JD17',
+}
+
 
 def parse_args():
     """Parse command line arguments"""
@@ -188,6 +197,8 @@ Examples:
                         help='Path to RPBP container')
     parser.add_argument('--unify-orf-container', default=None,
                         help='Path to container for unify_orf_predictions and classify_orfs (Python/biopython)')
+    parser.add_argument('--gencode-orf-mapper-container', default=None,
+                        help='Path to gencode-orf-mapper container for GENCODE ORF classification')
     
     # Pipeline options
     parser.add_argument('--skip-prefilter-qc', action='store_true',
@@ -235,6 +246,8 @@ Examples:
                         help='Save reference files for reuse (default: True)')
     parser.add_argument('--no-save-reference', action='store_false', dest='save_reference',
                         help='Do not save reference files')
+    parser.add_argument('--bg', action='store_true', default=False,
+                        help='Run Nextflow in background mode with -bg (default: False, run interactively)')
     
     # Script generation
     parser.add_argument('--script-name', default='run_pipeline.sh',
@@ -514,7 +527,7 @@ def prepare_orf_classify_ensembl_dir(workdir, args, dry_run=False):
     ensembl_species = ENSEMBL_SPECIES_MAP[args.species]
     division = ENSEMBL_DIVISION_MAP.get(args.species, 'ensembl')
     release = args.ensembl_release or DEFAULT_ENSEMBL_RELEASE.get(division)
-    assembly = args.ensembl_assembly or args.genome
+    assembly = args.ensembl_assembly or DEFAULT_ENSEMBL_ASSEMBLY.get(args.species) or args.genome
 
     if not release:
         logger.error("Ensembl release not specified and no default available.")
@@ -570,7 +583,8 @@ def prepare_orf_classify_ensembl_dir(workdir, args, dry_run=False):
 
 
 def setup_container_directory(workdir, container_dir, orfquant_container=None, 
-                              rpbp_container=None, unify_orf_container=None, dry_run=False):
+                              rpbp_container=None, unify_orf_container=None,
+                              gencode_orf_mapper_container=None, dry_run=False):
     """Setup container directory by copying specified images into workdir"""
     logger.info("\n" + "=" * 60)
     logger.info("Setting up container directory")
@@ -615,6 +629,18 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                     shutil.copy2(unify_path, link_path)
                     logger.info(f"✓ Copied Unify ORF container: {unify_path.name}")
                 linked_containers['unify_orf'] = link_path
+    
+    if gencode_orf_mapper_container:
+        gencode_path = Path(gencode_orf_mapper_container).resolve()
+        if gencode_path.exists():
+            link_path = target_dir / 'gencode_orf_mapper.sif'
+            if dry_run:
+                logger.info(f"[DRY RUN] Would copy gencode-orf-mapper: {gencode_path} -> {link_path}")
+            else:
+                if not link_path.exists():
+                    shutil.copy2(gencode_path, link_path)
+                    logger.info(f"✓ Copied gencode-orf-mapper container: {gencode_path.name}")
+                linked_containers['gencode_orf_mapper'] = link_path
     
     # Backward-compatible: copy all containers from container_dir
     if container_dir:
@@ -717,7 +743,8 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     ])
     
     # Background mode and save reference
-    nf_cmd_parts.append("-bg")
+    if getattr(args, 'bg', False):
+        nf_cmd_parts.append("-bg")
     if args.save_reference:
         nf_cmd_parts.append("--save_reference")
     
@@ -730,6 +757,9 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     
     if 'unify_orf' in containers:
         nf_cmd_parts.append(f"--unify_orf_container {containers['unify_orf']}")
+    
+    if 'gencode_orf_mapper' in containers:
+        nf_cmd_parts.append(f"--gencode_orf_mapper_container {containers['gencode_orf_mapper']}")
     
     def prefer_uncompressed(path_obj):
         path_obj = Path(path_obj)
@@ -786,9 +816,9 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
             nf_cmd_parts.append("--orfquant_psite_correction false")
     
     # ORF unification and classification options (default: run, so no need to set false)
+    # Note: orf_classify_mode is deprecated; all three classifiers now run simultaneously.
     nf_cmd_parts.extend([
         f"--unify_orf_min_len {args.unify_orf_min_len}",
-        "--orf_classify_mode orf_type",
     ])
     
     # Advanced ORF merging options
@@ -836,6 +866,9 @@ echo "=========================================="
 echo ""
 
 # Nextflow command
+# WARNING: Do NOT comment out lines with # inside this multi-line command.
+# Due to bash line-continuation (backslash), a # in the middle of the command
+# will comment out ALL subsequent arguments. To disable an argument, DELETE the line.
 {' \\\n    '.join(nf_cmd_parts)} \\
     -resume \\
     -with-report "${{RESULT_DIR}}/pipeline_report.html" \\
@@ -904,7 +937,7 @@ def create_config_summary(workdir, args, sample_sheet, containers,
         'orf_classify_ensembl': {
             'ensembl_dir': str(orf_classify_ensembl_dir) if orf_classify_ensembl_dir else None,
             'ensembl_release': args.ensembl_release,
-            'ensembl_assembly': args.ensembl_assembly or args.genome,
+            'ensembl_assembly': args.ensembl_assembly or DEFAULT_ENSEMBL_ASSEMBLY.get(args.species) or args.genome,
             'ensembl_base_url': args.ensembl_base_url,
             'auto_prepared': bool(orf_classify_ensembl_dir),
         },
@@ -912,7 +945,8 @@ def create_config_summary(workdir, args, sample_sheet, containers,
             'source_directory': args.container_dir,
             'orfquant': str(containers.get('orfquant', '')),
             'rpbp': str(containers.get('rpbp', '')),
-            'unify_orf': str(containers.get('unify_orf', ''))
+            'unify_orf': str(containers.get('unify_orf', '')),
+            'gencode_orf_mapper': str(containers.get('gencode_orf_mapper', ''))
         },
         'pipeline_options': {
             'run_prefilter_qc': args.run_prefilter_qc,
@@ -1058,6 +1092,7 @@ def main():
         args.orfquant_container,
         args.rpbp_container,
         args.unify_orf_container,
+        args.gencode_orf_mapper_container,
         args.dry_run
     )
     
