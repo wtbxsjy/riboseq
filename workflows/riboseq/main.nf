@@ -47,6 +47,7 @@ include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_POSTFILTER } from '../.
 include { HISAT2_EXTRACTSPLICESITES                            } from '../../modules/nf-core/hisat2/extractsplicesites/main'
 include { UNIFY_ORF_PREDICTIONS                                } from '../../modules/local/unify_orf_predictions/main'
 include { CLASSIFY_ORFS_GENCODE; CLASSIFY_ORFS_ORFQUANT; CLASSIFY_ORFS_ORF_TYPE } from '../../modules/local/classify_orfs/main'
+include { COLLECT_QC_STATS                                     } from '../../modules/local/collect_qc_stats/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -118,6 +119,14 @@ workflow RIBOSEQ {
     ch_transcriptome_bam = Channel.empty()
     ch_transcriptome_bai = Channel.empty()
     ch_fastq             = Channel.empty()
+
+    // Initialize QC stats channels (populated later, used by COLLECT_QC_STATS)
+    ch_qc_star_logs      = Channel.empty()
+    ch_qc_sorf_stats     = Channel.empty()
+    ch_qc_psites_calcs   = Channel.empty()
+    ch_qc_ribotish_all   = Channel.empty()
+    ch_qc_ribotricer_orfs = Channel.empty()
+    ch_qc_orfquant_results = Channel.empty()
 
     //
     // BAM INPUT MODE: Skip preprocessing and alignment
@@ -230,6 +239,7 @@ workflow RIBOSEQ {
             ch_transcriptome_bam       = FASTQ_ALIGN_STAR.out.orig_bam_transcript
             ch_transcriptome_bai       = FASTQ_ALIGN_STAR.out.bai_transcript
             ch_versions                = ch_versions.mix(FASTQ_ALIGN_STAR.out.versions)
+            ch_qc_star_logs            = FASTQ_ALIGN_STAR.out.log_final.map { meta, log -> log }
 
             ch_multiqc_files = ch_multiqc_files
                 .mix(FASTQ_ALIGN_STAR.out.stats.collect{it[1]})
@@ -334,6 +344,7 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(SORF_BAM_FILTER.out.versions)
         ch_multiqc_files = ch_multiqc_files.mix(SORF_BAM_FILTER.out.stats)
+        ch_qc_sorf_stats = SORF_BAM_FILTER.out.stats.map { it instanceof List ? it[1] : it }
 
         SAMTOOLS_INDEX(
             SORF_BAM_FILTER.out.bam
@@ -413,6 +424,7 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOTISH_PREDICT_POSTFILTER.out.versions)
         ch_ribotish_predictions = RIBOTISH_PREDICT_POSTFILTER.out.predictions
+        ch_qc_ribotish_all = RIBOTISH_PREDICT_POSTFILTER.out.all.map { meta, f -> f }
 
         if (params.sorf_predict_pooled) {
             RIBOTISH_PREDICT_ALL(
@@ -453,6 +465,7 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_POSTFILTER.out.versions)
         ch_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs
+        ch_qc_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs.map { meta, f -> f }
     }
 
     if (!params.skip_rpbp){
@@ -519,6 +532,7 @@ workflow RIBOSEQ {
         // Store RiboseQC postfilter outputs for ORFquant
         ch_riboseqc_annotation = RIBOSEQC_POSTFILTER.out.annotation
         ch_riboseqc_orfquant   = RIBOSEQC_POSTFILTER.out.orfquant
+        ch_qc_psites_calcs     = RIBOSEQC_POSTFILTER.out.psites_calcs.map { meta, f -> f }
     }
 
     //
@@ -537,6 +551,7 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(ORFQUANT.out.versions)
         ch_orfquant_gtf = ORFQUANT.out.gtf
+        ch_qc_orfquant_results = ORFQUANT.out.results.map { meta, f -> f }
     } else if (!params.skip_orfquant && params.skip_riboseqc) {
         log.warn "ORFquant requires RiboseQC output. Skipping ORFquant because RiboseQC is skipped."
     }
@@ -694,6 +709,24 @@ workflow RIBOSEQ {
             orftype_outdir
         )
         ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
+    }
+
+    //
+    // COLLECT QC STATS: Aggregate per-sample QC metrics into CSVs for downstream plotting
+    //
+    if (!params.skip_collect_qc_stats) {
+        def ch_collect_script = Channel.value(file("${projectDir}/scripts/collect_qc_stats.py", checkIfExists: true))
+
+        COLLECT_QC_STATS(
+            ch_qc_star_logs.collect().ifEmpty([]),
+            ch_qc_sorf_stats.collect(),
+            ch_qc_psites_calcs.collect().ifEmpty([]),
+            ch_qc_ribotish_all.collect().ifEmpty([]),
+            ch_qc_ribotricer_orfs.collect().ifEmpty([]),
+            ch_qc_orfquant_results.collect().ifEmpty([]),
+            ch_collect_script
+        )
+        ch_versions = ch_versions.mix(COLLECT_QC_STATS.out.versions)
     }
 
     //
