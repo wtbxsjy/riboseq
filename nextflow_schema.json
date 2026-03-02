@@ -510,6 +510,10 @@
                     "type": "string",
                     "description": "Extra arguments to pass to the ribotricer detect-orfs command in addition to defaults defined by the pipeline."
                 },
+                "ribotricer_phase_score_cutoff": {
+                    "type": "number",
+                    "description": "Phase score cutoff for Ribotricer's metagene periodicity detection. When not set, uses Ribotricer's default (3/7 ≈ 0.429). Set to a lower value (e.g. 0.1) for plant or low-depth samples where canonical CDS coverage is sparse."
+                },
                 "extra_anota2seq_run_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to anota2seq in addition to defaults defined by the pipeline."
