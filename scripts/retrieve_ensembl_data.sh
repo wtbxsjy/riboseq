@@ -179,8 +179,17 @@ PYTHON_SCRIPT
 
 TSL_FILE="transcript_support_level.txt"
 BIOMART_URL="http://ensembl.org/biomart/martservice?query=<Query virtualSchemaName=\"default\" formatter=\"TSV\" header=\"1\" uniqueRows=\"0\" count=\"\" datasetConfigVersion=\"0.6\"><Dataset name=\"${species_lower}_gene_ensembl\" interface=\"default\"><Attribute name=\"ensembl_transcript_id\"/><Attribute name=\"transcript_tsl\"/><Attribute name=\"transcript_appris\"/></Dataset></Query>"
-if ! wget -q -O "$TSL_FILE" "$BIOMART_URL"; then
-  echo "[WARN] BioMart download failed; generating basic transcript support from GTF."
+TSL_OK=false
+if wget -q -O "${TSL_FILE}.tmp" "$BIOMART_URL" && \
+   [[ -s "${TSL_FILE}.tmp" ]] && \
+   head -1 "${TSL_FILE}.tmp" | grep -qiE "transcript|ensembl_transcript_id" && \
+   ! head -1 "${TSL_FILE}.tmp" | grep -qiE "^Query ERROR|^Error|Exception"; then
+  mv "${TSL_FILE}.tmp" "$TSL_FILE"
+  TSL_OK=true
+fi
+rm -f "${TSL_FILE}.tmp"
+if [[ "$TSL_OK" == "false" ]]; then
+  echo "[WARN] BioMart download failed or returned invalid data; generating basic transcript support from GTF."
   python3 - <<'PYTHON_SCRIPT' "$GTF_SORTED" "$TSL_FILE"
 import re
 import sys
@@ -212,7 +221,7 @@ with open(gtf_file, 'r') as gtf:
             transcripts[transcript_id] = {'tsl': tsl, 'appris': appris}
 
 with open(output_file, 'w') as out:
-    out.write("transcript_id\tTSL\tAPPRIS\n")
+    out.write("Transcript stable ID\tTSL\tAPPRIS\n")
     for tid, data in transcripts.items():
         out.write(f"{tid}\t{data['tsl']}\t{data['appris']}\n")
 PYTHON_SCRIPT
