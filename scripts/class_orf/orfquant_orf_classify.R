@@ -53,14 +53,12 @@ project_to_tx_coords <- function(orf_gr, exon_gr, strand) {
 
   # Map one genomic position to a 1-based transcript position.
   gpos_to_tx <- function(gpos) {
-    for (j in seq_len(n_ex)) {
-      s <- ex_s[j]; e <- ex_e[j]
-      if (gpos >= s && gpos <= e) {
-        offset <- if (identical(strand, "-")) (e - gpos) else (gpos - s)
-        return(cum_before[j] + offset + 1L)
-      }
-    }
-    NA_integer_
+    # Vectorized: find which exon contains gpos
+    in_exon <- which(gpos >= ex_s & gpos <= ex_e)
+    if (length(in_exon) == 0L) return(NA_integer_)
+    j <- in_exon[1L]
+    offset <- if (identical(strand, "-")) (ex_e[j] - gpos) else (gpos - ex_s[j])
+    cum_before[j] + offset + 1L
   }
 
   tx_pos <- vapply(c(IRanges::start(orf_gr), IRanges::end(orf_gr)), gpos_to_tx, integer(1))
@@ -190,7 +188,16 @@ orfquant_classify_orfs <- function(orfs,
       return(a)
     }
     if (is.character(a) && length(a) == 1 && file.exists(a)) {
+      # Check for cached RDS annotation to avoid repeated slow GTF imports
+      rds_cache <- paste0(a, ".ann_cache.rds")
+      if (file.exists(rds_cache) &&
+          file.mtime(rds_cache) >= file.mtime(a)) {
+        message("  [normalize_annotation] Loading cached annotation from: ", rds_cache)
+        return(readRDS(rds_cache))
+      }
+      message("  [normalize_annotation] Importing GTF: ", a, " (", format(file.size(a), big.mark=","), " bytes)")
       ann <- rtracklayer::import(a)
+      message("  [normalize_annotation] Building CDS gene/transcript structures...")
       cds <- ann[ann$type == "CDS"]
       if (length(cds) == 0) stop("No CDS features found in annotation.")
       if (is.null(cds$gene_id))    stop("CDS annotation must contain gene_id.")
@@ -207,11 +214,41 @@ orfquant_classify_orfs <- function(orfs,
         cds_txs  # fall back to CDS exons as proxy
       }
 
+      # Build lncRNA gene set from 'gene' features in the annotation.
+      # Any gene with a biotype in the LNCRNA_BIOTYPES set is recorded so
+      # that ORFs whose gene_id is a non-coding gene can be classified as
+      # "lncRNA" rather than falling back to a positional category.
+      LNCRNA_BIOTYPES <- c(
+        # Human / mouse (Ensembl / GENCODE)
+        "lncRNA", "lincRNA", "antisense", "processed_transcript",
+        "sense_intronic", "sense_overlapping", "non_coding",
+        "3prime_overlapping_ncrna", "bidirectional_promoter_lncrna",
+        # Plant species (Ensembl Plants)
+        "ncRNA",            # Oryza sativa (rice): general long non-coding RNA
+        "antisense_RNA",    # Oryza sativa: antisense long non-coding RNA
+        "misc_non_coding"   # Zea mays (maize): catch-all non-coding gene category
+      )
+      gene_feat <- ann[ann$type == "gene"]
+      lncrna_genes <- character(0)
+      if (length(gene_feat) > 0 && !is.null(gene_feat$gene_biotype)) {
+        lnc_mask <- gene_feat$gene_biotype %in% LNCRNA_BIOTYPES
+        if (!is.null(gene_feat$gene_id)) {
+          lncrna_genes <- unique(gene_feat$gene_id[lnc_mask])
+        }
+        message("  [normalize_annotation] ", length(lncrna_genes),
+                " lncRNA genes identified.")
+      }
+
       # Build per-transcript CDS bounds in TRANSCRIPT space by projecting
       # CDS genomic exons through the exon chain.  This correctly handles
       # multi-exon ORFs (unlike the previous genomic-strand-normalised
       # approximation which collapsed multi-exon structures to a single span).
-      cds_txs_tx_coords <- lapply(names(cds_txs), function(tid) {
+      # Uses parallel::mclapply for speed when multiple cores are available.
+      n_tx <- length(cds_txs)
+      n_cores <- max(1L, parallel::detectCores(logical = FALSE) - 1L)
+      message("  [normalize_annotation] Building tx-coord projection for ",
+              n_tx, " CDS transcripts (", n_cores, " cores)...")
+      cds_txs_tx_coords <- parallel::mclapply(names(cds_txs), function(tid) {
         cds_gr  <- cds_txs[[tid]]
         exon_gr <- if (tid %in% names(exon_txs)) exon_txs[[tid]] else cds_gr
         if (length(cds_gr) == 0 || length(exon_gr) == 0) return(IRanges::IRanges())
@@ -219,13 +256,23 @@ orfquant_classify_orfs <- function(orfs,
         tx_c <- project_to_tx_coords(cds_gr, exon_gr, strd)
         if (is.null(tx_c)) return(IRanges::IRanges())
         IRanges::IRanges(start = tx_c[1], end = tx_c[2])
-      })
+      }, mc.cores = n_cores)
       names(cds_txs_tx_coords) <- names(cds_txs)
 
-      return(list(cds_genes = cds_genes, cds_txs = cds_txs,
-                  exon_txs = exon_txs, cds_txs_tx_coords = cds_txs_tx_coords))
+      result <- list(cds_genes = cds_genes, cds_txs = cds_txs,
+                     exon_txs = exon_txs, cds_txs_tx_coords = cds_txs_tx_coords,
+                     lncrna_genes = lncrna_genes)
+
+      # Save cache for future use
+      tryCatch({
+        saveRDS(result, rds_cache)
+        message("  [normalize_annotation] Cached annotation to: ", rds_cache)
+      }, error = function(e) {
+        message("  [normalize_annotation] Warning: could not save cache: ", e$message)
+      })
+
+      return(result)
     }
-    stop("Unsupported annotation input. Use ORFquant Annotation or GTF/GFF path.")
   }
 
   get_max_cds_by_gene <- function(cds_txs) {
@@ -342,11 +389,14 @@ orfquant_classify_orfs <- function(orfs,
     }
 
     if (orf_sto != ann_sto) {
-      if (orf_sta < ann_sta && orf_sto < ann_sto) return("overl_uORF")
+      # Check more-specific (non-overlapping) cases BEFORE the overlapping cases.
+      # uORF: entirely upstream of CDS start; overl_uORF: overlaps CDS 5' end.
+      # dORF: entirely downstream of CDS stop; overl_dORF: overlaps CDS 3' end.
       if (orf_sta < ann_sta && orf_sto < ann_sta) return("uORF")
+      if (orf_sta < ann_sta && orf_sto < ann_sto) return("overl_uORF")
       if (orf_sta < ann_sta && orf_sto > ann_sto) return("NC_extension")
-      if (orf_sta > ann_sta && orf_sto > ann_sto) return("overl_dORF")
       if (orf_sta > ann_sto && orf_sto > ann_sto) return("dORF")
+      if (orf_sta > ann_sta && orf_sto > ann_sto) return("overl_dORF")
       if (orf_sta > ann_sta && orf_sto < ann_sto) return("nested_ORF")
       if (orf_sta == ann_sta && orf_sto < ann_sto) return("C_truncation")
       if (orf_sta == ann_sta && orf_sto > ann_sto) return("C_extension")
@@ -361,6 +411,9 @@ orfquant_classify_orfs <- function(orfs,
   cds_genes <- ann$cds_genes
   cds_txs <- ann$cds_txs
   max_cds_by_gene <- get_max_cds_by_gene(cds_txs)
+
+  # lncRNA gene set from annotation (may be empty if annotation or GTF lacks gene features)
+  lncrna_genes <- if (!is.null(ann$lncrna_genes)) ann$lncrna_genes else character(0)
 
   # Priority order for ORF_category_Tx_compatible: lower number = better match.
   TX_CLASS_PRIORITY <- c(
@@ -425,6 +478,16 @@ orfquant_classify_orfs <- function(orfs,
   for (i in seq_along(orf_grl)) {
     orf_gen <- orf_grl[[i]]
     gene_id <- S4Vectors::mcols(orf_grl)$gene_id[i]
+
+    # If the ORF's gene is a known lncRNA gene, assign "lncRNA" immediately
+    # and skip the CDS-based positional classification (which is meaningless
+    # for non-coding genes).
+    if (!is.na(gene_id) && length(lncrna_genes) > 0 && gene_id %in% lncrna_genes) {
+      res$ORF_category_Gen[i] <- "lncRNA"
+      res$ORF_category_Tx[i]  <- "lncRNA"
+      res$ORF_category_Tx_compatible[i] <- "lncRNA"
+      next
+    }
 
     if (!is.na(gene_id) && gene_id %in% names(cds_genes)) {
       cds_gene <- IRanges::reduce(unlist(cds_genes[gene_id]))

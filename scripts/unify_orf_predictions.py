@@ -29,46 +29,66 @@ class GTFIndex:
         self.transcripts = {} # tid -> {chrom, strand, exons: [(s,e), ...], cds: [(s,e), ...]}
         self.gene_map = {} # tid -> gid
         self.gene_names = {} # gid -> gene_name
+        self.cds_by_chrom = {}   # chrom -> sorted list of (start, end, strand, gid)
+        self.gene_by_chrom = {}  # chrom -> sorted list of (start, end, strand, gid)
         self._load_gtf(gtf_file)
 
     def _load_gtf(self, gtf_file):
         print(f"Loading GTF: {gtf_file}...", file=sys.stderr)
+        cds_temp = defaultdict(list)
+        gene_temp = defaultdict(list)
         with open(gtf_file, 'r') as f:
             for line in f:
                 if line.startswith('#'): continue
                 parts = line.strip().split('\t')
                 if len(parts) < 9: continue
-                
+
                 feature = parts[2]
                 attributes = self._parse_attributes(parts[8])
-                
+                chrom = parts[0]
+                strand = parts[6]
+                start, end = int(parts[3]), int(parts[4])
+                gid = attributes.get('gene_id', 'NA')
+
+                # gene features have no transcript_id – collect for spatial index
+                if feature == 'gene':
+                    gene_temp[chrom].append((start, end, strand, gid))
+                    continue
+
                 if 'transcript_id' not in attributes: continue
                 tid = attributes['transcript_id']
-                gid = attributes.get('gene_id', 'NA')
                 gname = attributes.get('gene_name', gid)
-                
+
                 self.gene_map[tid] = gid
                 self.gene_names[gid] = gname
-                
+
                 if tid not in self.transcripts:
                     self.transcripts[tid] = {
-                        'chrom': parts[0],
-                        'strand': parts[6],
+                        'chrom': chrom,
+                        'strand': strand,
                         'exons': [],
                         'cds': []
                     }
-                
-                start, end = int(parts[3]), int(parts[4])
+
                 if feature == 'exon':
                     self.transcripts[tid]['exons'].append((start, end))
                 elif feature == 'CDS':
                     self.transcripts[tid]['cds'].append((start, end))
-        
+                    cds_temp[chrom].append((start, end, strand, gid))
+
         # Sort exons and CDS
         for tid in self.transcripts:
             self.transcripts[tid]['exons'].sort()
             self.transcripts[tid]['cds'].sort()
         print(f"Loaded {len(self.transcripts)} transcripts.", file=sys.stderr)
+
+        # Build spatial indexes (sorted by start for bisect queries)
+        import bisect
+        for chrom, intervals in cds_temp.items():
+            self.cds_by_chrom[chrom] = sorted(intervals, key=lambda x: x[0])
+        for chrom, intervals in gene_temp.items():
+            self.gene_by_chrom[chrom] = sorted(intervals, key=lambda x: x[0])
+        print(f"CDS spatial index: {sum(len(v) for v in self.cds_by_chrom.values())} intervals on {len(self.cds_by_chrom)} chroms.", file=sys.stderr)
 
     def _parse_attributes(self, attr_str):
         attrs = {}
@@ -150,6 +170,50 @@ class GTFIndex:
         genomic_blocks.sort()
         
         return chrom, strand, genomic_blocks
+
+    def find_cds_overlap_inframe(self, chrom, strand, orf_start, orf_end, orf_frame):
+        """Check if the ORF overlaps in-frame with any annotated CDS interval."""
+        import bisect
+        intervals = self.cds_by_chrom.get(chrom, [])
+        if not intervals:
+            return False
+        starts = [iv[0] for iv in intervals]
+        idx = bisect.bisect_right(starts, orf_end)
+        for i in range(min(idx, len(intervals)) - 1, -1, -1):
+            iv_start, iv_end, iv_strand, iv_gid = intervals[i]
+            if iv_start > orf_end:
+                continue
+            if iv_end < orf_start:
+                break
+            if iv_strand != strand:
+                continue
+            cds_frame = iv_start % 3 if strand == '+' else iv_end % 3
+            if cds_frame == orf_frame:
+                return True
+        return False
+
+    def find_overlapping_genes(self, chrom, strand, orf_start, orf_end):
+        """Return list of gene_ids whose genomic interval overlaps the ORF (same strand)."""
+        import bisect
+        intervals = self.gene_by_chrom.get(chrom, [])
+        if not intervals:
+            return []
+        starts = [iv[0] for iv in intervals]
+        idx = bisect.bisect_right(starts, orf_end)
+        result = []
+        seen = set()
+        for i in range(min(idx, len(intervals)) - 1, -1, -1):
+            iv_start, iv_end, iv_strand, iv_gid = intervals[i]
+            if iv_start > orf_end:
+                continue
+            if iv_end < orf_start:
+                break
+            if iv_strand != strand:
+                continue
+            if iv_gid not in seen:
+                seen.add(iv_gid)
+                result.append(iv_gid)
+        return result
 
 
 def calculate_frame(chrom, strand, start, blocks):
@@ -325,63 +389,88 @@ def group_overlapping_orfs(candidates, min_overlap_fraction=0.5):
     return list(groups.values())
 
 
-def merge_frame_compatible_orfs(candidates, tolerance=3):
+def merge_frame_compatible_orfs(candidates, min_overlap_fraction=0.9):
     """
-    Merge ORFs that are frame-compatible (same frame, coordinates within tolerance).
-    This handles slight P-site offset differences between tools.
-    
+    Merge ORFs that are frame-compatible with >= min_overlap_fraction positional overlap.
+
+    Rules (Mudge et al. 2022-inspired):
+    - ONLY single-exon ORFs are eligible for frame-aware merging
+    - Multi-exon (spliced) ORFs pass through unchanged
+    - Single-exon ORFs are merged if:
+        1. Same chromosome and strand
+        2. Same reading frame
+        3. Overlap fraction >= min_overlap_fraction (relative to shorter ORF)
+    - The longest ORF in a merged group becomes representative
+
     Args:
         candidates: List of ORFCandidate
-        tolerance: Maximum base pair difference allowed for merging
-    
+        min_overlap_fraction: Minimum overlap of shorter ORF to merge (default 0.9 = 90%)
+
     Returns:
-        List of merged ORFCandidate
+        List of ORFCandidate (multi-exon untouched; single-exon merged)
     """
     if not candidates:
         return []
-    
-    # Sort by chromosome, strand, start for efficient comparison
-    sorted_cands = sorted(candidates, key=lambda c: (c.chrom, c.strand, c.start))
-    
+
+    # Separate single-exon from multi-exon: multi-exon pass through
+    single_exon = [c for c in candidates if len(c.blocks) == 1]
+    multi_exon  = [c for c in candidates if len(c.blocks) > 1]
+
+    if not single_exon:
+        return multi_exon
+
+    # Sort single-exon by chrom, strand, frame, start for efficient sweep
+    single_exon.sort(key=lambda c: (c.chrom, c.strand, c.frame, c.start))
+
     merged = []
     used = set()
-    
-    for i, cand1 in enumerate(sorted_cands):
+
+    for i, cand1 in enumerate(single_exon):
         if i in used:
             continue
-        
-        # Find all frame-compatible candidates
+
         compatible_group = [cand1]
-        for j in range(i + 1, len(sorted_cands)):
+        max_possible_end = cand1.end  # tracks the furthest end in current group
+
+        for j in range(i + 1, len(single_exon)):
             if j in used:
                 continue
-            cand2 = sorted_cands[j]
-            
-            # Early exit if different chromosome/strand
+            cand2 = single_exon[j]
+
+            # Different chrom/strand/frame → can never merge
             if cand2.chrom != cand1.chrom or cand2.strand != cand1.strand:
                 break
-            
-            # Early exit if too far apart
-            if cand2.start > cand1.start + tolerance:
+            if cand2.frame != cand1.frame:
+                continue
+            # Early exit: cand2 starts beyond the furthest end of any group member
+            if cand2.start > max_possible_end:
                 break
-            
-            if are_frame_compatible(cand1, cand2, tolerance):
+
+            # Compute overlap fraction (relative to shorter ORF)
+            overlap_start = max(cand1.start, cand2.start)
+            overlap_end   = min(max_possible_end, cand2.end)
+            if overlap_start >= overlap_end:
+                continue
+            overlap_bp = overlap_end - overlap_start
+            min_len = min(cand1.length_nt, cand2.length_nt)
+            if min_len > 0 and overlap_bp / min_len >= min_overlap_fraction:
                 compatible_group.append(cand2)
                 used.add(j)
-        
+                max_possible_end = max(max_possible_end, cand2.end)
+
         used.add(i)
-        
+
         if len(compatible_group) == 1:
             merged.append(cand1)
         else:
-            # Select the longest ORF as representative
+            # Longest ORF is representative; others are merged into it
             representative = max(compatible_group, key=lambda c: c.length_nt)
             for cand in compatible_group:
                 if cand is not representative:
                     representative.merge(cand)
             merged.append(representative)
-    
-    return merged
+
+    return merged + multi_exon
 
 
 def select_representative_for_group(candidates, group_indices):
@@ -436,6 +525,108 @@ def process_overlap_groups(candidates, min_overlap_fraction=0.5):
     return representatives
 
 
+def _seq_identity_from_shared_terminus(aa1, aa2):
+    """
+    Compute sequence identity aligned from the shared terminus.
+    For two ORFs sharing the same stop codon, compare from the C-terminus;
+    for same start, compare from the N-terminus.
+    Returns fraction of identical positions / len(shorter).
+    Caller is responsible for picking the correct direction.
+    """
+    if not aa1 or not aa2:
+        return 0.0
+    shorter, longer = (aa1, aa2) if len(aa1) <= len(aa2) else (aa2, aa1)
+    n = len(shorter)
+    # Compare last n characters of longer with shorter (shared stop → C-terminal)
+    matches = sum(a == b for a, b in zip(shorter, longer[-n:]))
+    return matches / n
+
+
+def cluster_by_sequence(candidates, seq_identity=0.9, min_length_ratio=0.8,
+                        terminus_tolerance=3):
+    """
+    Stage 3: Sequence-similarity-based clustering (UniRef90-inspired).
+
+    Two ORFs are merged into one cluster when ALL THREE conditions hold:
+      1. Same gene locus (gene_id match, or same chrom+strand for gene_id='NA')
+      2. Share a start OR stop position within ±terminus_tolerance bp
+      3. Length ratio (shorter/longer) >= min_length_ratio
+         AND sequence identity (identical_aa/len_shorter) >= seq_identity
+
+    Within each cluster the longest ORF is the representative; others are
+    recorded as subset_orfs.
+    """
+    if not candidates:
+        return []
+
+    # ---- bucket by gene_id (fall back to chrom+strand for NA) ----
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    for idx, cand in enumerate(candidates):
+        key = cand.gid if cand.gid and cand.gid != 'NA' else f"_locus_{cand.chrom}_{cand.strand}"
+        buckets[key].append(idx)
+
+    uf = UnionFind(len(candidates))
+
+    for key, indices in buckets.items():
+        n = len(indices)
+        if n == 1:
+            continue
+        # Sort by start position for a narrow comparison window
+        indices_sorted = sorted(indices, key=lambda i: candidates[i].start)
+        for ii in range(n):
+            idx1 = indices_sorted[ii]
+            c1 = candidates[idx1]
+            for jj in range(ii + 1, n):
+                idx2 = indices_sorted[jj]
+                c2 = candidates[idx2]
+
+                # Early-exit: if start positions are too far apart to share terminus
+                # (and the ORFs are not likely to share a stop), skip
+                # (max ORF is ~3000 aa → 9000 nt; we just avoid extremely distant pairs)
+                if abs(c2.start - c1.start) > 100000:
+                    break
+
+                # Condition 2: shared start OR stop within tolerance
+                shared_start = abs(c1.start - c2.start) <= terminus_tolerance
+                shared_stop  = abs(c1.end   - c2.end)   <= terminus_tolerance
+                if not (shared_start or shared_stop):
+                    continue
+
+                # Condition 3a: length ratio
+                len1, len2 = c1.length_aa, c2.length_aa
+                if len1 == 0 or len2 == 0:
+                    continue
+                shorter_len = min(len1, len2)
+                longer_len  = max(len1, len2)
+                if shorter_len / longer_len < min_length_ratio:
+                    continue
+
+                # Condition 3b: sequence identity (only if sequences available)
+                aa1 = c1.aa_sequence
+                aa2 = c2.aa_sequence
+                if aa1 and aa2:
+                    identity = _seq_identity_from_shared_terminus(aa1, aa2)
+                    if identity < seq_identity:
+                        continue
+                # If sequences not available, fall back to length-ratio-only
+
+                uf.union(idx1, idx2)
+
+    # Collect groups
+    from collections import defaultdict
+    group_map = defaultdict(list)
+    for idx in range(len(candidates)):
+        group_map[uf.find(idx)].append(idx)
+
+    representatives = []
+    for root, group_indices in group_map.items():
+        rep = select_representative_for_group(candidates, group_indices)
+        representatives.append(rep)
+
+    return representatives
+
+
 class ORFCandidate:
     def __init__(self, chrom, strand, blocks, tid, gid, tool, sample, score=None, pvalue=None, sequence=None):
         self.chrom = chrom
@@ -445,7 +636,8 @@ class ORFCandidate:
         self.gid = gid
         self.sources = {(tool, sample)} # Set of (tool, sample) tuples
         self.score = score
-        self.sequence = sequence # Extracted sequence
+        self.sequence = sequence # Extracted nucleotide sequence
+        self.aa_sequence = ""   # Amino acid sequence (set by extract_sequence)
         self.tool_scores = {tool: score} if score is not None else {}  # Dict: tool -> score
         self.tool_pvalues = {tool: pvalue} if pvalue is not None else {}  # Dict: tool -> pvalue
         
@@ -467,7 +659,11 @@ class ORFCandidate:
         
         # Frame (0, 1, 2)
         self.frame = calculate_frame(chrom, strand, self.start, self.blocks)
-        
+
+        self.start_codon = ""         # First 3 nt of coding sequence (set after sequence extraction)
+        self.is_cds_overlap = False   # Whether ORF overlaps in-frame with annotated CDS
+        self.overlapping_gene_ids = [] # Gene IDs whose genomic region overlaps this ORF
+
         # ID for grouping (exact match)
         self.id_key = (self.chrom, self.strand, self.blocks)
 
@@ -489,6 +685,15 @@ class ORFCandidate:
         self.unique_reads += other.unique_reads
         if not self.sequence and other.sequence:
             self.sequence = other.sequence
+        # Propagate CDS overlap flag
+        if other.is_cds_overlap:
+            self.is_cds_overlap = True
+        # Merge overlapping genes (union)
+        for gid in other.overlapping_gene_ids:
+            if gid not in self.overlapping_gene_ids:
+                self.overlapping_gene_ids.append(gid)
+        if not self.start_codon and other.start_codon:
+            self.start_codon = other.start_codon
         # Merge subset ORFs
         self.subset_orfs.extend(other.subset_orfs)
     
@@ -512,6 +717,11 @@ class ORFCandidate:
         })
         # Merge sources into representative
         self.sources.update(other.sources)
+        if other.is_cds_overlap:
+            self.is_cds_overlap = True
+        for gid in other.overlapping_gene_ids:
+            if gid not in self.overlapping_gene_ids:
+                self.overlapping_gene_ids.append(gid)
         # Merge tool scores and pvalues
         for tool, score in other.tool_scores.items():
             if tool not in self.tool_scores or (score is not None and self.tool_scores.get(tool) is None):
@@ -531,7 +741,8 @@ class ORFCandidate:
         return self.unique_psites / self.length_nt if self.length_nt > 0 else 0
 
 # Parsers
-def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
+def parse_ribotish(file_path, gtf_index, sample_id, min_len=0,
+                   exclude_tistypes=None, atg_only=False):
     candidates = []
     print(f"Parsing Ribo-TISH: {file_path}", file=sys.stderr)
     
@@ -544,6 +755,9 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
                 return []
     except Exception:
         pass
+    
+    filtered_tis = 0
+    filtered_atg = 0
     
     try:
         with open(file_path, 'r') as f:
@@ -563,6 +777,20 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
             for line in f:
                 parts = line.strip().split('\t')
                 tid = parts[col_map['Tid']]
+                
+                # Stage 0: TisType filtering
+                if exclude_tistypes and 'TisType' in col_map:
+                    tis_type = parts[col_map['TisType']] if col_map['TisType'] < len(parts) else ''
+                    if tis_type in exclude_tistypes:
+                        filtered_tis += 1
+                        continue
+                
+                # Stage 0: ATG-only filtering
+                if atg_only and 'StartCodon' in col_map:
+                    start_codon = parts[col_map['StartCodon']] if col_map['StartCodon'] < len(parts) else ''
+                    if start_codon.upper() != 'ATG':
+                        filtered_atg += 1
+                        continue
                 
                 # Extract TisPvalue as score (lower is better, convert to -log10(p))
                 score = None
@@ -625,9 +853,12 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0):
     except Exception as e:
         print(f"Error parsing Ribo-TISH file: {e}", file=sys.stderr)
     
+    if filtered_tis or filtered_atg:
+        print(f"  -> Filtered: {filtered_tis} by TisType, {filtered_atg} by start codon", file=sys.stderr)
     return candidates
 
-def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
+def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0,
+                     exclude_tistypes=None, atg_only=False):
     candidates = []
     print(f"Parsing Ribotricer: {file_path}", file=sys.stderr)
     
@@ -640,6 +871,9 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
                 return []
     except Exception:
         pass
+    
+    filtered_tis = 0
+    filtered_atg = 0
     
     try:
         with open(file_path, 'r') as f:
@@ -656,6 +890,20 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
                 parts = line.strip().split('\t')
                 tid = parts[col_map['transcript_id']]
                 orf_id = parts[col_map['ORF_ID']]
+                
+                # Stage 0: ORF_type filtering (ribotricer uses lowercase)
+                if exclude_tistypes and 'ORF_type' in col_map:
+                    orf_type = parts[col_map['ORF_type']] if col_map['ORF_type'] < len(parts) else ''
+                    if orf_type in exclude_tistypes:
+                        filtered_tis += 1
+                        continue
+                
+                # Stage 0: ATG-only filtering
+                if atg_only and 'start_codon' in col_map:
+                    start_codon = parts[col_map['start_codon']] if col_map['start_codon'] < len(parts) else ''
+                    if start_codon.upper() != 'ATG':
+                        filtered_atg += 1
+                        continue
                 
                 # Extract phase_score (0-1, higher is better)
                 score = None
@@ -697,9 +945,12 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0):
     except Exception as e:
         print(f"Error parsing Ribotricer file: {e}", file=sys.stderr)
 
+    if filtered_tis or filtered_atg:
+        print(f"  -> Filtered: {filtered_tis} by ORF_type, {filtered_atg} by start codon", file=sys.stderr)
     return candidates
 
-def parse_orfquant(file_path, gtf_index, sample_id, min_len=0):
+def parse_orfquant(file_path, gtf_index, sample_id, min_len=0,
+                   exclude_tistypes=None, atg_only=False):
     candidates = []
     print(f"Parsing ORFquant: {file_path}", file=sys.stderr)
     
@@ -815,24 +1066,53 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0):
     
     return candidates
 
-def validate_sequence(cand, genome_fasta):
+def extract_sequence(cand, genome_fasta):
+    """Extract nucleotide + amino acid sequence for a candidate ORF.
+    Sets cand.sequence (nt) and cand.aa_sequence (aa).
+    """
     try:
         seq_parts = []
         for s, e in cand.blocks:
-            # pyfaidx 0-based indexing
             seq = genome_fasta[cand.chrom][s-1:e]
             seq_parts.append(str(seq))
-        
         full_seq = "".join(seq_parts)
         seq_obj = Seq(full_seq)
-        
         if cand.strand == '-':
             seq_obj = seq_obj.reverse_complement()
-            
         cand.sequence = str(seq_obj)
-        
-    except Exception as e:
+        # Translate to AA (stop codon may or may not be present)
+        aa = str(seq_obj.translate(to_stop=False))
+        cand.aa_sequence = aa
+        # Set start codon from first 3 nt of coding sequence
+        if len(cand.sequence) >= 3:
+            cand.start_codon = cand.sequence[:3].upper()
+    except Exception:
         cand.sequence = "N" * cand.length_nt
+        cand.aa_sequence = ""
+        cand.start_codon = "UNK"
+
+def validate_sequence(cand, genome_fasta):
+    """Legacy wrapper – kept for back-compat; sequences already extracted."""
+    if not cand.sequence:
+        extract_sequence(cand, genome_fasta)
+
+
+def annotate_cds_overlap(candidates, gtf_index):
+    """
+    Annotate each candidate with CDS overlap status and overlapping gene IDs.
+    Must be called after extract_sequence() so that frame info is available.
+
+    Sets:
+      cand.is_cds_overlap      - True if ORF overlaps in-frame with annotated CDS
+      cand.overlapping_gene_ids - list of gene_ids overlapping this ORF (same strand)
+    """
+    for cand in candidates:
+        cand.overlapping_gene_ids = gtf_index.find_overlapping_genes(
+            cand.chrom, cand.strand, cand.start, cand.end
+        )
+        cand.is_cds_overlap = gtf_index.find_cds_overlap_inframe(
+            cand.chrom, cand.strand, cand.start, cand.end, cand.frame
+        )
 
 
 class BedgraphIndex:
@@ -1173,21 +1453,42 @@ def main():
     parser.add_argument("--gtf", required=True, help="Reference GTF file for coordinate mapping")
     parser.add_argument("--fasta", required=True, help="Genome FASTA file for validation")
     parser.add_argument("--output", required=True, help="Output prefix")
-    parser.add_argument("--min_len", type=int, default=24, help="Minimum amino acid length")
+    parser.add_argument("--min_len", type=int, default=6, help="Minimum amino acid length")
     parser.add_argument("--bedgraph-dir", help="Directory containing RiboseQC bedgraph files (optional)")
     parser.add_argument("--sample-list", help="Comma-separated list of sample names for bedgraph stats (optional)")
     parser.add_argument("--threads", type=int, default=4, help="Number of threads for parallel processing (default: 4)")
-    # New parameters for advanced merging
-    parser.add_argument("--merge-tolerance", type=int, default=3,
-                        help="Base pair tolerance for frame-aware merging (default: 3)")
-    parser.add_argument("--min-overlap", type=float, default=0.5,
-                        help="Minimum overlap fraction for grouping ORFs (default: 0.5)")
+    # Merging parameters
+    parser.add_argument("--frame-merge-min-overlap", type=float, default=0.9,
+                        help="Minimum overlap fraction of shorter ORF for single-exon frame-aware merging (default: 0.9)")
     parser.add_argument("--no-frame-merge", action="store_true",
                         help="Disable frame-aware merging (only use exact matches)")
-    parser.add_argument("--no-overlap-group", action="store_true",
-                        help="Disable overlap grouping (treat all ORFs independently)")
+    # Stage 0 filtering parameters (new)
+    parser.add_argument("--exclude-tistypes", default="Annotated,annotated",
+                        help="Comma-separated list of TisType/ORF_type values to exclude (default: Annotated,annotated)")
+    parser.add_argument("--atg-only", action="store_true",
+                        help="Only keep ORFs with ATG start codon (default: off)")
+    # Stage 3 sequence clustering parameters (new)
+    parser.add_argument("--seq-identity", type=float, default=0.9,
+                        help="Minimum sequence identity for clustering (default: 0.9)")
+    parser.add_argument("--min-length-ratio", type=float, default=0.8,
+                        help="Minimum length ratio (shorter/longer) for clustering (default: 0.8)")
+    parser.add_argument("--terminus-tolerance", type=int, default=3,
+                        help="Start/stop position tolerance in bp for clustering (default: 3)")
+    parser.add_argument("--seq-cluster", action="store_true",
+                        help="Enable Stage 3 sequence-similarity clustering (disabled by default)")
+    # Legacy option kept for back-compat (deprecated)
+    parser.add_argument("--min-overlap", type=float, default=0.5,
+                        help="[Deprecated] Minimum overlap fraction; use --seq-cluster to enable Stage 3")
     
     args = parser.parse_args()
+    
+    # Build exclude_tistypes set
+    exclude_tistypes = set()
+    if args.exclude_tistypes:
+        exclude_tistypes = {t.strip() for t in args.exclude_tistypes.split(',') if t.strip()}
+    print(f"Stage 0 TisType exclusions: {exclude_tistypes or '(none)'}", file=sys.stderr)
+    if args.atg_only:
+        print("Stage 0: ATG-only mode enabled", file=sys.stderr)
     
     gtf_index = GTFIndex(args.gtf)
     
@@ -1218,7 +1519,8 @@ def main():
     if args.ribotish:
         for f in args.ribotish:
             sid = os.path.basename(f).split('.')[0].replace('_pred', '')
-            orfs = parse_ribotish(f, gtf_index, sid, args.min_len)
+            orfs = parse_ribotish(f, gtf_index, sid, args.min_len,
+                                  exclude_tistypes=exclude_tistypes, atg_only=args.atg_only)
             all_candidates.extend(orfs)
             tool_stats['ribotish']['count'] += len(orfs)
             tool_stats['ribotish']['samples'].add(sid)
@@ -1227,7 +1529,8 @@ def main():
     if args.ribotricer:
         for f in args.ribotricer:
             sid = os.path.basename(f).split('.')[0].replace('_translating_ORFs', '')
-            orfs = parse_ribotricer(f, gtf_index, sid, args.min_len)
+            orfs = parse_ribotricer(f, gtf_index, sid, args.min_len,
+                                    exclude_tistypes=exclude_tistypes, atg_only=args.atg_only)
             all_candidates.extend(orfs)
             tool_stats['ribotricer']['count'] += len(orfs)
             tool_stats['ribotricer']['samples'].add(sid)
@@ -1236,7 +1539,8 @@ def main():
     if args.orfquant:
         for f in args.orfquant:
             sid = os.path.basename(f).split('.')[0].replace('_Detected_ORFs', '')
-            orfs = parse_orfquant(f, gtf_index, sid, args.min_len)
+            orfs = parse_orfquant(f, gtf_index, sid, args.min_len,
+                                  exclude_tistypes=exclude_tistypes, atg_only=args.atg_only)
             all_candidates.extend(orfs)
             tool_stats['orfquant']['count'] += len(orfs)
             tool_stats['orfquant']['samples'].add(sid)
@@ -1275,18 +1579,39 @@ def main():
     print(f"  Merged {len(all_candidates) - len(merged_candidates)} duplicates", file=sys.stderr)
     
     final_list = list(merged_candidates.values())
-    
-    # Stage 2: Frame-aware merging (merge ORFs with same frame and coordinates within tolerance)
-    if not args.no_frame_merge and args.merge_tolerance > 0:
-        print(f"Performing frame-aware merging (tolerance={args.merge_tolerance}bp)...", file=sys.stderr)
-        final_list = merge_frame_compatible_orfs(final_list, tolerance=args.merge_tolerance)
+
+    skip_stage3 = not args.seq_cluster
+
+    # Stage 2 preparation: extract sequences for all candidates (needed for annotation + frame merge)
+    print(f"Extracting sequences ({len(final_list)} candidates)...", file=sys.stderr)
+    for cand in final_list:
+        extract_sequence(cand, genome_fasta)
+
+    # Stage 2a: Annotate with reference (CDS overlap + overlapping genes)
+    print(f"Annotating CDS overlap and overlapping genes...", file=sys.stderr)
+    annotate_cds_overlap(final_list, gtf_index)
+    cds_overlap_count = sum(1 for c in final_list if c.is_cds_overlap)
+    print(f"  CDS in-frame overlap: {cds_overlap_count} ORFs ({100*cds_overlap_count/max(len(final_list),1):.1f}%)", file=sys.stderr)
+
+    # Stage 2: Frame-aware merging (single-exon only, overlap fraction threshold)
+    if not args.no_frame_merge:
+        frac = args.frame_merge_min_overlap
+        print(f"Performing frame-aware merging (single-exon only, min_overlap_fraction={frac})...", file=sys.stderr)
+        final_list = merge_frame_compatible_orfs(final_list, min_overlap_fraction=frac)
         print(f"After frame-aware merging: {len(final_list)}", file=sys.stderr)
-    
-    # Stage 3: Overlap grouping (group overlapping ORFs, select longest as representative)
-    if not args.no_overlap_group:
-        print(f"Grouping overlapping ORFs (min_overlap={args.min_overlap})...", file=sys.stderr)
-        final_list = process_overlap_groups(final_list, min_overlap_fraction=args.min_overlap)
-        print(f"After overlap grouping: {len(final_list)} representative ORFs", file=sys.stderr)
+
+    # Stage 3: Sequence-similarity clustering (disabled by default, opt-in with --seq-cluster)
+    if not skip_stage3:
+        print(f"Clustering by sequence similarity "
+              f"(seq_identity={args.seq_identity}, min_length_ratio={args.min_length_ratio}, "
+              f"terminus_tolerance={args.terminus_tolerance})...", file=sys.stderr)
+        final_list = cluster_by_sequence(
+            final_list,
+            seq_identity=args.seq_identity,
+            min_length_ratio=args.min_length_ratio,
+            terminus_tolerance=args.terminus_tolerance,
+        )
+        print(f"After sequence clustering: {len(final_list)} representative ORFs", file=sys.stderr)
     
     # Calculate final statistics by tool
     print("\n=== Final Set Statistics (after cross-attribution via overlap grouping) ===", file=sys.stderr)
@@ -1334,11 +1659,6 @@ def main():
         # Use parallel processing for large datasets
         calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, args.threads)
     
-    # Validate sequences
-    print(f"Validating sequences for {len(final_list)} candidates...", file=sys.stderr)
-    for cand in final_list:
-        validate_sequence(cand, genome_fasta)
-    
     # Write metadata.tsv with extended columns
     with open(f"{args.output}.metadata.tsv", 'w') as out:
         header = ["orf_id", "chrom", "strand", "start", "end", "length_aa", "exon_blocks", 
@@ -1346,7 +1666,7 @@ def main():
                   "tool_scores", "tool_pvalues", 
                   "total_reads", "unique_reads", "total_psites", "unique_psites", "pN", "unique_pN",
                   "num_subset_orfs", "subset_orfs",
-                  "sequence"]
+                  "sequence", "start_codon", "aa_sequence", "is_cds_overlap", "overlapping_genes"]
         out.write('\t'.join(header) + '\n')
         
         for i, cand in enumerate(final_list):
@@ -1381,7 +1701,11 @@ def main():
                    str(cand.total_psites), str(cand.unique_psites),
                    f"{cand.pN:.6f}", f"{cand.unique_pN:.6f}",
                    str(num_subset_orfs), subset_orfs_str,
-                   cand.sequence]
+                   cand.sequence,
+                   cand.start_codon,
+                   cand.aa_sequence,
+                   "1" if cand.is_cds_overlap else "0",
+                   ",".join(cand.overlapping_gene_ids) if cand.overlapping_gene_ids else "NA"]
             out.write('\t'.join(row) + '\n')
             
     with open(f"{args.output}.bed", 'w') as out:

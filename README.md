@@ -164,9 +164,12 @@ Outputs written to `results/orf_unification/`:
 - `unified_orfs.stats.txt` — per-tool/per-sample ORF counts before and after merging
 
 Disable with `--skip_unify_orf_predictions true`.  Key parameters:
-- `--unify_orf_min_len` — minimum ORF length in amino acids (default `10`)
-- `--unify_orf_merge_tolerance` — positional tolerance for frame-aware merging (default `3`)
-- `--unify_orf_min_overlap` — minimum overlap fraction for grouping (default `0.5`)
+- `--unify_orf_min_len` — minimum ORF length in amino acids (default `6`)
+- `--unify_orf_frame_merge_min_overlap` — minimum overlap fraction of shorter ORF for single-exon frame-aware merging; multi-exon ORFs are never frame-merged (default `0.9`)
+- `--unify_orf_no_frame_merge` — disable frame-aware merging entirely (default `false`)
+- `--unify_orf_seq_cluster` — enable Stage 3 sequence-similarity clustering, disabled by default (default `false`)
+
+The `unified_orfs.metadata.tsv` now includes `start_codon`, `aa_sequence`, `is_cds_overlap`, and `overlapping_genes` columns for downstream use.
 
 #### ORF Classification (`scripts/classify_orfs_wrapper.py`)
 

@@ -60,7 +60,7 @@ python3 scripts/prepare_workflow.py \
     --orfquant-container /path/to/orfquant_patched.sif \
     --rpbp-container /path/to/rpbp.sif \
     --run-prefilter-qc \
-    --unify-orf-min-len 24
+    --unify-orf-min-len 6
 ```
 
 ### 干运行模式（查看将要执行的操作）
@@ -114,7 +114,7 @@ python3 scripts/prepare_workflow.py \
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--run-prefilter-qc` | 启用 prefilter QC 分析 | False |
-| `--unify-orf-min-len` | 统一 ORF 预测的最小长度 | 24 |
+| `--unify-orf-min-len` | 统一 ORF 预测的最小长度 | 6 |
 | `--profile` | Nextflow profile | singularity |
 
 ### 可选参数 - 其他
@@ -164,7 +164,7 @@ python3 scripts/prepare_workflow.py \
     --rpbp-container /containers/rpbp.sif \
     --genome GRCh38 \
     --run-prefilter-qc \
-    --unify-orf-min-len 24
+    --unify-orf-min-len 6
 ```
 
 ### 示例 3: 小鼠数据分析
@@ -241,7 +241,7 @@ nextflow run main.nf \
     --orfquant_container /work/riboseq/containers/orfquant_patched.sif \
     --skip_unify_orf_predictions false \
     --skip_orf_classification false \
-    --unify_orf_min_len 24 \
+    --unify_orf_min_len 6 \
     -resume \
     -with-report result/pipeline_report.html
 ```
@@ -264,7 +264,7 @@ JSON 格式的配置摘要，记录所有设置：
   },
   "pipeline_options": {
     "run_prefilter_qc": false,
-    "unify_orf_min_len": 24
+    "unify_orf_min_len": 6
   }
 }
 ```

@@ -532,10 +532,30 @@
                 },
                 "unify_orf_min_len": {
                     "type": "integer",
-                    "default": 10,
+                    "default": 6,
                     "minimum": 1,
                     "fa_icon": "fas fa-ruler",
                     "description": "Minimum ORF length (amino acids) for unified predictions."
+                },
+                "unify_orf_frame_merge_min_overlap": {
+                    "type": "number",
+                    "default": 0.9,
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "fa_icon": "fas fa-compress-arrows-alt",
+                    "description": "Minimum overlap fraction of shorter ORF for single-exon frame-aware merging (0.0-1.0). Multi-exon ORFs are never frame-merged."
+                },
+                "unify_orf_no_frame_merge": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-ban",
+                    "description": "Disable frame-aware merging; only use exact coordinate matches."
+                },
+                "unify_orf_seq_cluster": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-object-group",
+                    "description": "Enable Stage 3 sequence-similarity clustering (UniRef90-inspired, disabled by default)."
                 },
                 "extra_unify_orf_predictions_args": {
                     "type": "string",

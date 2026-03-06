@@ -22,66 +22,82 @@ def parse_coords(coord_str: str) -> List[Tuple[int, int]]:
             continue
     return exons
 
-def load_gene_level_cds_from_gtf(gtf_file: str) -> Dict[str, Dict[str, Any]]:
+# lncRNA-related biotypes in Ensembl/GENCODE annotations.
+LNCRNA_BIOTYPES = {
+    # Human / mouse (Ensembl / GENCODE)
+    "lncRNA", "lincRNA", "antisense", "processed_transcript",
+    "sense_intronic", "sense_overlapping", "non_coding",
+    "3prime_overlapping_ncrna", "bidirectional_promoter_lncrna",
+    # Plant species (Ensembl Plants)
+    "ncRNA",            # Oryza sativa (rice): general long non-coding RNA
+    "antisense_RNA",    # Oryza sativa: antisense long non-coding RNA
+    "misc_non_coding",  # Zea mays (maize): catch-all non-coding gene category
+}
+
+def load_gene_level_cds_from_gtf(gtf_file: str) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     """
-    Builds gene-level CDS reference from GTF.
+    Builds gene-level CDS reference and gene-biotype lookup from GTF.
     Merges all CDS intervals for a gene into a canonical set.
-    Returns: gene_id -> {'strand': str, 'exons': [(s,e), ...]}
+
+    Returns:
+      cds_data:       gene_id -> {'strand': str, 'exons': [(s,e), ...]}
+      gene_biotypes:  gene_id -> gene_biotype string
     """
     print(f"Loading GTF to build Gene-level CDS: {gtf_file}...", file=sys.stderr)
-    gene_cds = {} # gid -> {strand, intervals: set of (s,e)}
-    
+    gene_cds = {}       # gid -> {strand, intervals: set of (s,e)}
+    gene_biotypes = {}  # gid -> gene_biotype
+
     with open(gtf_file, 'r') as f:
         for line in f:
             if line.startswith('#'): continue
             parts = line.strip().split('\t')
             if len(parts) < 9: continue
-            
-            if parts[2] != 'CDS': continue
-            
+
+            feature = parts[2]
+            if feature not in ('gene', 'CDS'): continue
+
             # Parse attributes
             attrs = {}
             for p in parts[8].split(';'):
                 p = p.strip()
                 if not p: continue
-                kv = p.split(' ')
-                attrs[kv[0]] = ' '.join(kv[1:]).strip('"')
-            
+                kv = p.split(' ', 1)
+                if len(kv) == 2:
+                    attrs[kv[0]] = kv[1].strip('"')
+
             gid = attrs.get('gene_id')
             if not gid: continue
-            
-            strand = parts[6]
-            start, end = int(parts[3]), int(parts[4])
-            
-            if gid not in gene_cds:
-                gene_cds[gid] = {'strand': strand, 'intervals': set()}
-            
-            gene_cds[gid]['intervals'].add((start, end))
-    
-    # Convert sets to sorted lists
+
+            if feature == 'gene':
+                bt = attrs.get('gene_biotype', '')
+                if bt:
+                    gene_biotypes[gid] = bt
+            elif feature == 'CDS':
+                strand = parts[6]
+                start, end = int(parts[3]), int(parts[4])
+                if gid not in gene_cds:
+                    gene_cds[gid] = {'strand': strand, 'intervals': set()}
+                gene_cds[gid]['intervals'].add((start, end))
+
+    # Convert sets to sorted/merged lists
     final_cds = {}
     for gid, data in gene_cds.items():
         sorted_intervals = sorted(list(data['intervals']))
-        # Merge overlapping intervals? 
-        # For gene-level CDS, usually we want the union of all CDS exons.
         merged = []
         if sorted_intervals:
             curr_s, curr_e = sorted_intervals[0]
             for next_s, next_e in sorted_intervals[1:]:
-                if next_s <= curr_e + 1: # Overlap or adjacent
+                if next_s <= curr_e + 1:
                     curr_e = max(curr_e, next_e)
                 else:
                     merged.append((curr_s, curr_e))
                     curr_s, curr_e = next_s, next_e
             merged.append((curr_s, curr_e))
-            
-        final_cds[gid] = {
-            'strand': data['strand'],
-            'exons': merged
-        }
-    
-    print(f"Gene-level CDS built for {len(final_cds)} genes.", file=sys.stderr)
-    return final_cds
+        final_cds[gid] = {'strand': data['strand'], 'exons': merged}
+
+    print(f"Gene-level CDS built for {len(final_cds)} genes; "
+          f"{len(gene_biotypes)} gene biotypes loaded.", file=sys.stderr)
+    return final_cds, gene_biotypes
 
 # --- 2. Classification Logic ---
 
@@ -91,13 +107,18 @@ def check_overlap(exons1: List[Tuple[int, int]], exons2: List[Tuple[int, int]]) 
             if max(s1, s2) <= min(e1, e2): return True
     return False
 
-def classify_orf(orf: Dict, merged_cds: Dict) -> str:
+def classify_orf(orf: Dict, merged_cds: Dict, gene_biotype: str = "") -> str:
     """
     Classifies an ORF based on its overlap with Gene-level CDS.
-    Types: annotated, truncated, extension, isoform, novel, etc.
-    This logic mimics the original R source code logic mentioned in previous version.
+    Types: uORF, uoORF, dORF, doORF, intORF, lncRNA, novel, etc.
+
+    When merged_cds is None (no CDS for this gene) and gene_biotype indicates
+    a lncRNA-class gene, returns "lncRNA" instead of "novel".
     """
-    if not merged_cds: return "novel"
+    if not merged_cds:
+        if gene_biotype in LNCRNA_BIOTYPES:
+            return "lncRNA"
+        return "novel"
     
     if orf['strand'] != merged_cds['strand']: return "novel_antisenese"
     
@@ -174,12 +195,16 @@ def classify_orf(orf: Dict, merged_cds: Dict) -> str:
             
         return "novel"
 
-def process_chunk(chunk_orfs: List[Dict], cds_data: Dict[str, Dict]) -> List[Tuple[str, str]]:
+def process_chunk(chunk_orfs: List[Dict], cds_data: Dict[str, Dict],
+                  gene_biotypes: Dict[str, str] = None) -> List[Tuple[str, str]]:
+    if gene_biotypes is None:
+        gene_biotypes = {}
     results = []
     for orf in chunk_orfs:
         gid = orf['gene_id']
         merged_cds = cds_data.get(gid)
-        category = classify_orf(orf, merged_cds)
+        biotype = gene_biotypes.get(gid, "")
+        category = classify_orf(orf, merged_cds, gene_biotype=biotype)
         results.append((orf['orf_id'], category))
     return results
 
@@ -236,7 +261,8 @@ def write_extra_outputs(orfs: List[Dict], classification_map: Dict[str, str], pr
         # Write out header
         out_header = ['orf_id', 'chrom', 'start', 'end', 'strand',
                       'gene_id', 'transcript_id', 'length_aa',
-                      'tools', 'n_samples', 'orf_type_category'] + all_samples
+                      'tools', 'n_samples', 'orf_type_category',
+                      'is_short', 'is_non_atg'] + all_samples
         out_f.write('\t'.join(out_header) + '\n')
 
         for orf in orfs:
@@ -286,9 +312,25 @@ def write_extra_outputs(orfs: List[Dict], classification_map: Dict[str, str], pr
             sample_set = set(s.strip() for s in orf.get('samples', '').split(',') if s.strip())
             n_samples = len(sample_set)
             sample_cols = [('1' if s in sample_set else '0') for s in all_samples]
+
+            # is_short: length_aa < 16 (Mudge et al. 2022 threshold)
+            try:
+                is_short = '1' if int(length_aa) < 16 else '0'
+            except (ValueError, TypeError):
+                is_short = 'NA'
+
+            # is_non_atg: start codon != ATG
+            start_codon = orf.get('start_codon', '')
+            if not start_codon and sequence:
+                start_codon = sequence[:3].upper()
+            is_non_atg = '0' if start_codon.upper() in ('ATG', '') else '1'
+            if not start_codon:
+                is_non_atg = 'NA'
+
             out_row = [orf_id, chrom, orf.get('start',''), orf.get('end',''), strand,
                        gene_id, transcript_id, length_aa,
-                       tools, str(n_samples), classification] + sample_cols
+                       tools, str(n_samples), classification,
+                       is_short, is_non_atg] + sample_cols
             out_f.write('\t'.join(out_row) + '\n')
 
     # Logs file
@@ -314,8 +356,8 @@ def main():
     
     args = parser.parse_args()
     
-    # 1. Load CDS Data
-    cds_data = load_gene_level_cds_from_gtf(args.gtf)
+    # 1. Load CDS Data and gene biotypes
+    cds_data, gene_biotypes = load_gene_level_cds_from_gtf(args.gtf)
     
     # 2. Load ORFs
     print(f"Loading ORFs from {args.input}...", file=sys.stderr)
@@ -339,7 +381,7 @@ def main():
     print(f"Classifying with {num_processes} processes...", file=sys.stderr)
     
     with Pool(processes=num_processes) as pool:
-        func = partial(process_chunk, cds_data=cds_data)
+        func = partial(process_chunk, cds_data=cds_data, gene_biotypes=gene_biotypes)
         results_list = pool.map(func, chunks)
     
     # Flatten results and create a mapping

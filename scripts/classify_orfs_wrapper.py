@@ -136,7 +136,9 @@ def main():
                 aa.append(CODON_TABLE.get(codon, 'X'))
             return ''.join(aa)
 
-        if os.path.exists(metadata_file):
+        if os.path.exists(fasta_file):
+            print(f"Using existing protein FASTA (skipping generation): {fasta_file}", file=sys.stderr)
+        elif os.path.exists(metadata_file):
             print(f"Generating protein FASTA for GENCODE mapper from {metadata_file}...", file=sys.stderr)
             with open(metadata_file) as mf, open(fasta_file, 'w') as ff:
                 hdr = mf.readline().strip().split('\t')

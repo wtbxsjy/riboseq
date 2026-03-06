@@ -29,3 +29,4 @@ patched_packages/*
 .DS_Store
 *.pyc
 .claude/
+orfquant_results.*
