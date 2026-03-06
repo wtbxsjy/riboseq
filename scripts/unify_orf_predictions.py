@@ -6,8 +6,25 @@ import csv
 import re
 from typing import List, Dict, Tuple, Set, Optional
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import multiprocessing
+import threading
+
+# ---------------------------------------------------------------------------
+# Module-level globals shared with parallel worker processes via fork (Linux).
+# Set in main() before the Pool is created; inherited by child processes via
+# copy-on-write fork — no serialisation overhead for large objects.
+# ---------------------------------------------------------------------------
+_shared_gtf_index  = None   # GTFIndex instance
+_shared_fasta_path = None   # str path to genome FASTA (workers open their own handle)
+
+# Maps the canonical tool display-name used in tasks to the lowercase key used
+# in tool_stats / sample_stats dictionaries.
+_TOOL_STATS_KEY = {
+    'Ribo-TISH': 'ribotish',
+    'Ribotricer': 'ribotricer',
+    'ORFquant':   'orfquant',
+}
 
 # Try to import biopython and pyfaidx
 try:
@@ -1445,7 +1462,89 @@ def calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, num
     print(f"  Processed {len(final_list)}/{len(final_list)} candidates.", file=sys.stderr)
 
 
+# ---------------------------------------------------------------------------
+# Top-level functions for parallel workers (must be at module level so that
+# multiprocessing can pickle/reference them).
+# ---------------------------------------------------------------------------
+
+def _parse_file_task(task):
+    """Parallel worker: parse one input file.
+
+    Inherits *_shared_gtf_index* from the parent process via fork (Linux COW).
+    No GTFIndex serialisation overhead.
+
+    Args:
+        task: (tool, file_path, sid, min_len, exclude_tistypes, atg_only)
+    Returns:
+        (tool, sid, orfs_list)
+    """
+    global _shared_gtf_index
+    tool, file_path, sid, min_len, exclude_tistypes, atg_only = task
+    _parse_fn = {
+        'Ribo-TISH': parse_ribotish,
+        'Ribotricer': parse_ribotricer,
+        'ORFquant':   parse_orfquant,
+    }[tool]
+    orfs = _parse_fn(file_path, _shared_gtf_index, sid, min_len,
+                     exclude_tistypes=exclude_tistypes, atg_only=atg_only)
+    return tool, sid, orfs
+
+
+def _extract_annotate_chunk(chunk):
+    """Parallel worker: sequence extraction + CDS annotation for a batch of ORFs.
+
+    Inherits *_shared_gtf_index* via fork; creates its own ``pyfaidx.Fasta``
+    instance from *_shared_fasta_path* to avoid shared file-handle races.
+
+    Args:
+        chunk: list of (id_key, chrom, strand, blocks, frame, length_nt)
+    Returns:
+        list of (id_key, nt_seq, aa_seq, start_codon, is_cds_overlap, gene_ids)
+    """
+    global _shared_gtf_index, _shared_fasta_path
+    try:
+        local_fasta = Fasta(_shared_fasta_path)
+    except Exception as exc:
+        print(f"Worker: failed to open FASTA '{_shared_fasta_path}': {exc}",
+              file=sys.stderr)
+        return [(row[0], '', '', 'UNK', False, []) for row in chunk]
+
+    results = []
+    for id_key, chrom, strand, blocks, frame, length_nt in chunk:
+        # --- Sequence extraction ---
+        try:
+            seq_parts = [str(local_fasta[chrom][s - 1:e]) for s, e in blocks]
+            full_seq  = ''.join(seq_parts)
+            seq_obj   = Seq(full_seq)
+            if strand == '-':
+                seq_obj = seq_obj.reverse_complement()
+            nt_seq      = str(seq_obj)
+            aa_seq      = str(seq_obj.translate(to_stop=False))
+            start_codon = nt_seq[:3].upper() if len(nt_seq) >= 3 else ''
+        except Exception:
+            nt_seq      = 'N' * length_nt
+            aa_seq      = ''
+            start_codon = 'UNK'
+
+        # --- CDS + gene overlap annotation ---
+        try:
+            orf_start = blocks[0][0]
+            orf_end   = blocks[-1][1]
+            gene_ids  = _shared_gtf_index.find_overlapping_genes(
+                chrom, strand, orf_start, orf_end)
+            is_cds    = _shared_gtf_index.find_cds_overlap_inframe(
+                chrom, strand, orf_start, orf_end, frame)
+        except Exception:
+            gene_ids = []
+            is_cds   = False
+
+        results.append((id_key, nt_seq, aa_seq, start_codon, is_cds, gene_ids))
+    return results
+
+
 def main():
+    global _shared_gtf_index, _shared_fasta_path
+
     parser = argparse.ArgumentParser(description="Unify ORF predictions from multiple tools")
     parser.add_argument("--ribotish", nargs='+', help="Ribo-TISH output files")
     parser.add_argument("--ribotricer", nargs='+', help="Ribotricer output files")
@@ -1494,7 +1593,24 @@ def main():
     
     print(f"Loading Genome FASTA: {args.fasta}...", file=sys.stderr)
     genome_fasta = Fasta(args.fasta)
-    
+
+    # ---------------------------------------------------------------------------
+    # Determine parallelism.  Set module-level globals BEFORE any Pool.fork()
+    # so child processes inherit them via Linux copy-on-write fork.
+    # ---------------------------------------------------------------------------
+    num_workers = min(args.threads, multiprocessing.cpu_count())
+    _shared_gtf_index  = gtf_index
+    _shared_fasta_path = args.fasta
+
+    def _can_fork():
+        try:
+            multiprocessing.get_context('fork')
+            return True
+        except ValueError:
+            return False
+
+    use_parallel = num_workers > 1 and _can_fork()
+
     # Log which tools have input files
     print("\n=== Input Files Summary ===", file=sys.stderr)
     print(f"Ribo-TISH files: {len(args.ribotish) if args.ribotish else 0}", file=sys.stderr)
@@ -1509,42 +1625,63 @@ def main():
     if args.orfquant:
         for f in args.orfquant:
             print(f"  - {f}", file=sys.stderr)
-    
+
     all_candidates = []
-    
+
     # Track statistics by tool
-    tool_stats = defaultdict(lambda: {'count': 0, 'samples': set()})
+    tool_stats   = defaultdict(lambda: {'count': 0, 'samples': set()})
     sample_stats = defaultdict(lambda: {'ribotish': 0, 'ribotricer': 0, 'orfquant': 0})
-    
+
+    # Build task list: (tool_name, file_path, sample_id, min_len, excl, atg_only)
+    parse_tasks = []
     if args.ribotish:
         for f in args.ribotish:
             sid = os.path.basename(f).split('.')[0].replace('_pred', '')
-            orfs = parse_ribotish(f, gtf_index, sid, args.min_len,
-                                  exclude_tistypes=exclude_tistypes, atg_only=args.atg_only)
-            all_candidates.extend(orfs)
-            tool_stats['ribotish']['count'] += len(orfs)
-            tool_stats['ribotish']['samples'].add(sid)
-            sample_stats[sid]['ribotish'] = len(orfs)
-            
+            parse_tasks.append(('Ribo-TISH', f, sid, args.min_len, exclude_tistypes, args.atg_only))
     if args.ribotricer:
         for f in args.ribotricer:
             sid = os.path.basename(f).split('.')[0].replace('_translating_ORFs', '')
-            orfs = parse_ribotricer(f, gtf_index, sid, args.min_len,
-                                    exclude_tistypes=exclude_tistypes, atg_only=args.atg_only)
-            all_candidates.extend(orfs)
-            tool_stats['ribotricer']['count'] += len(orfs)
-            tool_stats['ribotricer']['samples'].add(sid)
-            sample_stats[sid]['ribotricer'] = len(orfs)
-            
+            parse_tasks.append(('Ribotricer', f, sid, args.min_len, exclude_tistypes, args.atg_only))
     if args.orfquant:
         for f in args.orfquant:
             sid = os.path.basename(f).split('.')[0].replace('_Detected_ORFs', '')
-            orfs = parse_orfquant(f, gtf_index, sid, args.min_len,
-                                  exclude_tistypes=exclude_tistypes, atg_only=args.atg_only)
+            parse_tasks.append(('ORFquant', f, sid, args.min_len, exclude_tistypes, args.atg_only))
+
+    # --- Parallel or sequential file parsing ---
+    if use_parallel and len(parse_tasks) > 1:
+        n_parse_workers = min(num_workers, len(parse_tasks))
+        print(f"Parsing {len(parse_tasks)} input files using {n_parse_workers} workers (fork)...",
+              file=sys.stderr)
+        try:
+            ctx = multiprocessing.get_context('fork')
+            with ctx.Pool(n_parse_workers) as pool:
+                for tool, sid, orfs in pool.imap_unordered(_parse_file_task, parse_tasks):
+                    all_candidates.extend(orfs)
+                    key = _TOOL_STATS_KEY[tool]
+                    tool_stats[key]['count'] += len(orfs)
+                    tool_stats[key]['samples'].add(sid)
+                    sample_stats[sid][key] = len(orfs)
+        except Exception as exc:
+            print(f"Parallel parsing failed ({exc}), retrying sequentially...", file=sys.stderr)
+            all_candidates.clear()
+            for ts in [tool_stats, sample_stats]:
+                ts.clear()
+            use_parallel = False
+
+    if not use_parallel or len(parse_tasks) <= 1:
+        _parse_fn_map = {
+            'Ribo-TISH': parse_ribotish,
+            'Ribotricer': parse_ribotricer,
+            'ORFquant':   parse_orfquant,
+        }
+        for tool, file_path, sid, min_len, excl, atg in parse_tasks:
+            orfs = _parse_fn_map[tool](file_path, gtf_index, sid, min_len,
+                                       exclude_tistypes=excl, atg_only=atg)
             all_candidates.extend(orfs)
-            tool_stats['orfquant']['count'] += len(orfs)
-            tool_stats['orfquant']['samples'].add(sid)
-            sample_stats[sid]['orfquant'] = len(orfs)
+            key = _TOOL_STATS_KEY[tool]
+            tool_stats[key]['count'] += len(orfs)
+            tool_stats[key]['samples'].add(sid)
+            sample_stats[sid][key] = len(orfs)
 
     print(f"Total raw candidates: {len(all_candidates)}", file=sys.stderr)
     
@@ -1567,8 +1704,12 @@ def main():
         if total > 0:
             print(f"  {sample:20s}: ribotish={stats['ribotish']:6d}, ribotricer={stats['ribotricer']:6d}, orfquant={stats['orfquant']:6d}, total={total:6d}", file=sys.stderr)
     
-    # Stage 1: Exact match merging (same chrom, strand, and exact block coordinates)
-    merged_candidates = {} 
+    # Stage 1: Exact match merging (same chrom, strand, and exact block coordinates).
+    # Sort first so the same (gid, tid) is always chosen as the representative when
+    # the same ORF appears in multiple samples (ensures deterministic output regardless
+    # of parallel parse order).
+    all_candidates.sort(key=lambda c: (c.chrom, c.strand, c.id_key, c.gid, c.tid))
+    merged_candidates = {}
     for cand in all_candidates:
         if cand.id_key in merged_candidates:
             merged_candidates[cand.id_key].merge(cand)
@@ -1579,19 +1720,59 @@ def main():
     print(f"  Merged {len(all_candidates) - len(merged_candidates)} duplicates", file=sys.stderr)
     
     final_list = list(merged_candidates.values())
+    # Sort deterministically so ORF_IDs are consistent regardless of parse order
+    final_list.sort(key=lambda c: (c.chrom, c.strand, c.start, c.end))
 
     skip_stage3 = not args.seq_cluster
 
-    # Stage 2 preparation: extract sequences for all candidates (needed for annotation + frame merge)
-    print(f"Extracting sequences ({len(final_list)} candidates)...", file=sys.stderr)
-    for cand in final_list:
-        extract_sequence(cand, genome_fasta)
+    # Stage 2 preparation: extract sequences + annotate CDS overlap for all candidates.
+    # (Already sorted deterministically above; no additional sort needed for I/O locality.)
 
-    # Stage 2a: Annotate with reference (CDS overlap + overlapping genes)
-    print(f"Annotating CDS overlap and overlapping genes...", file=sys.stderr)
-    annotate_cds_overlap(final_list, gtf_index)
+    if use_parallel and len(final_list) > 200:
+        # Parallel: combine sequence extraction + CDS annotation in one worker pass.
+        # Workers inherit _shared_gtf_index via fork; each opens its own Fasta handle.
+        chunk_size = max(200, len(final_list) // (num_workers * 4))
+        chunk_data = [
+            (c.id_key, c.chrom, c.strand, c.blocks, c.frame, c.length_nt)
+            for c in final_list
+        ]
+        chunks     = [chunk_data[i:i + chunk_size]
+                      for i in range(0, len(chunk_data), chunk_size)]
+        cand_lookup = {c.id_key: c for c in final_list}
+
+        print(f"Extracting sequences + annotating CDS overlap "
+              f"({len(final_list)} candidates, {num_workers} workers, "
+              f"{len(chunks)} chunks)...", file=sys.stderr)
+        try:
+            ctx = multiprocessing.get_context('fork')
+            with ctx.Pool(num_workers) as pool:
+                all_chunk_results = pool.map(_extract_annotate_chunk, chunks)
+            for chunk_results in all_chunk_results:
+                for id_key, nt_seq, aa_seq, start_codon, is_cds, gene_ids in chunk_results:
+                    cand = cand_lookup.get(id_key)
+                    if cand:
+                        cand.sequence             = nt_seq
+                        cand.aa_sequence          = aa_seq
+                        cand.start_codon          = start_codon
+                        cand.is_cds_overlap       = is_cds
+                        cand.overlapping_gene_ids = gene_ids
+        except Exception as exc:
+            print(f"Parallel extract/annotate failed ({exc}), retrying sequentially...",
+                  file=sys.stderr)
+            for cand in final_list:
+                extract_sequence(cand, genome_fasta)
+            annotate_cds_overlap(final_list, gtf_index)
+    else:
+        # Sequential path (threads=1, small dataset, or non-fork platform)
+        print(f"Extracting sequences ({len(final_list)} candidates)...", file=sys.stderr)
+        for cand in final_list:
+            extract_sequence(cand, genome_fasta)
+        print(f"Annotating CDS overlap and overlapping genes...", file=sys.stderr)
+        annotate_cds_overlap(final_list, gtf_index)
+
     cds_overlap_count = sum(1 for c in final_list if c.is_cds_overlap)
-    print(f"  CDS in-frame overlap: {cds_overlap_count} ORFs ({100*cds_overlap_count/max(len(final_list),1):.1f}%)", file=sys.stderr)
+    print(f"  CDS in-frame overlap: {cds_overlap_count} ORFs "
+          f"({100*cds_overlap_count/max(len(final_list),1):.1f}%)", file=sys.stderr)
 
     # Stage 2: Frame-aware merging (single-exon only, overlap fraction threshold)
     if not args.no_frame_merge:
