@@ -32,23 +32,19 @@ class trans_object:
 
 
 def lcs(S, T):
-    m = len(S)
-    n = len(T)
-    counter = [[0] * (n + 1) for x in range(m + 1)]
-    longest = 0
-    lcs_set = set()
-    for i in range(m):
-        for j in range(n):
-            if S[i] == T[j]:
-                c = counter[i][j] + 1
-                counter[i + 1][j + 1] = c
-                if c > longest:
-                    lcs_set = set()
-                    longest = c
-                    lcs_set.add(S[i - c + 1 : i + 1])
-                elif c == longest:
-                    lcs_set.add(S[i - c + 1 : i + 1])
-    return lcs_set
+    """Return longest common substring.
+
+    Uses difflib.SequenceMatcher for fast C-level string comparison
+    instead of O(|S|×|T|) pure-Python dynamic programming.
+    Returns a set with a single string (the longest common substring)
+    to preserve the original interface.
+    """
+    import difflib
+    m = difflib.SequenceMatcher(None, S, T)
+    block = m.find_longest_match(0, len(S), 0, len(T))
+    if block.size == 0:
+        return set()
+    return {S[block.a : block.a + block.size]}
 
 
 def get_index_positions(list_of_elems, element):
@@ -475,6 +471,20 @@ def orf_tags(
     trans_orfs = {}
     coord_psites = {}
     second_names = {}
+    # Cache translated transcript sequences (3 frames each) so we only
+    # translate each transcript once regardless of how many ORFs map to it.
+    _tx_trans_cache = {}
+
+    def _get_tx_frames(tx_id):
+        if tx_id not in _tx_trans_cache:
+            seq = transcriptome_fa[tx_id].seq
+            _tx_trans_cache[tx_id] = (
+                str(seq.translate(cds=False)),
+                str(seq[1:].translate(cds=False)),
+                str(seq[2:].translate(cds=False)),
+            )
+        return _tx_trans_cache[tx_id]
+
     for orf in overlaps:
         cat2 = "non-coding"
         try:
@@ -494,15 +504,10 @@ def orf_tags(
                 continue
             gene = trans[1]
             genename = trans[4]
-            f1 = str(transcriptome_fa[trans[0]].seq.translate(cds=False)).find(
-                str(orf_seq)
-            )
-            f2 = str(transcriptome_fa[trans[0]].seq[1:].translate(cds=False)).find(
-                str(orf_seq)
-            )
-            f3 = str(transcriptome_fa[trans[0]].seq[2:].translate(cds=False)).find(
-                str(orf_seq)
-            )
+            _frames = _get_tx_frames(trans[0])
+            f1 = _frames[0].find(str(orf_seq))
+            f2 = _frames[1].find(str(orf_seq))
+            f3 = _frames[2].find(str(orf_seq))
             fi = [f1, f2, f3].index(max([f1, f2, f3]))
             f = max(f1, f2, f3) * 3 + fi
             if f < 0:
@@ -512,15 +517,10 @@ def orf_tags(
             intersection = []
             if trans[0] in overlaps_cds:  # Protein-codingç
                 prot = overlaps_cds[trans[0]]
-                c1 = str(transcriptome_fa[trans[0]].seq.translate(cds=False)).find(
-                    str(proteome_fa[prot].seq).replace("X", "")
-                )
-                c2 = str(transcriptome_fa[trans[0]].seq[1:].translate(cds=False)).find(
-                    str(proteome_fa[prot].seq).replace("X", "")
-                )
-                c3 = str(transcriptome_fa[trans[0]].seq[2:].translate(cds=False)).find(
-                    str(proteome_fa[prot].seq).replace("X", "")
-                )
+                _prot_seq = str(proteome_fa[prot].seq).replace("X", "")
+                c1 = _frames[0].find(_prot_seq)
+                c2 = _frames[1].find(_prot_seq)
+                c3 = _frames[2].find(_prot_seq)
                 cc = len(str(proteome_fa[prot].seq).replace("X", ""))
                 ci = [c1, c2, c3].index(max([c1, c2, c3]))
                 c = max(c1, c2, c3) * 3 + ci
@@ -560,54 +560,60 @@ def orf_tags(
             trans_orfs.setdefault(trans[0], [])
             trans_orfs[trans[0]].append([orf, fi, f, orf_seq])
 
-            # Write ATG and STOP
-            all_coords = [[], [], gtf[trans[0]].chrm, gtf[trans[0]].strand, [], []]
-            if gtf[trans[0]].strand == "-":
-                rev = len(str(transcriptome_fa[trans[0]].seq)) - (
+            # Write ATG and STOP using vectorized exon-offset mapping.
+            # Replaces the per-nucleotide nested loop with cumulative exon
+            # arithmetic: find genome positions for transcript offsets f and
+            # f+orf_len-1, then iterate P-site offsets only (not all nt).
+            _strand = gtf[trans[0]].strand
+            if _strand == "-":
+                f = len(str(transcriptome_fa[trans[0]].seq)) - (
                     f + (len(orf_seq) * 3)
                 )
-                f = rev
-            tt = 0
-            tt2 = -1
-            ranges = []
-            for n, exon in enumerate(gtf[trans[0]].start):
-                for j in range(gtf[trans[0]].start[n], gtf[trans[0]].end[n] + 1):
-                    if tt == f:
-                        tt2 = 0
-                        atgstop.write(
-                            gtf[trans[0]].chrm
-                            + "\t"
-                            + str(j)
-                            + "\t"
-                            + str(j)
-                            + "\t"
-                            + orf
-                            + "\tboundaries\t"
-                            + gtf[trans[0]].strand
-                            + "\n"
-                        )
-                    elif tt == f + (len(orf_seq) * 3) - 1:
-                        tt2 = -1
-                        atgstop.write(
-                            gtf[trans[0]].chrm
-                            + "\t"
-                            + str(j)
-                            + "\t"
-                            + str(j)
-                            + "\t"
-                            + orf
-                            + "\tboundaries\t"
-                            + gtf[trans[0]].strand
-                            + "\n"
-                        )
-                    if tt2 != -1:
-                        if (tt2 % 3 == 2 and gtf[trans[0]].strand == "+") or (
-                            tt2 % 3 == 0 and gtf[trans[0]].strand == "-"
-                        ):
-                            coord_psites.setdefault(orf, [])
-                            coord_psites[orf].append(j)
-                        tt2 += 1
-                    tt += 1
+            _orf_len_nt = len(orf_seq) * 3
+            _ex_starts = gtf[trans[0]].start
+            _ex_ends   = gtf[trans[0]].end
+            _chrm      = gtf[trans[0]].chrm
+
+            # Build cumulative transcript offsets for each exon
+            _cum = []
+            _total = 0
+            for _n in range(len(_ex_starts)):
+                _cum.append(_total)
+                _total += _ex_ends[_n] - _ex_starts[_n] + 1
+
+            def _tx2g(tx_pos):
+                """Transcript position → genome coordinate (ascending exon order)."""
+                for _idx in range(len(_cum) - 1, -1, -1):
+                    if _cum[_idx] <= tx_pos:
+                        return _ex_starts[_idx] + (tx_pos - _cum[_idx])
+                return None
+
+            # ATG boundary
+            _atg_gp = _tx2g(f)
+            if _atg_gp is not None:
+                atgstop.write(
+                    _chrm + "\t" + str(_atg_gp) + "\t" + str(_atg_gp)
+                    + "\t" + orf + "\tboundaries\t" + _strand + "\n"
+                )
+
+            # Stop boundary (last nt of ORF)
+            _stop_gp = _tx2g(f + _orf_len_nt - 1)
+            if _stop_gp is not None:
+                atgstop.write(
+                    _chrm + "\t" + str(_stop_gp) + "\t" + str(_stop_gp)
+                    + "\t" + orf + "\tboundaries\t" + _strand + "\n"
+                )
+
+            # P-site positions (every 3rd nt within ORF, stop boundary excluded)
+            coord_psites.setdefault(orf, [])
+            if _strand == "+":
+                _psite_tx_offsets = range(f + 2, f + _orf_len_nt - 1, 3)
+            else:
+                _psite_tx_offsets = range(f, f + _orf_len_nt, 3)
+            for _tx_pos in _psite_tx_offsets:
+                _gp = _tx2g(_tx_pos)
+                if _gp is not None:
+                    coord_psites[orf].append(_gp)
 
     atgstop.close()
     return candidates, trans_orfs, second_names, coord_psites

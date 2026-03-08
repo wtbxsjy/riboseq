@@ -319,14 +319,22 @@ def calculate_overlap(cand1, cand2):
         min_len = min(cand1.length_nt, cand2.length_nt)
         return overlap_bp, overlap_bp / min_len if min_len > 0 else 0.0
     
-    # For multi-exon ORFs, calculate exon-level overlap
+    # For multi-exon ORFs, use two-pointer merge for O(b1+b2) overlap calculation
     overlap_bp = 0
-    for s1, e1 in cand1.blocks:
-        for s2, e2 in cand2.blocks:
-            os = max(s1, s2)
-            oe = min(e1, e2)
-            if os < oe:
-                overlap_bp += oe - os
+    b1 = sorted(cand1.blocks)
+    b2 = sorted(cand2.blocks)
+    i2, j2 = 0, 0
+    while i2 < len(b1) and j2 < len(b2):
+        s1, e1 = b1[i2]
+        s2, e2 = b2[j2]
+        os = max(s1, s2)
+        oe = min(e1, e2)
+        if os < oe:
+            overlap_bp += oe - os
+        if e1 <= e2:
+            i2 += 1
+        else:
+            j2 += 1
     
     min_len = min(cand1.length_nt, cand2.length_nt)
     return overlap_bp, overlap_bp / min_len if min_len > 0 else 0.0
@@ -458,7 +466,7 @@ def merge_frame_compatible_orfs(candidates, min_overlap_fraction=0.9):
             if cand2.chrom != cand1.chrom or cand2.strand != cand1.strand:
                 break
             if cand2.frame != cand1.frame:
-                continue
+                break  # sorted by (chrom, strand, frame, start); no more matching frames
             # Early exit: cand2 starts beyond the furthest end of any group member
             if cand2.start > max_possible_end:
                 break
@@ -589,46 +597,59 @@ def cluster_by_sequence(candidates, seq_identity=0.9, min_length_ratio=0.8,
         n = len(indices)
         if n == 1:
             continue
-        # Sort by start position for a narrow comparison window
-        indices_sorted = sorted(indices, key=lambda i: candidates[i].start)
-        for ii in range(n):
-            idx1 = indices_sorted[ii]
-            c1 = candidates[idx1]
-            for jj in range(ii + 1, n):
-                idx2 = indices_sorted[jj]
-                c2 = candidates[idx2]
+        # Replace O(n²) pairwise scan with terminus-based hash bucketing.
+        # Two ORFs can only merge if they share a start OR stop within
+        # ±terminus_tolerance bp (Condition 2).  Instead of checking all
+        # pairs, bucket by floor(pos / bin_width) and only compare within
+        # the same or adjacent bins — reduces to O(n) average per gene.
+        tol = terminus_tolerance
+        bin_w = 2 * tol + 1
 
-                # Early-exit: if start positions are too far apart to share terminus
-                # (and the ORFs are not likely to share a stop), skip
-                # (max ORF is ~3000 aa → 9000 nt; we just avoid extremely distant pairs)
-                if abs(c2.start - c1.start) > 100000:
-                    break
+        def _check_pair(idx1, idx2):
+            c1, c2 = candidates[idx1], candidates[idx2]
+            len1, len2 = c1.length_aa, c2.length_aa
+            if len1 == 0 or len2 == 0:
+                return
+            if min(len1, len2) / max(len1, len2) < min_length_ratio:
+                return
+            aa1, aa2 = c1.aa_sequence, c2.aa_sequence
+            if aa1 and aa2:
+                if _seq_identity_from_shared_terminus(aa1, aa2) < seq_identity:
+                    return
+            uf.union(idx1, idx2)
 
-                # Condition 2: shared start OR stop within tolerance
-                shared_start = abs(c1.start - c2.start) <= terminus_tolerance
-                shared_stop  = abs(c1.end   - c2.end)   <= terminus_tolerance
-                if not (shared_start or shared_stop):
-                    continue
-
-                # Condition 3a: length ratio
-                len1, len2 = c1.length_aa, c2.length_aa
-                if len1 == 0 or len2 == 0:
-                    continue
-                shorter_len = min(len1, len2)
-                longer_len  = max(len1, len2)
-                if shorter_len / longer_len < min_length_ratio:
-                    continue
-
-                # Condition 3b: sequence identity (only if sequences available)
-                aa1 = c1.aa_sequence
-                aa2 = c2.aa_sequence
-                if aa1 and aa2:
-                    identity = _seq_identity_from_shared_terminus(aa1, aa2)
-                    if identity < seq_identity:
+        # --- shared-start pairs ---
+        start_buckets = defaultdict(list)
+        for idx in indices:
+            c = candidates[idx]
+            start_buckets[c.start // bin_w].append(idx)
+        for bin_key, bucket in list(start_buckets.items()):
+            # check within this bin and against the next bin (boundary pairs)
+            next_bucket = start_buckets.get(bin_key + 1, [])
+            combined = bucket + next_bucket
+            for ii in range(len(bucket)):
+                for jj in range(ii + 1, len(combined)):
+                    idx1, idx2 = bucket[ii], combined[jj]
+                    if idx1 == idx2:
                         continue
-                # If sequences not available, fall back to length-ratio-only
+                    if abs(candidates[idx1].start - candidates[idx2].start) <= tol:
+                        _check_pair(idx1, idx2)
 
-                uf.union(idx1, idx2)
+        # --- shared-stop pairs ---
+        end_buckets = defaultdict(list)
+        for idx in indices:
+            c = candidates[idx]
+            end_buckets[c.end // bin_w].append(idx)
+        for bin_key, bucket in list(end_buckets.items()):
+            next_bucket = end_buckets.get(bin_key + 1, [])
+            combined = bucket + next_bucket
+            for ii in range(len(bucket)):
+                for jj in range(ii + 1, len(combined)):
+                    idx1, idx2 = bucket[ii], combined[jj]
+                    if idx1 == idx2:
+                        continue
+                    if abs(candidates[idx1].end - candidates[idx2].end) <= tol:
+                        _check_pair(idx1, idx2)
 
     # Collect groups
     from collections import defaultdict

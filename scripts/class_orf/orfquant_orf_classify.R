@@ -412,6 +412,17 @@ orfquant_classify_orfs <- function(orfs,
   cds_txs <- ann$cds_txs
   max_cds_by_gene <- get_max_cds_by_gene(cds_txs)
 
+  # Pre-compute IRanges::reduce() per gene ONCE so the per-ORF loop avoids
+  # repeating this expensive operation for every ORF mapped to the same gene.
+  cds_genes_reduced <- if (length(cds_genes) > 0) {
+    setNames(
+      lapply(names(cds_genes), function(g) IRanges::reduce(unlist(cds_genes[g]))),
+      names(cds_genes)
+    )
+  } else {
+    list()
+  }
+
   # lncRNA gene set from annotation (may be empty if annotation or GTF lacks gene features)
   lncrna_genes <- if (!is.null(ann$lncrna_genes)) ann$lncrna_genes else character(0)
 
@@ -490,7 +501,7 @@ orfquant_classify_orfs <- function(orfs,
     }
 
     if (!is.na(gene_id) && gene_id %in% names(cds_genes)) {
-      cds_gene <- IRanges::reduce(unlist(cds_genes[gene_id]))
+      cds_gene <- cds_genes_reduced[[gene_id]]
       max_cdsok <- max_cds_by_gene[[gene_id]]
     } else {
       cds_gene <- all_cds
@@ -549,6 +560,7 @@ orfquant_classify_orfs <- function(orfs,
               best_class    <- cls
             }
           }
+          if (best_priority <= 1L) break  # can't improve on ORF_annotated
         }
         res$ORF_category_Tx_compatible[i] <- best_class
       } else if (!is.na(gene_id)) {
@@ -787,6 +799,30 @@ orfquant_classify_orfs_py <- function(orfs,
   cds_genes <- ann$cds_genes
   cds_txs <- ann$cds_txs
 
+  # Pre-compute IRanges::reduce() per gene ONCE (same pattern as orfquant_classify_orfs).
+  cds_genes_reduced2 <- if (length(cds_genes) > 0) {
+    setNames(
+      lapply(names(cds_genes), function(g) GenomicRanges::reduce(unlist(cds_genes[g]))),
+      names(cds_genes)
+    )
+  } else {
+    list()
+  }
+
+  # Pre-compute gene → CDS strand map so the per-ORF loop does O(1) lookup
+  # instead of iterating ALL CDS transcripts via sapply() for each ORF.
+  gene_to_cds_strand2 <- if (length(cds_txs) > 0) {
+    gene_ids_per_tx <- vapply(cds_txs, function(x) {
+      gid <- unique(S4Vectors::mcols(x)$gene_id)
+      if (length(gid) > 0 && !is.na(gid[1])) gid[1] else NA_character_
+    }, character(1))
+    tapply(seq_along(cds_txs), gene_ids_per_tx, function(idxs) {
+      as.vector(GenomicRanges::strand(cds_txs[[idxs[1]]][1]))
+    })
+  } else {
+    list()
+  }
+
   seqnames_vec <- vapply(orf_grl, function(x) {
     if (length(x) == 0) return(NA_character_)
     as.character(GenomicRanges::seqnames(x)[1])
@@ -826,13 +862,9 @@ orfquant_classify_orfs_py <- function(orfs,
     cds_strand <- orf_strand
 
     if (!is.na(gene_id) && gene_id %in% names(cds_genes)) {
-      cds_gene <- GenomicRanges::reduce(unlist(cds_genes[gene_id]))
-      if (length(cds_txs) > 0) {
-        txs_gene <- cds_txs[sapply(cds_txs, function(x) { gid <- unique(x$gene_id); length(gid) > 0 && gid[1] == gene_id })]
-        if (length(txs_gene) > 0) {
-          cds_strand <- as.vector(GenomicRanges::strand(txs_gene[[1]][1]))
-        }
-      }
+      cds_gene <- cds_genes_reduced2[[gene_id]]
+      strand_lookup <- gene_to_cds_strand2[[gene_id]]
+      if (!is.null(strand_lookup)) cds_strand <- strand_lookup
     }
 
     res$ORF_type_py[i] <- classify_py(orf_gen, orf_strand, cds_gene, cds_strand)
