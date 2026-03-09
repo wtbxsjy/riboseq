@@ -209,3 +209,171 @@ process UNIFY_ORF_PREDICTIONS {
     END_VERSIONS
     """
 }
+
+// Per-tool variant: exact-match dedup only, no cross-tool frame-aware merging.
+// Outputs per-tool files for each tool that ran, plus a combined exact-dedup set.
+// Use this when skip_unify_orf_predictions = true to enable per-tool classification.
+process UNIFY_ORF_PREDICTIONS_PER_TOOL {
+    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+
+    tag "${prefix}"
+    label 'process_medium'
+
+    publishDir "${params.outdir}/orf_unification/per_tool", mode: params.publish_dir_mode
+
+    conda "${moduleDir}/environment.yml"
+    container "${ params.unify_orf_container ?
+        params.unify_orf_container :
+        (workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+            'https://depot.galaxyproject.org/singularity/biopython:1.79' :
+            'quay.io/biocontainers/biopython:1.79') }"
+
+    input:
+    tuple val(ribotish_files), val(ribotricer_files), val(orfquant_files), path(all_inputs)
+    path gtf
+    path fasta
+    path unify_script
+    path psites_bedgraph, stageAs: 'bedgraph/*'
+    val sample_list
+
+    output:
+    path "${prefix}_ribotish.metadata.tsv"  , emit: ribotish_metadata  , optional: true
+    path "${prefix}_ribotish.bed"           , emit: ribotish_bed       , optional: true
+    path "${prefix}_ribotish.gtf"           , emit: ribotish_gtf       , optional: true
+    path "${prefix}_ribotricer.metadata.tsv", emit: ribotricer_metadata, optional: true
+    path "${prefix}_ribotricer.bed"         , emit: ribotricer_bed     , optional: true
+    path "${prefix}_ribotricer.gtf"         , emit: ribotricer_gtf     , optional: true
+    path "${prefix}_orfquant.metadata.tsv"  , emit: orfquant_metadata  , optional: true
+    path "${prefix}_orfquant.bed"           , emit: orfquant_bed       , optional: true
+    path "${prefix}_orfquant.gtf"           , emit: orfquant_gtf       , optional: true
+    path "${prefix}.metadata.tsv"           , emit: combined_metadata
+    path "${prefix}.bed"                    , emit: combined_bed
+    path "${prefix}.gtf"                    , emit: combined_gtf
+    path "${prefix}.stats.txt"              , emit: stats
+    path "versions.yml"                     , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    def min_len = params.unify_orf_min_len ?: 6
+    def extra_args = params.extra_unify_orf_predictions_args ?: ''
+    def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ?
+        "--ribotish ${ribotish_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ?
+        "--ribotricer ${ribotricer_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ?
+        "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def has_bedgraph = (psites_bedgraph instanceof List && psites_bedgraph.size() > 0) ||
+                       (psites_bedgraph && !(psites_bedgraph instanceof List) && psites_bedgraph.name != 'NO_FILE')
+    def bedgraph_arg = has_bedgraph ? "--bedgraph-dir bedgraph" : ''
+    def sample_arg = (sample_list && sample_list instanceof List && sample_list.size() > 0) ? "--sample-list ${sample_list.join(',')}" : ''
+    def input_files_list = (all_inputs instanceof List) ? all_inputs.collect{ it.name }.join(' ') : (all_inputs ? all_inputs.name : '')
+    """
+    set -uo pipefail
+
+    if python3 -c "import Bio; import pyfaidx" 2>/dev/null; then
+        echo "Dependencies already available in container"
+    else
+        export PYTHONUSERBASE="\$PWD/.pylibs"
+        export PATH="\$PYTHONUSERBASE/bin:\$PATH"
+        export PYTHONPATH="\$PYTHONUSERBASE/lib/python3.9/site-packages:\${PYTHONPATH:-}"
+        export PIP_NO_CACHE_DIR=1
+        mkdir -p "\$PYTHONUSERBASE"
+        pip install --user --no-cache-dir --no-warn-script-location pyfaidx biopython 2>&1 || \
+            python3 -m pip install --user --no-cache-dir pyfaidx biopython
+    fi
+    python3 -c "import Bio; import pyfaidx; print('Dependencies OK')"
+
+    has_valid_input=false
+    for input_file in ${input_files_list}; do
+        if [ -f "\${input_file}" ]; then
+            line_count=\$(wc -l < "\${input_file}" 2>/dev/null || echo "0")
+            if [ "\${line_count}" -gt 2 ] && \
+               ! grep -qi "placeholder" "\${input_file}" 2>/dev/null && \
+               ! grep -qi "# Empty" "\${input_file}" 2>/dev/null && \
+               ! grep -qi "insufficient" "\${input_file}" 2>/dev/null; then
+                has_valid_input=true
+                break
+            fi
+        fi
+    done
+
+    if [ "\${has_valid_input}" = "false" ]; then
+        echo "WARNING: All input files are empty/placeholder - creating placeholder outputs"
+        for f in ${prefix}_ribotish ${prefix}_ribotricer ${prefix}_orfquant; do
+            echo "# Placeholder (no valid input)" > "\${f}.metadata.tsv"
+            echo "# Placeholder (no valid input)" > "\${f}.bed"
+            echo "# Placeholder (no valid input)" > "\${f}.gtf"
+        done
+        echo "# Placeholder (no valid input)" > ${prefix}.metadata.tsv
+        echo "# Placeholder (no valid input)" > ${prefix}.bed
+        echo "# Placeholder (no valid input)" > ${prefix}.gtf
+        echo "WARNING: No valid ORF input data" > ${prefix}.stats.txt
+    else
+        set +e
+        python3 ${unify_script} \\
+            --gtf ${gtf} \\
+            --fasta ${fasta} \\
+            --output ${prefix} \\
+            --per-tool-output ${prefix} \\
+            --min_len ${min_len} \\
+            --threads ${task.cpus} \\
+            --no-frame-merge \\
+            ${ribotish_arg} \\
+            ${ribotricer_arg} \\
+            ${orfquant_arg} \\
+            ${bedgraph_arg} \\
+            ${sample_arg} \\
+            ${extra_args} 2>&1 | tee unify_orf.log
+        EXIT_CODE=\${PIPESTATUS[0]}
+        set -e
+
+        {
+            echo "=== Per-Tool ORF Unification Statistics ==="
+            grep -E "^===|^By Tool:|^By Sample:|^Final|^After|^Total|^Note:|^  (ribotish|ribotricer|orfquant|Ribo-TISH|Ribotricer|ORFquant|[A-Za-z0-9_])" unify_orf.log || true
+        } > ${prefix}.stats.txt
+
+        if [ \${EXIT_CODE} -ne 0 ]; then
+            if grep -qiE "(no valid|no ORFs|zero ORFs|empty|no predictions|0 ORFs|ValueError|KeyError|IndexError)" unify_orf.log; then
+                echo "WARNING: ORF unification failed due to insufficient data - creating placeholder files"
+                for f in ${prefix}_ribotish ${prefix}_ribotricer ${prefix}_orfquant; do
+                    [ ! -f "\${f}.metadata.tsv" ] && echo "# Placeholder" > "\${f}.metadata.tsv"
+                    [ ! -f "\${f}.bed" ]          && echo "# Placeholder" > "\${f}.bed"
+                    [ ! -f "\${f}.gtf" ]          && echo "# Placeholder" > "\${f}.gtf"
+                done
+                [ ! -f "${prefix}.metadata.tsv" ] && echo "# Placeholder" > ${prefix}.metadata.tsv
+                [ ! -f "${prefix}.bed" ]           && echo "# Placeholder" > ${prefix}.bed
+                [ ! -f "${prefix}.gtf" ]           && echo "# Placeholder" > ${prefix}.gtf
+                echo "ERROR: unification failed" >> ${prefix}.stats.txt
+            else
+                echo "ERROR: UNIFY_ORF_PREDICTIONS_PER_TOOL failed with unexpected error"
+                cat unify_orf.log
+                exit \${EXIT_CODE}
+            fi
+        fi
+    fi
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: \$(python3 --version | sed 's/Python //')
+        biopython: \$(python3 -c "import Bio; print(Bio.__version__)" 2>/dev/null || echo "unknown")
+        pyfaidx: \$(python3 -c "import pyfaidx; print(pyfaidx.__version__)" 2>/dev/null || echo "unknown")
+    END_VERSIONS
+    """
+
+    stub:
+    """
+    touch ${prefix}_ribotish.metadata.tsv ${prefix}_ribotish.bed ${prefix}_ribotish.gtf
+    touch ${prefix}_ribotricer.metadata.tsv ${prefix}_ribotricer.bed ${prefix}_ribotricer.gtf
+    touch ${prefix}_orfquant.metadata.tsv ${prefix}_orfquant.bed ${prefix}_orfquant.gtf
+    touch ${prefix}.metadata.tsv ${prefix}.bed ${prefix}.gtf ${prefix}.stats.txt
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: "3.9.0"
+        biopython: "1.81"
+        pyfaidx: "0.7"
+    END_VERSIONS
+    """
+}

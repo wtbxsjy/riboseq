@@ -45,8 +45,17 @@ include { RIBOTRICER_PREPAREORFS                               } from '../../mod
 include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_PREFILTER } from '../../modules/nf-core/ribotricer/detectorfs'
 include { RIBOTRICER_DETECTORFS as RIBOTRICER_DETECTORFS_POSTFILTER } from '../../modules/nf-core/ribotricer/detectorfs'
 include { HISAT2_EXTRACTSPLICESITES                            } from '../../modules/nf-core/hisat2/extractsplicesites/main'
-include { UNIFY_ORF_PREDICTIONS                                } from '../../modules/local/unify_orf_predictions/main'
+include { UNIFY_ORF_PREDICTIONS; UNIFY_ORF_PREDICTIONS_PER_TOOL         } from '../../modules/local/unify_orf_predictions/main'
 include { CLASSIFY_ORFS_GENCODE; CLASSIFY_ORFS_ORFQUANT; CLASSIFY_ORFS_ORF_TYPE } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_GENCODE   as CLASSIFY_ORFS_GENCODE_RIBOTISH   } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_GENCODE   as CLASSIFY_ORFS_GENCODE_RIBOTRICER } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_GENCODE   as CLASSIFY_ORFS_GENCODE_ORFQUANT   } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORFQUANT  as CLASSIFY_ORFS_ORFQUANT_RIBOTISH  } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORFQUANT  as CLASSIFY_ORFS_ORFQUANT_RIBOTRICER} from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORFQUANT  as CLASSIFY_ORFS_ORFQUANT_ORFQUANT  } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOTISH  } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER} from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_ORFQUANT  } from '../../modules/local/classify_orfs/main'
 include { COLLECT_QC_STATS                                     } from '../../modules/local/collect_qc_stats/main'
 
 /*
@@ -657,58 +666,222 @@ workflow RIBOSEQ {
     // ORF classification (scripts/classify_orfs_wrapper.py)
     //
     if (!params.skip_orf_classification) {
-        if (params.skip_unify_orf_predictions) {
-            error "ORF classification requires unified ORF predictions. Please disable --skip_unify_orf_predictions."
-        }
-
         def classify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
         def classify_wrapper = file("${workflow.projectDir}/scripts/classify_orfs_wrapper.py", checkIfExists: true)
         def class_orf_dir = file("${workflow.projectDir}/scripts/class_orf", checkIfExists: true)
         def gencode_orf_dir = file("${workflow.projectDir}/scripts/gencode-riboseqORFs", checkIfExists: true)
         def base_classify_dir = params.orf_classify_output_dir ?: 'orf_classification'
-        def gencode_outdir = "${base_classify_dir}/gencode"
-        def orfquant_outdir = "${base_classify_dir}/orfquant"
-        def orftype_outdir = "${base_classify_dir}/orf_type"
 
         if (params.orf_classify_mode) {
             log.warn "orf_classify_mode is ignored; running all ORF classification modes."
         }
 
-        if (!params.orf_classify_ensembl_dir) {
-            error "ORF classification requires --orf_classify_ensembl_dir to run gencode classification."
+        if (params.skip_unify_orf_predictions) {
+            // Per-tool mode: exact-match dedup per tool, no cross-tool merging, classify each independently
+            if (!has_unify_inputs) {
+                log.warn "Per-tool ORF classification is enabled but no ORF prediction tool ran; skipping."
+            } else {
+                // Re-use the same input channel construction as the unified path
+                def ch_ribotish_list_pt = (params.skip_ribotish ? Channel.value([]) : ch_ribotish_predictions.map { meta, file -> file }.collect())
+                    .map { it ?: [] }
+                def ch_ribotricer_list_pt = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
+                    .map { it ?: [] }
+                def ch_orfquant_list_pt = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
+                    .map { it ?: [] }
+                def ch_psites_bedgraph_pt = params.skip_riboseqc ?
+                    Channel.value([]) :
+                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> files }.flatten().collect().map { it ?: [] }
+                def ch_sample_list_pt = params.skip_riboseqc ?
+                    Channel.value([]) :
+                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> meta.id }.collect().map { it ?: [] }
+
+                def ch_unify_inputs_pt = ch_ribotish_list_pt
+                    .combine(ch_ribotricer_list_pt)
+                    .combine(ch_orfquant_list_pt)
+                    .map { combined ->
+                        def ribotish_files = []; def ribotricer_files = []; def orfquant_files = []
+                        if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List) {
+                            ribotish_files = combined[0][0]; ribotricer_files = combined[0][1]; orfquant_files = combined[1]
+                        } else if (combined instanceof List && combined.size() == 3) {
+                            ribotish_files = combined[0]; ribotricer_files = combined[1]; orfquant_files = combined[2]
+                        } else if (combined instanceof List) {
+                            ribotish_files  = combined.findAll { it.getName().endsWith('_pred.txt') }
+                            ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
+                            orfquant_files  = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') }
+                        } else { ribotish_files = combined }
+                        def rt  = ribotish_files  instanceof List ? ribotish_files  : (ribotish_files  ? [ribotish_files]  : [])
+                        def rtr = ribotricer_files instanceof List ? ribotricer_files : (ribotricer_files ? [ribotricer_files] : [])
+                        def oq  = orfquant_files   instanceof List ? orfquant_files   : (orfquant_files   ? [orfquant_files]   : [])
+                        def all = []; all.addAll(rt); all.addAll(rtr); all.addAll(oq)
+                        [ rt.collect{ it.getName() }, rtr.collect{ it.getName() }, oq.collect{ it.getName() }, all ]
+                    }
+
+                UNIFY_ORF_PREDICTIONS_PER_TOOL(
+                    ch_unify_inputs_pt,
+                    ch_gtf,
+                    ch_fasta,
+                    file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true),
+                    ch_psites_bedgraph_pt,
+                    ch_sample_list_pt
+                )
+                ch_versions = ch_versions.mix(UNIFY_ORF_PREDICTIONS_PER_TOOL.out.versions)
+
+                // Helper closure: run all three classifiers for a given tool's outputs
+                // tool_suffix: 'ribotish' | 'ribotricer' | 'orfquant'
+                def ch_ensembl_dir = params.orf_classify_ensembl_dir ?
+                    Channel.value(file(params.orf_classify_ensembl_dir, checkIfExists: true)) :
+                    Channel.empty()
+
+                if (!params.skip_ribotish) {
+                    def rt_prefix = "${classify_prefix}_ribotish"
+                    if (params.orf_classify_ensembl_dir) {
+                        CLASSIFY_ORFS_GENCODE_RIBOTISH(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_bed,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_metadata,
+                            rt_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            gencode_orf_dir,
+                            file(params.orf_classify_ensembl_dir, checkIfExists: true),
+                            "${base_classify_dir}/per_tool/ribotish/gencode"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_RIBOTISH.out.versions)
+                    }
+                    CLASSIFY_ORFS_ORFQUANT_RIBOTISH(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_gtf,
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_metadata,
+                        rt_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/ribotish/orfquant"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOTISH.out.versions)
+                    CLASSIFY_ORFS_ORF_TYPE_RIBOTISH(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_metadata,
+                        rt_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/ribotish/orf_type"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE_RIBOTISH.out.versions)
+                }
+
+                if (!params.skip_ribotricer) {
+                    def rtr_prefix = "${classify_prefix}_ribotricer"
+                    if (params.orf_classify_ensembl_dir) {
+                        CLASSIFY_ORFS_GENCODE_RIBOTRICER(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_bed,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_metadata,
+                            rtr_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            gencode_orf_dir,
+                            file(params.orf_classify_ensembl_dir, checkIfExists: true),
+                            "${base_classify_dir}/per_tool/ribotricer/gencode"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_RIBOTRICER.out.versions)
+                    }
+                    CLASSIFY_ORFS_ORFQUANT_RIBOTRICER(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_gtf,
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_metadata,
+                        rtr_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/ribotricer/orfquant"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOTRICER.out.versions)
+                    CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_metadata,
+                        rtr_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/ribotricer/orf_type"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER.out.versions)
+                }
+
+                if (!params.skip_orfquant && !params.skip_riboseqc) {
+                    def oq_prefix = "${classify_prefix}_orfquant"
+                    if (params.orf_classify_ensembl_dir) {
+                        CLASSIFY_ORFS_GENCODE_ORFQUANT(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_bed,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_metadata,
+                            oq_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            gencode_orf_dir,
+                            file(params.orf_classify_ensembl_dir, checkIfExists: true),
+                            "${base_classify_dir}/per_tool/orfquant/gencode"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_ORFQUANT.out.versions)
+                    }
+                    CLASSIFY_ORFS_ORFQUANT_ORFQUANT(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_gtf,
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_metadata,
+                        oq_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/orfquant/orfquant"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_ORFQUANT.out.versions)
+                    CLASSIFY_ORFS_ORF_TYPE_ORFQUANT(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_metadata,
+                        oq_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/orfquant/orf_type"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE_ORFQUANT.out.versions)
+                }
+            }
+        } else {
+            // Unified classification path (default: skip_unify_orf_predictions = false)
+            def gencode_outdir = "${base_classify_dir}/gencode"
+            def orfquant_outdir = "${base_classify_dir}/orfquant"
+            def orftype_outdir = "${base_classify_dir}/orf_type"
+
+            if (!params.orf_classify_ensembl_dir) {
+                error "ORF classification requires --orf_classify_ensembl_dir to run gencode classification."
+            }
+            CLASSIFY_ORFS_GENCODE(
+                ch_unify_bed,
+                ch_unify_metadata,
+                classify_prefix,
+                classify_wrapper,
+                class_orf_dir,
+                gencode_orf_dir,
+                file(params.orf_classify_ensembl_dir, checkIfExists: true),
+                gencode_outdir
+            )
+            ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE.out.versions)
+
+            CLASSIFY_ORFS_ORFQUANT(
+                ch_unify_gtf,
+                ch_unify_metadata,
+                classify_prefix,
+                classify_wrapper,
+                class_orf_dir,
+                ch_gtf,
+                orfquant_outdir
+            )
+            ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
+
+            CLASSIFY_ORFS_ORF_TYPE(
+                ch_unify_metadata,
+                classify_prefix,
+                classify_wrapper,
+                class_orf_dir,
+                ch_gtf,
+                orftype_outdir
+            )
+            ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
         }
-        CLASSIFY_ORFS_GENCODE(
-            ch_unify_bed,
-            ch_unify_metadata,
-            classify_prefix,
-            classify_wrapper,
-            class_orf_dir,
-            gencode_orf_dir,
-            file(params.orf_classify_ensembl_dir, checkIfExists: true),
-            gencode_outdir
-        )
-        ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE.out.versions)
-
-        CLASSIFY_ORFS_ORFQUANT(
-            ch_unify_gtf,
-            ch_unify_metadata,
-            classify_prefix,
-            classify_wrapper,
-            class_orf_dir,
-            ch_gtf,
-            orfquant_outdir
-        )
-        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
-
-        CLASSIFY_ORFS_ORF_TYPE(
-            ch_unify_metadata,
-            classify_prefix,
-            classify_wrapper,
-            class_orf_dir,
-            ch_gtf,
-            orftype_outdir
-        )
-        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
     }
 
     //

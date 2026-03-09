@@ -1563,6 +1563,91 @@ def _extract_annotate_chunk(chunk):
     return results
 
 
+def _write_orf_outputs(candidates: list, prefix: str) -> None:
+    """Write BED12, metadata TSV, and GTF files for *candidates* to files named *prefix*.{bed,metadata.tsv,gtf}."""
+    with open(f"{prefix}.metadata.tsv", 'w') as out:
+        header = ["orf_id", "chrom", "strand", "start", "end", "length_aa", "exon_blocks",
+                  "gene_id", "transcript_id", "tools", "samples",
+                  "tool_scores", "tool_pvalues",
+                  "total_reads", "unique_reads", "total_psites", "unique_psites", "pN", "unique_pN",
+                  "num_subset_orfs", "subset_orfs",
+                  "sequence", "start_codon", "aa_sequence", "is_cds_overlap", "overlapping_genes"]
+        out.write('\t'.join(header) + '\n')
+
+        for i, cand in enumerate(candidates):
+            orf_id = f"ORF_{i+1}_{cand.gid}"
+            tools = ",".join(sorted(set(t for t, s in cand.sources)))
+            samples = ",".join(sorted(set(s for t, s in cand.sources)))
+            blocks_str = ",".join(f"{s}-{e}" for s, e in cand.blocks)
+            tool_scores_str = (",".join(f"{t}:{v:.3f}" if isinstance(v, float) else f"{t}:{v}"
+                                        for t, v in sorted(cand.tool_scores.items()) if v is not None)
+                               or "NA")
+            tool_pvalues_str = (",".join(f"{t}:{p:.2e}" for t, p in sorted(cand.tool_pvalues.items()) if p is not None)
+                                or "NA")
+            if cand.subset_orfs:
+                subset_orfs_str = ";".join(
+                    f"{s['blocks']}|{s['tools']}|{s['samples']}" for s in cand.subset_orfs)
+                num_subset_orfs = len(cand.subset_orfs)
+            else:
+                subset_orfs_str = "NA"
+                num_subset_orfs = 0
+            row = [orf_id, cand.chrom, cand.strand, str(cand.start), str(cand.end),
+                   str(cand.length_aa), blocks_str, cand.gid, cand.tid, tools, samples,
+                   tool_scores_str, tool_pvalues_str,
+                   str(cand.total_reads), str(cand.unique_reads),
+                   str(cand.total_psites), str(cand.unique_psites),
+                   f"{cand.pN:.6f}", f"{cand.unique_pN:.6f}",
+                   str(num_subset_orfs), subset_orfs_str,
+                   cand.sequence, cand.start_codon, cand.aa_sequence,
+                   "1" if cand.is_cds_overlap else "0",
+                   ",".join(cand.overlapping_gene_ids) if cand.overlapping_gene_ids else "NA"]
+            out.write('\t'.join(row) + '\n')
+
+    with open(f"{prefix}.bed", 'w') as out:
+        for i, cand in enumerate(candidates):
+            orf_id = f"ORF_{i+1}_{cand.gid}"
+            start0 = cand.start - 1
+            end1 = cand.end
+            block_sizes = []
+            block_starts = []
+            for s, e in cand.blocks:
+                block_sizes.append(str(e - s + 1))
+                block_starts.append(str((s - 1) - start0))
+            out.write(f"{cand.chrom}\t{start0}\t{end1}\t{orf_id}\t0\t{cand.strand}\t"
+                      f"{start0}\t{end1}\t0,0,0\t{len(cand.blocks)}\t"
+                      f"{','.join(block_sizes)}\t{','.join(block_starts)}\n")
+
+    with open(f"{prefix}.gtf", 'w') as out:
+        out.write("##gff-version 2\n")
+        source = "UnifiedRiboseq"
+        for i, cand in enumerate(candidates):
+            orf_id = f"ORF_{i+1}_{cand.gid}"
+            tools = ",".join(sorted(set(t for t, s in cand.sources)))
+            samples = ",".join(sorted(set(s for t, s in cand.sources)))
+            num_tools = len(set(t for t, s in cand.sources))
+            attr = (f'gene_id "{cand.gid}"; transcript_id "{cand.tid}"; orf_id "{orf_id}"; '
+                    f'sources "{tools}"; samples "{samples}"; num_tools "{num_tools}";')
+            for s, e in cand.blocks:
+                out.write(f"{cand.chrom}\t{source}\texon\t{s}\t{e}\t.\t{cand.strand}\t.\t{attr}\n")
+                out.write(f"{cand.chrom}\t{source}\tCDS\t{s}\t{e}\t.\t{cand.strand}\t.\t{attr}\n")
+
+
+# Canonical tool names (as stored in ORFCandidate.sources) → file suffix
+_TOOL_NAMES = [("Ribo-TISH", "ribotish"), ("Ribotricer", "ribotricer"), ("ORFquant", "orfquant")]
+
+
+def _write_per_tool_outputs(candidates: list, per_tool_prefix: str) -> None:
+    """Write per-tool BED12/metadata/GTF files for each tool present in *candidates*."""
+    for canonical, suffix in _TOOL_NAMES:
+        tool_orfs = [c for c in candidates if canonical in {t for t, _s in c.sources}]
+        if tool_orfs:
+            _write_orf_outputs(tool_orfs, f"{per_tool_prefix}_{suffix}")
+            print(f"  {canonical}: {len(tool_orfs)} ORFs → {per_tool_prefix}_{suffix}.*",
+                  file=sys.stderr)
+        else:
+            print(f"  {canonical}: 0 ORFs (no output files written)", file=sys.stderr)
+
+
 def main():
     global _shared_gtf_index, _shared_fasta_path
 
@@ -1599,7 +1684,14 @@ def main():
     # Legacy option kept for back-compat (deprecated)
     parser.add_argument("--min-overlap", type=float, default=0.5,
                         help="[Deprecated] Minimum overlap fraction; use --seq-cluster to enable Stage 3")
-    
+    # Per-tool output mode: exact-match dedup per tool, no cross-tool merging
+    parser.add_argument("--per-tool-output", type=str, default=None,
+                        help="When set, output per-tool BED12/metadata/GTF files with this prefix "
+                             "(e.g. 'ribotish_orfs', 'ribotricer_orfs', 'orfquant_orfs') in addition "
+                             "to the combined exact-dedup output at --output. "
+                             "Skips Stage 2b (cross-tool frame-aware merge) and Stage 3 (seq clustering). "
+                             "Use this for per-tool classification without cross-tool merging.")
+
     args = parser.parse_args()
     
     # Build exclude_tistypes set
@@ -1795,6 +1887,20 @@ def main():
     print(f"  CDS in-frame overlap: {cds_overlap_count} ORFs "
           f"({100*cds_overlap_count/max(len(final_list),1):.1f}%)", file=sys.stderr)
 
+    # ── Per-tool output mode ────────────────────────────────────────────────
+    # When --per-tool-output is set, emit per-tool files based on the exact-match
+    # deduplicated list (Stage 1 only) and skip cross-tool merging (Stage 2b) and
+    # sequence clustering (Stage 3).  The combined exact-dedup set is also written
+    # to args.output.* so downstream tools can consume the full set if needed.
+    if args.per_tool_output:
+        _write_per_tool_outputs(final_list, args.per_tool_output)
+        _write_orf_outputs(final_list, args.output)
+        print(f"Per-tool outputs written to {args.per_tool_output}_{{ribotish,ribotricer,orfquant}}.*",
+              file=sys.stderr)
+        print(f"Combined exact-dedup output written to {args.output}.*", file=sys.stderr)
+        print(f"Done. Outputs written to {args.output}.*", file=sys.stderr)
+        return
+
     # Stage 2: Frame-aware merging (single-exon only, overlap fraction threshold)
     if not args.no_frame_merge:
         frac = args.frame_merge_min_overlap
@@ -1861,98 +1967,7 @@ def main():
         # Use parallel processing for large datasets
         calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, args.threads)
     
-    # Write metadata.tsv with extended columns
-    with open(f"{args.output}.metadata.tsv", 'w') as out:
-        header = ["orf_id", "chrom", "strand", "start", "end", "length_aa", "exon_blocks", 
-                  "gene_id", "transcript_id", "tools", "samples", 
-                  "tool_scores", "tool_pvalues", 
-                  "total_reads", "unique_reads", "total_psites", "unique_psites", "pN", "unique_pN",
-                  "num_subset_orfs", "subset_orfs",
-                  "sequence", "start_codon", "aa_sequence", "is_cds_overlap", "overlapping_genes"]
-        out.write('\t'.join(header) + '\n')
-        
-        for i, cand in enumerate(final_list):
-            orf_id = f"ORF_{i+1}_{cand.gid}"
-            tools = ",".join(sorted(list(set(t for t, s in cand.sources))))
-            samples = ",".join(sorted(list(set(s for t, s in cand.sources))))
-            blocks_str = ",".join(f"{s}-{e}" for s, e in cand.blocks)
-            
-            # Format tool_scores as tool1:score1,tool2:score2
-            tool_scores_str = ",".join(f"{t}:{s:.3f}" if isinstance(s, float) else f"{t}:{s}" 
-                                      for t, s in sorted(cand.tool_scores.items()) if s is not None) or "NA"
-            
-            # Format tool_pvalues as tool1:pval1,tool2:pval2
-            tool_pvalues_str = ",".join(f"{t}:{p:.2e}" for t, p in sorted(cand.tool_pvalues.items()) if p is not None) or "NA"
-            
-            # Format subset_orfs as blocks|tools|samples;blocks|tools|samples;...
-            if cand.subset_orfs:
-                subset_strs = []
-                for subset in cand.subset_orfs:
-                    subset_str = f"{subset['blocks']}|{subset['tools']}|{subset['samples']}"
-                    subset_strs.append(subset_str)
-                subset_orfs_str = ";".join(subset_strs)
-                num_subset_orfs = len(cand.subset_orfs)
-            else:
-                subset_orfs_str = "NA"
-                num_subset_orfs = 0
-            
-            row = [orf_id, cand.chrom, cand.strand, str(cand.start), str(cand.end), str(cand.length_aa), 
-                   blocks_str, cand.gid, cand.tid, tools, samples, 
-                   tool_scores_str, tool_pvalues_str,
-                   str(cand.total_reads), str(cand.unique_reads), 
-                   str(cand.total_psites), str(cand.unique_psites),
-                   f"{cand.pN:.6f}", f"{cand.unique_pN:.6f}",
-                   str(num_subset_orfs), subset_orfs_str,
-                   cand.sequence,
-                   cand.start_codon,
-                   cand.aa_sequence,
-                   "1" if cand.is_cds_overlap else "0",
-                   ",".join(cand.overlapping_gene_ids) if cand.overlapping_gene_ids else "NA"]
-            out.write('\t'.join(row) + '\n')
-            
-    with open(f"{args.output}.bed", 'w') as out:
-        for i, cand in enumerate(final_list):
-            orf_id = f"ORF_{i+1}_{cand.gid}"
-            
-            chrom = cand.chrom
-            start0 = cand.start - 1
-            end1 = cand.end
-            name = orf_id
-            score = "0"
-            strand = cand.strand
-            thickStart = start0
-            thickEnd = end1
-            rgb = "0,0,0"
-            blockCount = len(cand.blocks)
-            
-            blockSizes = []
-            blockStarts = []
-            
-            for s, e in cand.blocks:
-                size = e - s + 1
-                rel_start = (s - 1) - start0
-                blockSizes.append(str(size))
-                blockStarts.append(str(rel_start))
-                
-            out.write(f"{chrom}\t{start0}\t{end1}\t{name}\t{score}\t{strand}\t{thickStart}\t{thickEnd}\t{rgb}\t{blockCount}\t{','.join(blockSizes)}\t{','.join(blockStarts)}\n")
-    
-    with open(f"{args.output}.gtf", 'w') as out:
-        out.write("##gff-version 2\n")
-        source = "UnifiedRiboseq"
-        for i, cand in enumerate(final_list):
-            orf_id = f"ORF_{i+1}_{cand.gid}"
-            gene_id = cand.gid
-            tid = cand.tid
-            tools = ",".join(sorted(list(set(t for t, s in cand.sources))))
-            samples = ",".join(sorted(list(set(s for t, s in cand.sources))))
-            num_tools = len(set(t for t, s in cand.sources))
-            
-            attr_base = f'gene_id "{gene_id}"; transcript_id "{tid}"; orf_id "{orf_id}"; sources "{tools}"; samples "{samples}"; num_tools "{num_tools}";'
-            
-            for s, e in cand.blocks:
-                out.write(f"{cand.chrom}\t{source}\texon\t{s}\t{e}\t.\t{cand.strand}\t.\t{attr_base}\n")
-                out.write(f"{cand.chrom}\t{source}\tCDS\t{s}\t{e}\t.\t{cand.strand}\t.\t{attr_base}\n")
-
+    _write_orf_outputs(final_list, args.output)
     print(f"Done. Outputs written to {args.output}.*", file=sys.stderr)
 
 if __name__ == "__main__":
