@@ -205,8 +205,8 @@ Examples:
                         help='Skip prefilter QC (only run postfilter analysis)')
     parser.add_argument('--run-prefilter-qc', action='store_true',
                         help='Enable prefilter QC for comparison')
-    parser.add_argument('--unify-orf-min-len', type=int, default=24,
-                        help='Minimum ORF length for unification (default: 24)')
+    parser.add_argument('--unify-orf-min-len', type=int, default=6,
+                        help='Minimum ORF length in amino acids for unification (default: 6)')
     parser.add_argument('--profile', default='singularity',
                         help='Nextflow profile (default: singularity)')
     
@@ -602,8 +602,8 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                 if not link_path.exists():
                     shutil.copy2(orfquant_path, link_path)
                     logger.info(f"✓ Copied ORFquant container: {orfquant_path.name}")
-                linked_containers['orfquant'] = link_path
-    
+            linked_containers['orfquant'] = link_path
+
     if rpbp_container:
         rpbp_path = Path(rpbp_container).resolve()
         if rpbp_path.exists():
@@ -614,8 +614,8 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                 if not link_path.exists():
                     shutil.copy2(rpbp_path, link_path)
                     logger.info(f"✓ Copied RPBP container: {rpbp_path.name}")
-                linked_containers['rpbp'] = link_path
-    
+            linked_containers['rpbp'] = link_path
+
     if unify_orf_container:
         unify_path = Path(unify_orf_container).resolve()
         if unify_path.exists():
@@ -626,8 +626,8 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                 if not link_path.exists():
                     shutil.copy2(unify_path, link_path)
                     logger.info(f"✓ Copied Unify ORF container: {unify_path.name}")
-                linked_containers['unify_orf'] = link_path
-    
+            linked_containers['unify_orf'] = link_path
+
     if gencode_orf_mapper_container:
         gencode_path = Path(gencode_orf_mapper_container).resolve()
         if gencode_path.exists():
@@ -638,7 +638,7 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                 if not link_path.exists():
                     shutil.copy2(gencode_path, link_path)
                     logger.info(f"✓ Copied gencode-orf-mapper container: {gencode_path.name}")
-                linked_containers['gencode_orf_mapper'] = link_path
+            linked_containers['gencode_orf_mapper'] = link_path
     
     # Backward-compatible: copy all containers from container_dir
     if container_dir:
