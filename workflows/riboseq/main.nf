@@ -22,6 +22,8 @@ include { ORFQUANT           } from '../../subworkflows/local/orfquant'
 
 // Local module: sORF BAM filtering (unique mapping + contig exclusion + read length)
 include { SORF_BAM_FILTER } from '../../modules/local/sorf_bam_filter'
+// Local module: merge replicate BAMs (same-group samples) before ORF prediction
+include { SAMTOOLS_MERGE_REPLICATES } from '../../modules/local/samtools_merge/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -370,6 +372,54 @@ workflow RIBOSEQ {
         // If sorf_filter is disabled, use original BAMs for all downstream analysis
         ch_bams_for_sorf_prediction = ch_bams_for_analysis
         ch_bams_for_postfilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] }
+    }
+
+    //
+    // REPLICATE BAM MERGING: Merge same-group replicates after sORF filtering
+    // Produces additional merged BAMs that run through ALL ORF prediction tools
+    // alongside the individual replicate BAMs.
+    //
+    if (params.merge_replicates) {
+        // Only consider samples that have a group assigned
+        ch_bams_with_group = ch_bams_for_sorf_prediction
+            .filter { meta, bam, bai -> meta.group != null && meta.group != '' }
+
+        // Group by (group, sample_type, strandedness) — all replicates in a group
+        // must share the same sample_type and strandedness.
+        // Build a merged meta: id="{group}_merged", preserve sample_type & strandedness.
+        ch_grouped_bams = ch_bams_with_group
+            .map { meta, bam, bai -> [ meta.group, meta, bam ] }
+            .groupTuple(by: 0)
+            .map { group, metas, bams ->
+                def merged_meta = [
+                    id          : "${group}_merged",
+                    group       : group,
+                    sample_type : metas[0].sample_type,
+                    strandedness: metas[0].strandedness,
+                    single_end  : metas[0].single_end,
+                    is_merged   : true
+                ]
+                [ merged_meta, bams ]
+            }
+
+        SAMTOOLS_MERGE_REPLICATES( ch_grouped_bams )
+        ch_versions = ch_versions.mix(SAMTOOLS_MERGE_REPLICATES.out.versions)
+
+        // Build merged BAM channel: join bam + bai outputs
+        ch_merged_bams = SAMTOOLS_MERGE_REPLICATES.out.bam
+            .join(SAMTOOLS_MERGE_REPLICATES.out.bai)
+
+        // Extend prediction channels with merged BAMs
+        ch_bams_for_sorf_prediction = ch_bams_for_sorf_prediction.mix(ch_merged_bams)
+
+        // Postfilter channel: also add merged BAMs (with filter_status tag)
+        ch_bams_for_postfilter = ch_bams_for_postfilter.mix(
+            ch_merged_bams.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] }
+        )
+
+        log.info "Replicate merging enabled: merged BAMs will be created for each 'group' and run through all ORF prediction tools."
+    } else {
+        log.info "Replicate merging disabled (set --merge_replicates to enable)."
     }
 
     if (!params.skip_ribotish){

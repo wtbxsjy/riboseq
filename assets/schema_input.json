@@ -59,6 +59,12 @@
                 "errorMessage": "Sample type must be provided and be one of 'riboseq', 'rnaseq' or 'tiseq'",
                 "enum": ["riboseq", "rnaseq", "tiseq"],
                 "meta": ["sample_type"]
+            },
+            "group": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Group name cannot contain spaces",
+                "meta": ["group"]
             }
         },
         "required": ["sample", "strandedness", "type"],

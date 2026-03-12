@@ -1,6 +1,7 @@
 import os
 import glob
 import csv
+import json
 import argparse
 import re
 import sys
@@ -12,8 +13,46 @@ def parse_args():
     parser.add_argument('-o', '--output_csv', required=True, help="输出 CSV 文件的路径 (例如: samples.csv)")
     parser.add_argument('--strandedness', default='auto', help="CSV 中的 strandedness 列的值 (默认: auto)")
     parser.add_argument('--type', default='riboseq', help="CSV 中的 type 列的值 (默认: riboseq)")
+    parser.add_argument(
+        '--group-map',
+        default=None,
+        help=(
+            "可选：指定样本到分组的映射，用于生成 samplesheet 中的 group 列。\n"
+            "接受两种格式：\n"
+            "  1. JSON 文件：{\"sample_id\": \"group_name\", ...}\n"
+            "  2. CSV 文件（两列，无表头）：sample_id,group_name\n"
+            "未出现在映射中的样本不写 group 列（留空）。\n"
+            "示例 JSON: {\"rep1\": \"treatment_A\", \"rep2\": \"treatment_A\"}"
+        )
+    )
     
     return parser.parse_args()
+
+
+def load_group_map(group_map_path):
+    """Load sample-to-group mapping from a JSON or two-column CSV file."""
+    if not os.path.exists(group_map_path):
+        print(f"错误: group-map 文件不存在: {group_map_path}", file=sys.stderr)
+        sys.exit(1)
+
+    ext = os.path.splitext(group_map_path)[1].lower()
+    mapping = {}
+
+    if ext == '.json':
+        with open(group_map_path) as f:
+            mapping = json.load(f)
+        if not isinstance(mapping, dict):
+            print("错误: JSON group-map 必须是 {sample_id: group_name} 格式", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Treat as two-column CSV (no header): sample_id,group_name
+        with open(group_map_path, newline='') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if len(row) >= 2:
+                    mapping[row[0].strip()] = row[1].strip()
+
+    return mapping
 
 def get_sample_name(filename, mode):
     """
@@ -37,6 +76,12 @@ def main():
     if not os.path.exists(input_dir):
         print(f"错误: 目录 {input_dir} 不存在")
         sys.exit(1)
+
+    # Load optional group mapping
+    group_map = {}
+    if args.group_map:
+        group_map = load_group_map(args.group_map)
+        print(f"已加载 group 映射，共 {len(group_map)} 个样本")
 
     # 寻找所有的 .fastq.gz 和 .fq.gz 文件
     patterns = ['*.fastq.gz', '*.fq.gz']
@@ -101,19 +146,27 @@ def main():
         # 提取样品名
         sample_name = get_sample_name(filename, mode)
         
+        # Resolve group for this sample (empty string if not mapped)
+        group = group_map.get(sample_name, '')
+
         # 添加到结果列表
         csv_rows.append({
             'sample': sample_name,
             'fastq_1': fastq_1,
             'fastq_2': fastq_2,
             'strandedness': args.strandedness,
-            'type': args.type
+            'type': args.type,
+            'group': group,
         })
         
         processed_files.add(f_path)
 
-    # 写入 CSV
-    headers = ['sample', 'fastq_1', 'fastq_2', 'strandedness', 'type']
+    # Write CSV — include 'group' column only if any sample has a group assigned
+    has_groups = any(row.get('group') for row in csv_rows)
+    if has_groups:
+        headers = ['sample', 'fastq_1', 'fastq_2', 'strandedness', 'type', 'group']
+    else:
+        headers = ['sample', 'fastq_1', 'fastq_2', 'strandedness', 'type']
     
     try:
         with open(args.output_csv, 'w', newline='') as csvfile:

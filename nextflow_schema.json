@@ -494,6 +494,13 @@
                     "description": "Run pooled (all-samples) sORF prediction in addition to per-sample prediction.",
                     "help_text": "Disabled by default for performance. This only affects sORF prediction steps (QC can remain per-sample)."
                 },
+                "merge_replicates": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-compress-arrows-alt",
+                    "description": "Merge BAMs from biological/technical replicates sharing the same 'group' field before ORF calling.",
+                    "help_text": "When enabled, samples sharing the same 'group' value in the samplesheet are merged (samtools merge) after SORF_BAM_FILTER. The merged BAM (id: '{group}_merged') runs through ALL ORF prediction tools (Ribo-TISH, Ribotricer, RiboseQC, ORFquant) in addition to the individual replicates. This improves reproducibility and helps filter random ORF calls. The 'group' column must be added to the samplesheet CSV."
+                },
                 "extra_ribotish_quality_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to the ribotish quality command in addition to defaults defined by the pipeline."

@@ -189,6 +189,16 @@ Examples:
                         help='Strandedness for sample sheet (default: auto)')
     parser.add_argument('--sample-type', default='riboseq',
                         help='Sample type (riboseq/tiseq) (default: riboseq)')
+    parser.add_argument('--group-map', default=None,
+                        help=(
+                            'Optional path to a JSON or two-column CSV file mapping sample IDs to '
+                            'group names, used to populate the "group" column in the samplesheet. '
+                            'JSON format: {"sample_id": "group_name", ...}. '
+                            'CSV format (no header): sample_id,group_name. '
+                            'Samples not listed in the map will have an empty group.'
+                        ))
+    parser.add_argument('--merge-replicates', action='store_true', default=False,
+                        help='Add --merge_replicates to the generated Nextflow run script (requires --group-map to be useful)')
     
     # Container options
     parser.add_argument('--orfquant-container', default=None,
@@ -665,7 +675,7 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
 
 
 def generate_sample_sheet(workdir, data_dir, strandedness='auto', 
-                          sample_type='riboseq', dry_run=False):
+                          sample_type='riboseq', group_map=None, dry_run=False):
     """Generate sample sheet CSV using get_sample_sheet.py"""
     logger.info("\n" + "=" * 60)
     logger.info("Generating sample sheet")
@@ -691,6 +701,14 @@ def generate_sample_sheet(workdir, data_dir, strandedness='auto',
         '--strandedness', strandedness,
         '--type', sample_type
     ]
+
+    if group_map:
+        group_map_path = Path(group_map).resolve()
+        if group_map_path.exists():
+            cmd.extend(['--group-map', str(group_map_path)])
+            logger.info(f"Using group map: {group_map_path}")
+        else:
+            logger.warning(f"Group map file not found, ignoring: {group_map_path}")
     
     if dry_run:
         logger.info(f"[DRY RUN] Would execute: {' '.join(cmd)}")
@@ -806,6 +824,10 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     # Skip RPBP by default (not fully validated yet)
     nf_cmd_parts.append("--skip_rpbp")
     
+    # Replicate BAM merging
+    if getattr(args, 'merge_replicates', False):
+        nf_cmd_parts.append("--merge_replicates")
+
     # P-site offset correction for ORFquant (enabled by default)
     if hasattr(args, 'orfquant_psite_correction'):
         if args.orfquant_psite_correction:
@@ -1097,6 +1119,7 @@ def main():
         args.data_dir,
         args.strandedness,
         args.sample_type,
+        getattr(args, 'group_map', None),
         args.dry_run
     )
     

@@ -3,6 +3,17 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## dev
+
+### `Added`
+
+- feat: Replicate BAM merging before ORF calling (`--merge_replicates`). When enabled, samples sharing the same `group` value in the samplesheet are merged with `samtools merge` after `SORF_BAM_FILTER`. The merged BAM (id: `{group}_merged`) runs through all ORF prediction tools (Ribo-TISH, Ribotricer, RiboseQC, ORFquant) alongside individual replicates, improving reproducibility and helping filter low-confidence ORF calls. Add `group` to samplesheet CSV to define replicate groups.
+  - New parameter: `--merge_replicates` (boolean, default: `false`)
+  - New samplesheet column: `group` (optional string)
+  - New local module: `modules/local/samtools_merge/main.nf`
+  - `scripts/get_sample_sheet.py`: new `--group-map` option (JSON or two-column CSV) to populate the `group` column
+  - `scripts/prepare_workflow.py`: new `--group-map` and `--merge-replicates` options
+
 ## v1.1.0 - 2025-01-30
 
 ### `Added`
