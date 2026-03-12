@@ -200,6 +200,20 @@ Examples:
     parser.add_argument('--merge-replicates', action='store_true', default=False,
                         help='Add --merge_replicates to the generated Nextflow run script (requires --group-map to be useful)')
     
+    # Ribotricer options
+    parser.add_argument('--ribotricer-phase-score-cutoff', type=float, default=None,
+                        help='Ribotricer phase score cutoff (default: None uses ribotricer built-in default ~0.429). '
+                             'Lower this (e.g. 0.1) for plant/low-depth samples with weak metagene periodicity.')
+    
+    # sORF filter options
+    parser.add_argument('--sorf-unique-mode', default=None,
+                        choices=['auto', 'nh', 'mapq'],
+                        help='Mode for unique-mapping filter: auto (detect NH tag), nh, or mapq (default: auto)')
+    
+    # QC options
+    parser.add_argument('--skip-collect-qc-stats', action='store_true', default=False,
+                        help='Skip the COLLECT_QC_STATS step that aggregates per-sample QC metrics')
+    
     # Container options
     parser.add_argument('--orfquant-container', default=None,
                         help='Path to ORFquant patched container')
@@ -827,6 +841,18 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     # Replicate BAM merging
     if getattr(args, 'merge_replicates', False):
         nf_cmd_parts.append("--merge_replicates")
+
+    # Ribotricer phase score cutoff (only set when explicitly provided)
+    if getattr(args, 'ribotricer_phase_score_cutoff', None) is not None:
+        nf_cmd_parts.append(f"--ribotricer_phase_score_cutoff {args.ribotricer_phase_score_cutoff}")
+
+    # sORF unique mapping mode (only set when explicitly provided)
+    if getattr(args, 'sorf_unique_mode', None) is not None:
+        nf_cmd_parts.append(f"--sorf_unique_mode {args.sorf_unique_mode}")
+
+    # Skip collect QC stats
+    if getattr(args, 'skip_collect_qc_stats', False):
+        nf_cmd_parts.append("--skip_collect_qc_stats")
 
     # P-site offset correction for ORFquant (enabled by default)
     if hasattr(args, 'orfquant_psite_correction'):

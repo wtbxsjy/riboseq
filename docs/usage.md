@@ -107,12 +107,38 @@ SRX11780890,SRX11780890_SRR15480793_chr20_1.fastq.gz,,auto,riboseq,Ribo-seq_P400
 | `fastq_2`      | Full path to FastQ file for Illumina short reads 2. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
 | `strandedness` | Sample strand-specificity. Must be one of `unstranded`, `forward`, `reverse` or `auto`.                                                                                                |
 | `type`         | Type of sample. Must be one of `riboseq`, `rnaseq` or `tiseq`                                                                                                                          |
+| `group`        | (Optional) Replicate group name. Samples sharing the same `group` value will have their filtered BAMs merged before ORF calling when `--merge_replicates` is set.                      |
 
 An [example samplesheet](../assets/samplesheet.csv) has been provided with the pipeline.
 
 When specifying `contrasts` to perform a translational efficiency analysis (see below), the `type` column is necessary to distinguish Ribo-seq and RNA-seq samples. There must further be a column somewhere in the table that separates the treatment groups to be compared (`treatment` in the above example). Optionally sample pairing can be specified via an additional column (`pair` in the example), by default the same ordering will be assumed between RNA-seq and Riboseq samples of the respective groups.
 
-## Adapter trimming options
+### Replicate BAM Merging
+
+When your dataset contains biological or technical replicates, you can instruct the pipeline to merge their filtered BAMs before ORF calling by adding a `group` column to the samplesheet and enabling `--merge_replicates`. This increases detection sensitivity by pooling signal across replicates, while individual replicate results are still produced for cross-replicate comparison.
+
+```csv title="samplesheet_with_groups.csv"
+sample,fastq_1,fastq_2,strandedness,type,group
+treatment_rep1,rep1.fastq.gz,,reverse,riboseq,treatment
+treatment_rep2,rep2.fastq.gz,,reverse,riboseq,treatment
+control_rep1,ctrl1.fastq.gz,,reverse,riboseq,control
+control_rep2,ctrl2.fastq.gz,,reverse,riboseq,control
+```
+
+Enable at runtime:
+
+```bash
+nextflow run nf-core/riboseq \
+  --input samplesheet_with_groups.csv \
+  --merge_replicates \
+  --outdir results
+```
+
+- Merging happens **after** `SORF_BAM_FILTER`, so only unique-mapping, length-filtered reads enter the merged BAM.
+- Merged BAMs (id: `{group}_merged`, `meta.is_merged = true`) run through **all ORF prediction tools alongside the individual replicates**.
+- Samples without a `group` value are not affected.
+
+
 
 [Trim Galore!](https://www.bioinformatics.babraham.ac.uk/projects/trim_galore/) is a wrapper tool around Cutadapt and FastQC to peform quality and adapter trimming on FastQ files. Trim Galore! will automatically detect and trim the appropriate adapter sequence. It is the default trimming tool used by this pipeline, however you can use fastp instead by specifying the `--trimmer fastp` parameter. [fastp](https://github.com/OpenGene/fastp) is a tool designed to provide fast, all-in-one preprocessing for FastQ files. It has been developed in C++ with multithreading support to achieve higher performance. You can specify additional options for Trim Galore! and fastp via the `--extra_trimgalore_args` and `--extra_fastp_args` parameters, respectively.
 
@@ -198,7 +224,25 @@ By default, the input GTF file will be filtered to ensure that sequence names co
 
 The pipeline will by default run the [Ribo-TISH](https://github.com/zhpn1024/ribotish) [quality](https://github.com/zhpn1024/ribotish?tab=readme-ov-file#quality) and [predict](https://github.com/zhpn1024/ribotish?tab=readme-ov-file#predict) commands for QC and ORF prediction, respectively. Additional arguments can be supplied to either command via the `--extra_ribotish_quality_args` and `--extra_ribotish_predict_args` parameters.
 
-### ORFquant P-site offset correction
+### Ribotricer phase score cutoff
+
+Ribotricer filters candidate ORFs using a phase score that measures 3-nt periodicity of ribosome footprints. The default threshold (approximately 0.429 = 3/7) works well for most mammalian datasets. For **plant or low-coverage samples** where metagene periodicity is inherently weaker, this cutoff may be too stringent and result in very few detected ORFs. Reduce it with:
+
+```bash
+--ribotricer_phase_score_cutoff 0.1
+```
+
+Setting this to `null` (the default) uses ribotricer's built-in default.
+
+### QC statistics aggregation
+
+The pipeline collects per-sample QC metrics (alignment statistics, sORF filter pass rates, ORF prediction counts) into a summary table (`collect_qc_stats/`) via the `COLLECT_QC_STATS` module. To skip this step:
+
+```bash
+--skip_collect_qc_stats
+```
+
+
 
 When using ORFquant for ORF detection and quantification, the pipeline can apply P-site offset correction to improve accuracy. This feature is enabled by default via the `--orfquant_psite_correction` parameter.
 

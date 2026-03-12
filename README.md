@@ -205,6 +205,8 @@ CONTROL_REP1,AEG588A1_S1_L002_R1_001.fastq.gz,AEG588A1_S1_L002_R2_001.fastq.gz,f
 
 Each row represents a fastq file (single-end) or a pair of fastq files (paired end). Each row should have a 'type' value of `riboseq`, `tiseq` or `rnaseq`. Future iterations of the workflow will conduct paired analysis of matched riboseq and rnaseq samples to accomplish analysis types such as 'translational efficiency, but in the current version you should set this to `riboseq` or `tiseq` for reglar Ribo-seq or TI-seq data respectively.
 
+An optional `group` column can be used together with `--merge_replicates` to merge BAMs from biological/technical replicates before ORF calling (see [Replicate BAM Merging](#replicate-bam-merging) below).
+
 ### Starting from BAM Files
 
 If you already have aligned BAM files (genome-aligned), you can skip preprocessing and alignment by providing BAM input:
@@ -299,6 +301,50 @@ To enable optional prefilter QC analysis (comparison of unfiltered vs filtered B
 
 > [!NOTE]
 > **ORFquant** uses the P-site analysis output from **RiboseQC** (`*_for_ORFquant` files). If you skip RiboseQC, ORFquant will also be automatically skipped.
+
+> [!TIP]
+> **Ribotricer phase score cutoff:** For plant or low-depth samples where metagene 3-nt periodicity is weak, the default Ribotricer phase score cutoff (~0.429) may be too stringent. Lower it with:
+> ```bash
+> --ribotricer_phase_score_cutoff 0.1
+> ```
+
+> [!NOTE]
+> **QC statistics aggregation:** The pipeline collects per-sample QC metrics (mapping stats, sORF filter pass rates, ORF counts) into a summary table via `COLLECT_QC_STATS`. To skip this step:
+> ```bash
+> --skip_collect_qc_stats
+> ```
+
+### Replicate BAM Merging
+
+When your experiment has biological or technical replicates, the pipeline can merge their filtered BAMs before ORF calling. This improves detection sensitivity and reproducibility, and merged results can be compared against individual replicates to filter low-confidence calls.
+
+**How to use:**
+
+1. Add a `group` column to your samplesheet assigning each replicate to a group:
+
+```csv
+sample,fastq_1,fastq_2,strandedness,type,group
+treatment_rep1,rep1.fastq.gz,,reverse,riboseq,treatment
+treatment_rep2,rep2.fastq.gz,,reverse,riboseq,treatment
+control_rep1,ctrl1.fastq.gz,,reverse,riboseq,control
+control_rep2,ctrl2.fastq.gz,,reverse,riboseq,control
+```
+
+2. Enable merging at runtime:
+
+```bash
+nextflow run nf-core/riboseq \
+  --input samplesheet.csv \
+  --merge_replicates \
+  --outdir results
+```
+
+Merged BAMs (id: `{group}_merged`) run through **all ORF prediction tools alongside individual replicates**. Downstream ORF unification and classification automatically include the merged results.
+
+> [!NOTE]
+> Merging happens **after** `SORF_BAM_FILTER`, so only unique-mapping, length-filtered reads are combined. The `group` column is optional — samples without a group value are unaffected and run as usual.
+
+
 
 > [!IMPORTANT]
 > **ORFquant Custom Container:**
