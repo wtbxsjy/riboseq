@@ -5,6 +5,7 @@ import subprocess
 import os
 import random
 import string
+from concurrent.futures import ThreadPoolExecutor
 from Bio import SeqIO
 from Bio.Seq import Seq
 from datetime import datetime
@@ -117,6 +118,214 @@ def read_support(t_support):
             supp[line.split("\t")[0]] = "tslNA"
 
     return appris, supp
+
+
+def project_tx_range_to_genome(exon_starts, exon_ends, tx_start, tx_len):
+    """Project a transcript-space interval onto genomic exon blocks."""
+    if tx_start < 0 or tx_len <= 0:
+        return []
+
+    blocks = []
+    remaining_start = tx_start
+    remaining_len = tx_len
+
+    for exon_start, exon_end in zip(exon_starts, exon_ends):
+        exon_len = exon_end - exon_start + 1
+        if remaining_start >= exon_len:
+            remaining_start -= exon_len
+            continue
+
+        seg_start = exon_start + remaining_start
+        take_len = min(remaining_len, exon_len - remaining_start)
+        seg_end = seg_start + take_len - 1
+        blocks.append((seg_start, seg_end))
+
+        remaining_len -= take_len
+        if remaining_len <= 0:
+            break
+        remaining_start = 0
+
+    return blocks
+
+
+def _resolve_fast_cpus():
+    """Return requested CPU count for fast mode, defaulting to sequential."""
+    raw = os.environ.get("GENCODE_FAST_CPUS", "").strip()
+    if not raw:
+        return 1
+    try:
+        cpus = int(raw)
+    except ValueError:
+        return 1
+    return max(1, cpus)
+
+
+def _chunk_items(items, n_chunks):
+    if n_chunks <= 1 or len(items) <= 1:
+        return [items]
+    chunk_size = max(1, (len(items) + n_chunks - 1) // n_chunks)
+    return [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]
+
+
+def _canonicalize_trans_orfs(trans_orfs, orf_order_map):
+    """Rebuild trans_orfs with deterministic ordering matching ORF input order."""
+    tx_with_order = []
+    for tx_id, rows in trans_orfs.items():
+        sorted_rows = sorted(
+            rows,
+            key=lambda row: (orf_order_map.get(row[0], 10**18), row[2], row[1], row[0]),
+        )
+        first_idx = orf_order_map.get(sorted_rows[0][0], 10**18) if sorted_rows else 10**18
+        tx_with_order.append((first_idx, tx_id, sorted_rows))
+
+    tx_with_order.sort(key=lambda item: (item[0], item[1]))
+    ordered = {}
+    for _, tx_id, rows in tx_with_order:
+        ordered[tx_id] = rows
+    return ordered
+
+
+def _process_orf_chunk(
+    orf_items,
+    overlaps_cds,
+    orf_seq_map,
+    orf_desc_map,
+    transcript_seq_map,
+    protein_seq_map,
+    gtf,
+    len_cutoff,
+    max_len_cutoff,
+):
+    candidates = {}
+    trans_orfs = {}
+    coord_psites = {}
+    second_names = {}
+    atgstop_lines = []
+    tx_trans_cache = {}
+
+    def _get_tx_frames(tx_id):
+        if tx_id not in tx_trans_cache:
+            seq = transcript_seq_map[tx_id]
+            tx_trans_cache[tx_id] = (
+                str(Seq(seq).translate(cds=False)),
+                str(Seq(seq[1:]).translate(cds=False)),
+                str(Seq(seq[2:]).translate(cds=False)),
+            )
+        return tx_trans_cache[tx_id]
+
+    for orf, overlap_rows in orf_items:
+        cat2 = "non-coding"
+        orf_seq = orf_seq_map.get(orf)
+        if orf_seq is None:
+            continue
+        try:
+            second_names[orf] = orf_desc_map[orf].split()[-1].split("--")[0]
+        except Exception:
+            second_names[orf] = orf.split("--")[0]
+        aa_len = len(orf_seq.replace("*", ""))
+        if aa_len < len_cutoff or aa_len > max_len_cutoff:
+            continue
+
+        for trans in overlap_rows:
+            tx_id = trans[0]
+            if tx_id not in transcript_seq_map:
+                continue
+            gene = trans[1]
+            genename = trans[4]
+            frames = _get_tx_frames(tx_id)
+            f1 = frames[0].find(orf_seq)
+            f2 = frames[1].find(orf_seq)
+            f3 = frames[2].find(orf_seq)
+            fi = [f1, f2, f3].index(max([f1, f2, f3]))
+            f = max(f1, f2, f3) * 3 + fi
+            if f < 0:
+                continue
+            if trans[3] == "protein_coding":
+                cat2 = "protein_coding"
+
+            intersection = []
+            if tx_id in overlaps_cds:
+                prot_seq = protein_seq_map.get(tx_id)
+                if prot_seq is None:
+                    continue
+                c1 = frames[0].find(prot_seq)
+                c2 = frames[1].find(prot_seq)
+                c3 = frames[2].find(prot_seq)
+                cc = len(prot_seq)
+                ci = [c1, c2, c3].index(max([c1, c2, c3]))
+                c = max(c1, c2, c3) * 3 + ci
+                if c == -3:
+                    continue
+
+                fr = range(f, f + (len(orf_seq) * 3))
+                cr = range(c, c + (cc * 3))
+                intersection = set(fr).intersection(cr)
+
+                if len(intersection) == 0:
+                    cat = "dORF" if f > c else "uORF"
+                else:
+                    if fi == ci:
+                        cat = "CDS"
+                    else:
+                        if f > c:
+                            if f + (len(orf_seq) * 3) > c + (cc * 3):
+                                cat = "doORF"
+                            else:
+                                cat = "intORF"
+                        else:
+                            cat = "uoORF"
+            else:
+                cat = "lncRNA"
+
+            candidates.setdefault(orf, [])
+            candidates[orf].append([tx_id, gene, genename, cat, cat2, fi, f, orf_seq, len(intersection)])
+
+            trans_orfs.setdefault(tx_id, [])
+            trans_orfs[tx_id].append([orf, fi, f, orf_seq])
+
+            strand = gtf[tx_id].strand
+            genomic_f = f
+            if strand == "-":
+                genomic_f = len(transcript_seq_map[tx_id]) - (f + (len(orf_seq) * 3))
+            orf_len_nt = len(orf_seq) * 3
+            exon_starts = gtf[tx_id].start
+            exon_ends = gtf[tx_id].end
+            chrom = gtf[tx_id].chrm
+
+            cum = []
+            total = 0
+            for exon_idx in range(len(exon_starts)):
+                cum.append(total)
+                total += exon_ends[exon_idx] - exon_starts[exon_idx] + 1
+
+            def _tx2g(tx_pos):
+                for idx in range(len(cum) - 1, -1, -1):
+                    if cum[idx] <= tx_pos:
+                        return exon_starts[idx] + (tx_pos - cum[idx])
+                return None
+
+            atg_gp = _tx2g(genomic_f)
+            if atg_gp is not None:
+                atgstop_lines.append(
+                    chrom + "\t" + str(atg_gp) + "\t" + str(atg_gp) + "\t" + orf + "\tboundaries\t" + strand + "\n"
+                )
+            stop_gp = _tx2g(genomic_f + orf_len_nt - 1)
+            if stop_gp is not None:
+                atgstop_lines.append(
+                    chrom + "\t" + str(stop_gp) + "\t" + str(stop_gp) + "\t" + orf + "\tboundaries\t" + strand + "\n"
+                )
+
+            coord_psites.setdefault(orf, [])
+            if strand == "+":
+                psite_offsets = range(genomic_f + 2, genomic_f + orf_len_nt - 1, 3)
+            else:
+                psite_offsets = range(genomic_f, genomic_f + orf_len_nt, 3)
+            for tx_pos in psite_offsets:
+                gp = _tx2g(tx_pos)
+                if gp is not None:
+                    coord_psites[orf].append(gp)
+
+    return candidates, trans_orfs, second_names, coord_psites, atgstop_lines
 
 
 def make_bed(
@@ -358,7 +567,7 @@ def make_bed(
         else:
             nomap.write(p + "\tunmapped\t" + orf_seq + "\n")
     bedout = open(orfs_bed_file, "w+")
-    done = []
+    done = set()
     for line in lines:
         if (mult == "no") and (
             line.split("\t")[3] + "--" + line.split("\t")[4] in multiple
@@ -389,7 +598,8 @@ def insersect_orf_gtf(orfs_bed_file, transcriptome_gtf_file, folder):
     overlaps = {}
     overlaps_cds = {}
     other_overlaps = {}
-    total_studies = []
+    total_studies = set()
+    overlap_seen = {}
     seed = "".join(random.choice(string.ascii_letters) for i in range(10))
     out = open(folder + "/tmp/" + seed + "orfs_to_gtf.ov", "w+")
     subprocess.call(
@@ -402,8 +612,7 @@ def insersect_orf_gtf(orfs_bed_file, transcriptome_gtf_file, folder):
             continue
         if "\ttranscript\t" in line:
             name = line.split("\t")[3] + "--" + line.split("\t")[4]
-            if not line.split("\t")[4] in total_studies:
-                total_studies.append(line.split("\t")[4])
+            total_studies.add(line.split("\t")[4])
             gene = line.split('gene_id "')[1].split('"')[0]
             if "gene_name" in line:
                 gene_name = line.split('gene_name "')[1].split('"')[0]
@@ -414,14 +623,17 @@ def insersect_orf_gtf(orfs_bed_file, transcriptome_gtf_file, folder):
             t_biotype = line.split('transcript_biotype "')[1].split('"')[0]
             overlaps.setdefault(name, [])
             other_overlaps.setdefault(name, ["0", "0", "0"])
-            if not [trans, gene, t_biotype, g_biotype, gene_name] in overlaps[name]:
+            overlap_seen.setdefault(name, set())
+            overlap_key = (trans, gene, t_biotype, g_biotype, gene_name)
+            if overlap_key not in overlap_seen[name]:
                 overlaps[name].append([trans, gene, t_biotype, g_biotype, gene_name])
+                overlap_seen[name].add(overlap_key)
     for line in open(transcriptome_gtf_file):
         if "\tCDS\t" in line:
             trans = line.split('transcript_id "')[1].split('"')[0]
             prot = line.split('protein_id "')[1].split('"')[0]
             overlaps_cds[trans] = prot
-    total_studies.sort()
+    total_studies = sorted(total_studies)
     return overlaps, overlaps_cds, other_overlaps, total_studies, seed
 
 
@@ -466,156 +678,94 @@ def orf_tags(
 ):
     """Check the relative overlap of the ORFs in transcript(s)"""
     print("Checking for ORF overlaps in transcriptome")
-    atgstop = open(folder + "/tmp/" + seed + "atg_to_stop.bed", "w+")
     candidates = {}
     trans_orfs = {}
     coord_psites = {}
     second_names = {}
-    # Cache translated transcript sequences (3 frames each) so we only
-    # translate each transcript once regardless of how many ORFs map to it.
-    _tx_trans_cache = {}
+    atgstop_path = folder + "/tmp/" + seed + "atg_to_stop.bed"
 
-    def _get_tx_frames(tx_id):
-        if tx_id not in _tx_trans_cache:
-            seq = transcriptome_fa[tx_id].seq
-            _tx_trans_cache[tx_id] = (
-                str(seq.translate(cds=False)),
-                str(seq[1:].translate(cds=False)),
-                str(seq[2:].translate(cds=False)),
+    needed_tx_ids = set()
+    needed_orf_ids = set(overlaps.keys())
+    for overlap_rows in overlaps.values():
+        for trans in overlap_rows:
+            needed_tx_ids.add(trans[0])
+    orf_seq_map = {}
+    orf_desc_map = {}
+    for orf_id in needed_orf_ids:
+        if orf_id in orfs_fa:
+            orf_seq_map[orf_id] = str(orfs_fa[orf_id].seq)
+            orf_desc_map[orf_id] = str(orfs_fa[orf_id].description)
+    transcript_seq_map = {
+        tx_id: str(transcriptome_fa[tx_id].seq)
+        for tx_id in needed_tx_ids
+        if tx_id in transcriptome_fa
+    }
+    protein_seq_map = {}
+    for tx_id, protein_id in overlaps_cds.items():
+        if tx_id in transcript_seq_map and protein_id in proteome_fa:
+            protein_seq_map[tx_id] = str(proteome_fa[protein_id].seq).replace("X", "")
+
+    orf_items = list(overlaps.items())
+    orf_order_map = {orf_id: idx for idx, (orf_id, _) in enumerate(orf_items)}
+    fast_cpus = _resolve_fast_cpus()
+    chunks = _chunk_items(orf_items, fast_cpus)
+
+    if fast_cpus > 1 and len(chunks) > 1:
+        print(
+            "Fast mode enabled for orf_tags with "
+            + str(fast_cpus)
+            + " worker(s) across "
+            + str(len(orf_items))
+            + " ORFs"
+        )
+        results = []
+        with ThreadPoolExecutor(max_workers=fast_cpus) as executor:
+            futures = [
+                executor.submit(
+                    _process_orf_chunk,
+                    chunk,
+                    overlaps_cds,
+                    orf_seq_map,
+                    orf_desc_map,
+                    transcript_seq_map,
+                    protein_seq_map,
+                    gtf,
+                    len_cutoff,
+                    max_len_cutoff,
+                )
+                for chunk in chunks
+            ]
+            for future in futures:
+                results.append(future.result())
+    else:
+        results = [
+            _process_orf_chunk(
+                orf_items,
+                overlaps_cds,
+                orf_seq_map,
+                orf_desc_map,
+                transcript_seq_map,
+                protein_seq_map,
+                gtf,
+                len_cutoff,
+                max_len_cutoff,
             )
-        return _tx_trans_cache[tx_id]
+        ]
 
-    for orf in overlaps:
-        cat2 = "non-coding"
-        try:
-            orf_seq = str(orfs_fa[orf].seq)
-        except:
-            continue
-        try:
-            second_names[orf] = str(orfs_fa[orf].description).split()[-1].split("--")[0]
-        except:
-            second_names[orf] = orf.split("--")[0]
-        if len(orf_seq.replace("*", "")) < len_cutoff:
-            continue
-        elif len(orf_seq.replace("*", "")) > max_len_cutoff:
-            continue
-        for trans in overlaps[orf]:
-            if not trans[0] in transcriptome_fa:
-                continue
-            gene = trans[1]
-            genename = trans[4]
-            _frames = _get_tx_frames(trans[0])
-            f1 = _frames[0].find(str(orf_seq))
-            f2 = _frames[1].find(str(orf_seq))
-            f3 = _frames[2].find(str(orf_seq))
-            fi = [f1, f2, f3].index(max([f1, f2, f3]))
-            f = max(f1, f2, f3) * 3 + fi
-            if f < 0:
-                continue
-            if trans[3] == "protein_coding":  # Gene biotype
-                cat2 = "protein_coding"
-            intersection = []
-            if trans[0] in overlaps_cds:  # Protein-codingç
-                prot = overlaps_cds[trans[0]]
-                _prot_seq = str(proteome_fa[prot].seq).replace("X", "")
-                c1 = _frames[0].find(_prot_seq)
-                c2 = _frames[1].find(_prot_seq)
-                c3 = _frames[2].find(_prot_seq)
-                cc = len(str(proteome_fa[prot].seq).replace("X", ""))
-                ci = [c1, c2, c3].index(max([c1, c2, c3]))
-                c = max(c1, c2, c3) * 3 + ci
-                if c == -3:
-                    continue
+    with open(atgstop_path, "w+") as atgstop:
+        for cand_local, trans_local, names_local, psites_local, atg_lines in results:
+            for orf, rows in cand_local.items():
+                candidates.setdefault(orf, []).extend(rows)
+            for tx_id, rows in trans_local.items():
+                trans_orfs.setdefault(tx_id, []).extend(rows)
+            second_names.update(names_local)
+            for orf, coords in psites_local.items():
+                coord_psites.setdefault(orf, []).extend(coords)
+            for line in atg_lines:
+                atgstop.write(line)
 
-                fr = range(f, f + (len(orf_seq) * 3))
-                cr = range(c, c + (cc * 3))
-                xs = set(fr)
-                intersection = xs.intersection(cr)
+    trans_orfs = _canonicalize_trans_orfs(trans_orfs, orf_order_map)
 
-                if len(intersection) == 0:
-                    if f > c:
-                        cat = "dORF"
-                    else:
-                        cat = "uORF"
-                else:
-                    if fi == ci:  # in-frame overlap
-                        cat = "CDS"
-                    else:
-                        if f > c:
-                            if f + (len(orf_seq) * 3) > c + (cc * 3):
-                                cat = "doORF"
-                            else:
-                                cat = "intORF"
-                        else:
-                            cat = "uoORF"
-
-            else:  # Non-overlapping CDS
-                cat = "lncRNA"
-
-            candidates.setdefault(orf, [])
-            candidates[orf].append(
-                [trans[0], gene, genename, cat, cat2, fi, f, orf_seq, len(intersection)]
-            )
-
-            trans_orfs.setdefault(trans[0], [])
-            trans_orfs[trans[0]].append([orf, fi, f, orf_seq])
-
-            # Write ATG and STOP using vectorized exon-offset mapping.
-            # Replaces the per-nucleotide nested loop with cumulative exon
-            # arithmetic: find genome positions for transcript offsets f and
-            # f+orf_len-1, then iterate P-site offsets only (not all nt).
-            _strand = gtf[trans[0]].strand
-            if _strand == "-":
-                f = len(str(transcriptome_fa[trans[0]].seq)) - (
-                    f + (len(orf_seq) * 3)
-                )
-            _orf_len_nt = len(orf_seq) * 3
-            _ex_starts = gtf[trans[0]].start
-            _ex_ends   = gtf[trans[0]].end
-            _chrm      = gtf[trans[0]].chrm
-
-            # Build cumulative transcript offsets for each exon
-            _cum = []
-            _total = 0
-            for _n in range(len(_ex_starts)):
-                _cum.append(_total)
-                _total += _ex_ends[_n] - _ex_starts[_n] + 1
-
-            def _tx2g(tx_pos):
-                """Transcript position → genome coordinate (ascending exon order)."""
-                for _idx in range(len(_cum) - 1, -1, -1):
-                    if _cum[_idx] <= tx_pos:
-                        return _ex_starts[_idx] + (tx_pos - _cum[_idx])
-                return None
-
-            # ATG boundary
-            _atg_gp = _tx2g(f)
-            if _atg_gp is not None:
-                atgstop.write(
-                    _chrm + "\t" + str(_atg_gp) + "\t" + str(_atg_gp)
-                    + "\t" + orf + "\tboundaries\t" + _strand + "\n"
-                )
-
-            # Stop boundary (last nt of ORF)
-            _stop_gp = _tx2g(f + _orf_len_nt - 1)
-            if _stop_gp is not None:
-                atgstop.write(
-                    _chrm + "\t" + str(_stop_gp) + "\t" + str(_stop_gp)
-                    + "\t" + orf + "\tboundaries\t" + _strand + "\n"
-                )
-
-            # P-site positions (every 3rd nt within ORF, stop boundary excluded)
-            coord_psites.setdefault(orf, [])
-            if _strand == "+":
-                _psite_tx_offsets = range(f + 2, f + _orf_len_nt - 1, 3)
-            else:
-                _psite_tx_offsets = range(f, f + _orf_len_nt, 3)
-            for _tx_pos in _psite_tx_offsets:
-                _gp = _tx2g(_tx_pos)
-                if _gp is not None:
-                    coord_psites[orf].append(_gp)
-
-    atgstop.close()
     return candidates, trans_orfs, second_names, coord_psites
 
 
@@ -639,68 +789,70 @@ def exclude_variants(
     )
     out.close()
     ovs = {}
-    ovs_psites = {}
     for line in open(folder + "/tmp/" + seed + "atg_to_stop.ov"):
         if "boundaries" in line:
-            ovs.setdefault(line.split("\t")[3], [])
-            ovs.setdefault(line.split("\t")[9], [])
-            if not line.split("\t")[9] in ovs[line.split("\t")[3]]:
-                ovs[line.split("\t")[3]].append(line.split("\t")[9])
-            if not line.split("\t")[3] in ovs[line.split("\t")[9]]:
-                ovs[line.split("\t")[9]].append(line.split("\t")[3])
+            left = line.split("\t")[3]
+            right = line.split("\t")[9]
+            ovs.setdefault(left, set()).add(right)
+            ovs.setdefault(right, set()).add(left)
 
-    exc = []
+    exc = set()
     variants = {}
     variants_names = {}
     datasets = {}
+    processed_pairs = set()
+    psite_sets = {}
     for trans in trans_orfs:
         for orf in trans_orfs[trans]:
-            for orf2_name in ovs[orf[0]]:
-                if orf[0] in exc:
+            orf_name = orf[0]
+            for orf2_name in ovs.get(orf_name, ()):
+                pair_key = tuple(sorted((orf_name, orf2_name)))
+                if pair_key in processed_pairs:
+                    continue
+                processed_pairs.add(pair_key)
+                if orf_name in exc:
                     continue
                 # if (orf[0] in exc) or (orf2_name in exc):
                 # 	continue
-                variants.setdefault(orf[0], [])
-                variants_names.setdefault(orf[0], [])
-                variants_names[orf[0]].append(orf[0])
-                datasets.setdefault(orf[0], [])
-                datasets[orf[0]].append(orf[0].split("--")[1])
+                variants.setdefault(orf_name, set())
+                variants_names.setdefault(orf_name, set())
+                variants_names[orf_name].add(orf_name)
+                datasets.setdefault(orf_name, set())
+                datasets[orf_name].add(orf_name.split("--")[1])
                 orf2 = candidates[orf2_name]
-                if orf[0] != orf2_name:
+                if orf_name != orf2_name:
                     if method == "longest_string":
                         match = len(str(list(lcs(orf[3], orf2[0][7]))[0]))
                         if match > 0:
                             if (len(orf[3]) >= len(orf2[0][7])) and (
                                 match > (float(len(orf2[0][7])) * col_thr)
                             ):  # Remove shorter variant if intersect more than thr%
-                                if not orf2[0][7] in variants[orf[0]]:
-                                    if orf2[0][7] != orf[3]:
-                                        variants[orf[0]].append(orf2[0][7])
-                                variants_names[orf[0]].append(orf2_name)
-                                datasets[orf[0]].append(orf2_name.split("--")[1])
-                                exc.append(orf2_name)
+                                if orf2[0][7] != orf[3]:
+                                    variants[orf_name].add(orf2[0][7])
+                                variants_names[orf_name].add(orf2_name)
+                                datasets[orf_name].add(orf2_name.split("--")[1])
+                                exc.add(orf2_name)
                     elif method == "psite_overlap":
-                        match = len(
-                            [
-                                value
-                                for value in list(set(coord_psites[orf[0]]))
-                                if value in list(set(coord_psites[orf2_name]))
-                            ]
-                        )
+                        psite_sets.setdefault(orf_name, set(coord_psites[orf_name]))
+                        psite_sets.setdefault(orf2_name, set(coord_psites[orf2_name]))
+                        match = len(psite_sets[orf_name].intersection(psite_sets[orf2_name]))
                         if match > 0:
                             if (len(orf[3]) >= len(orf2[0][7])) and (
                                 match > (float(len(orf2[0][7])) * col_thr)
                             ):  # Remove shorter variant if intersect more than thr%
-                                if not orf2[0][7] in variants[orf[0]]:
-                                    if orf2[0][7] != orf[3]:
-                                        variants[orf[0]].append(orf2[0][7])
-                                variants_names[orf[0]].append(orf2_name)
-                                datasets[orf[0]].append(orf2_name.split("--")[1])
-                                exc.append(orf2_name)
+                                if orf2[0][7] != orf[3]:
+                                    variants[orf_name].add(orf2[0][7])
+                                variants_names[orf_name].add(orf2_name)
+                                datasets[orf_name].add(orf2_name.split("--")[1])
+                                exc.add(orf2_name)
 
     # for var in variants:
     # 	print(var + "\t" + str(variants[var]))
 
+    exc = sorted(exc)
+    variants = {k: sorted(v) for k, v in variants.items()}
+    variants_names = {k: sorted(v) for k, v in variants_names.items()}
+    datasets = {k: sorted(v) for k, v in datasets.items()}
     return exc, variants, variants_names, datasets
 
 
@@ -817,7 +969,8 @@ def write_output(
     outs2 = []
     new_cases = {}
     all_biotypes = {}
-    same_prot = []
+    same_prot = set()
+    exc = set(exc)
     out = open(out_name + ".orfs.out", "w+")
     out.write(
         "orf_id\tversion\tchrm\tstarts\tends\tstrand\ttrans\tgene\tgene_name\torf_biotype\tgene_biotype\tpep\torf_length\tn_datasets\t"
@@ -858,27 +1011,25 @@ def write_output(
     for orf in candidates:
         if orf in exc:
             continue
-        all_t = []
-        all_g = []
-        all_gn = []
-        ncod = []
-        cod = []
+        all_t = set()
+        all_g = set()
+        all_gn = set()
+        ncod = set()
+        cod = set()
         for cand in candidates[orf]:
-            all_t.append(cand[0])
-            all_g.append(cand[1])
-            all_gn.append(cand[2])
+            all_t.add(cand[0])
+            all_g.add(cand[1])
+            all_gn.add(cand[2])
             if cand[3] == "lncRNA":
-                ncod.append(cand[0])
+                ncod.add(cand[0])
             else:
-                cod.append(cand[0])
+                cod.add(cand[0])
 
-        all_t = list(set(all_t))
-        all_g = list(set(all_g))
-        all_gn = list(set(all_gn))
-        ncod = list(set(ncod))
-        cod = list(set(cod))
-
-        all_t.sort()  # Sort list, in case of several transcripts with equal evidence, the first one is selected
+        all_t = sorted(all_t)  # Sort list, in case of several transcripts with equal evidence, the first one is selected
+        all_g = sorted(all_g)
+        all_gn = sorted(all_gn)
+        ncod = sorted(ncod)
+        cod = sorted(cod)
 
         # Evidence in APPRIS and TSL
         # if (len(ncod) > 0) and (len(cod) > 0): #If the ORF overlaps coding and non-coding transcripts, prioritize coding ones
@@ -981,9 +1132,10 @@ def write_output(
                 elif other_overlaps[orf][0] == "2":
                     trans[4] = "unitary_pseudogene"
                 # Vector 0/1 studies
+                dataset_set = set(datasets.get(orf, []))
                 stu = []
                 for study in total_studies:
-                    if study in datasets[orf]:
+                    if study in dataset_set:
                         stu.append("1")
                     else:
                         stu.append("0")
@@ -1006,107 +1158,55 @@ def write_output(
                     )
                     trans[6] = rev
 
-                tt = 0
-                ranges = []
-                for n, exon in enumerate(gtf[t].start):
-                    for j in range(gtf[t].start[n], gtf[t].end[n] + 1):
-                        if (tt >= trans[6]) and (tt < trans[6] + (len(trans[7]) * 3)):
-                            ranges.append(j)
-                        tt += 1
-                n2 = 0
+                genomic_blocks = project_tx_range_to_genome(
+                    gtf[t].start, gtf[t].end, trans[6], len(trans[7]) * 3
+                )
                 n3 = 1
-                for n, r in enumerate(ranges):
-                    if n2 == 0:
-                        start = ranges[n]
-                    elif ranges[n] - ranges[n - 1] != 1:
-                        end = ranges[n - 1]
-                        all_coords[4].append(
-                            gtf[t].chrm
-                            + "\t"
-                            + str(start)
-                            + "\t"
-                            + str(end)
-                            + "\tP1_ID\t"
-                            + trans[1]
-                            + "\t"
-                            + gtf[t].strand
-                            + "\n"
-                        )
-                        # all_coords[5].append(gtf[t].chrm + "\tphaseI\tCDS\t" + str(start) + "\t" + str(end) + "\t.\t" + gtf[t].strand + "\t.\tgene_id \"" + trans[1] + "\"; gene_name \"" + trans[2] + "--" + trans[3] + "\"; transcript_id \"P1_ID\";\n")
-                        all_coords[5].append(
-                            gtf[t].chrm
-                            + "\tphaseI\tCDS\t"
-                            + str(start)
-                            + "\t"
-                            + str(end)
-                            + "\t.\t"
-                            + gtf[t].strand
-                            + '\t.\tgene_id "'
-                            + trans[1]
-                            + '"; gene_name "'
-                            + trans[2]
-                            + '"; gene_biotype "'
-                            + trans[4]
-                            + '"; transcript_id "'
-                            + t
-                            + '"; orf_id "P1_ID"; orf_biotype "'
-                            + trans[3]
-                            + '"; phaseI_id "'
-                            + id2
-                            + '"; exon_number "'
-                            + str(n3)
-                            + '";\n'
-                        )
-                        all_coords[0].append(str(start))
-                        all_coords[1].append(str(end))
-                        start = ranges[n]
-                        n3 += 1
-                    n2 += 1
-
-                all_coords[4].append(
-                    gtf[t].chrm
-                    + "\t"
-                    + str(start)
-                    + "\t"
-                    + str(ranges[n])
-                    + "\tP1_ID\t"
-                    + trans[1]
-                    + "\t"
-                    + gtf[t].strand
-                    + "\n"
-                )
-                # all_coords[5].append(gtf[t].chrm + "\tphaseI\tCDS\t" + str(start) + "\t" + str(ranges[n]) + "\t.\t" + gtf[t].strand + "\t.\tgene_id \"" + trans[1] + "\"; gene_name \"" + trans[2] + "--" + trans[3] + "\"; transcript_id \"P1_ID\";\n")
-                all_coords[5].append(
-                    gtf[t].chrm
-                    + "\tphaseI\tCDS\t"
-                    + str(start)
-                    + "\t"
-                    + str(ranges[n])
-                    + "\t.\t"
-                    + gtf[t].strand
-                    + '\t.\tgene_id "'
-                    + trans[1]
-                    + '"; gene_name "'
-                    + trans[2]
-                    + '"; gene_biotype "'
-                    + trans[4]
-                    + '"; transcript_id "'
-                    + t
-                    + '"; orf_id "P1_ID"; orf_biotype "'
-                    + trans[3]
-                    + '"; phaseI_id "'
-                    + id2
-                    + '"; exon_number "'
-                    + str(n3)
-                    + '";\n'
-                )
-
-                all_coords[0].append(str(start))
-                all_coords[1].append(str(ranges[n]))
+                for start, end in genomic_blocks:
+                    all_coords[4].append(
+                        gtf[t].chrm
+                        + "\t"
+                        + str(start)
+                        + "\t"
+                        + str(end)
+                        + "\tP1_ID\t"
+                        + trans[1]
+                        + "\t"
+                        + gtf[t].strand
+                        + "\n"
+                    )
+                    # all_coords[5].append(gtf[t].chrm + "\tphaseI\tCDS\t" + str(start) + "\t" + str(end) + "\t.\t" + gtf[t].strand + "\t.\tgene_id \"" + trans[1] + "\"; gene_name \"" + trans[2] + "--" + trans[3] + "\"; transcript_id \"P1_ID\";\n")
+                    all_coords[5].append(
+                        gtf[t].chrm
+                        + "\tphaseI\tCDS\t"
+                        + str(start)
+                        + "\t"
+                        + str(end)
+                        + "\t.\t"
+                        + gtf[t].strand
+                        + '\t.\tgene_id "'
+                        + trans[1]
+                        + '"; gene_name "'
+                        + trans[2]
+                        + '"; gene_biotype "'
+                        + trans[4]
+                        + '"; transcript_id "'
+                        + t
+                        + '"; orf_id "P1_ID"; orf_biotype "'
+                        + trans[3]
+                        + '"; phaseI_id "'
+                        + id2
+                        + '"; exon_number "'
+                        + str(n3)
+                        + '";\n'
+                    )
+                    all_coords[0].append(str(start))
+                    all_coords[1].append(str(end))
+                    n3 += 1
 
                 # Convert variants to second name
                 new_variant_names = []
-                for variant in list(set(variants_names[orf])):
+                for variant in variants_names.get(orf, []):
                     new_variant_names.append(second_names[variant])
 
                 # In-frame overlaps with annotated CDSs
@@ -1211,7 +1311,7 @@ def write_output(
                     + "\t"
                     + str(len(trans[7]) * 3)
                     + "\t"
-                    + str(len(list(set(datasets[orf]))))
+                    + str(len(dataset_set))
                     + "\t"
                     + "\t".join(stu)
                     + "\t"
@@ -1234,7 +1334,7 @@ def write_output(
                 # Write FASTA
                 out4.write(">" + id + "\n" + trans[7] + "\n")
                 if (len(trans[7]) * 3 - 3) == int(trans[8]):
-                    same_prot.append(trans[7])
+                    same_prot.add(trans[7])
 
     outf.close()
     outf2.close()
@@ -1277,7 +1377,7 @@ def write_output(
             annot[line.split("\t")[11]] = line2.split("\t")[10]
         elif line.split("\t")[11] in riboseq_orfs:
             if len(riboseq_orfs[line.split("\t")[11]]) == 1:
-                done.append(
+                done.add(
                     riboseq_orfs[line.split("\t")[11]][0][0].replace("_var", "")
                 )
                 id2 = riboseq_orfs[line.split("\t")[11]][0][0]
@@ -1287,7 +1387,7 @@ def write_output(
                     line.split("\t")[11]
                 ]:  # In the event of two sequences being the same, the gene_id will be inspected, be aware in case the gene_id changes across versions
                     if elemento[2] == line.split("\t")[7]:
-                        done.append(elemento[0].replace("_var", ""))
+                        done.add(elemento[0].replace("_var", ""))
                         id2 = elemento[0]
                         bio2 = elemento[1]
         else:

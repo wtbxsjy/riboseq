@@ -5,6 +5,7 @@ import subprocess
 import os
 import random
 import string
+import time
 from Bio import SeqIO
 from Bio.Seq import Seq
 from datetime import datetime
@@ -35,6 +36,17 @@ def check_file (file_str):
 	except:
 		print("Error: " + file_str + " input not found\n")
 		exit()
+
+
+def append_profile(stage, started_at, details=""):
+	profile_path = os.environ.get("GENCODE_PROFILE_PATH")
+	if not profile_path:
+		return
+	header_needed = not os.path.exists(profile_path)
+	with open(profile_path, "a") as out:
+		if header_needed:
+			out.write("stage\tseconds\tdetails\n")
+		out.write(f"{stage}\t{time.perf_counter() - started_at:.6f}\t{details}\n")
 
 def main():
 	usage = "\n%prog  [options]"
@@ -137,16 +149,34 @@ def main():
 	except:
 		pass 
 
+	t0 = time.perf_counter()
 	(orfs_fa,transcriptome_fa,proteome_fa) = functions.load_fasta(orfs_fa_file,transcriptome_fa_file,proteome_fa_file)
+	append_profile("load_fasta", t0, "")
+	t0 = time.perf_counter()
 	gtf = functions.parse_gtf(transcriptome_gtf_file,"exon")
+	append_profile("parse_gtf", t0, "")
 	if calculate_coordinates != "no":
+		t0 = time.perf_counter()
 		functions.make_bed(orfs_fa,transcriptome_fa,gtf,len_cutoff,max_len_cutoff,calculate_coordinates,orfs_bed_file,out_name,mult,genomic,fgenomic)
+		append_profile("make_bed", t0, "")
+	t0 = time.perf_counter()
 	(appris,supp) = functions.read_support(t_support)
+	append_profile("read_support", t0, "")
+	t0 = time.perf_counter()
 	(overlaps,overlaps_cds,other_overlaps,total_studies,seed) = functions.insersect_orf_gtf(orfs_bed_file,transcriptome_gtf_file,folder)
+	append_profile("intersect_orf_gtf", t0, f"orfs={len(overlaps)}")
+	t0 = time.perf_counter()
 	other_overlaps = functions.pseudo_or_cds_ov(orfs_bed_file,transcriptome_gtf_file,other_overlaps,folder,seed)
+	append_profile("pseudo_or_cds_ov", t0, "")
+	t0 = time.perf_counter()
 	(candidates,trans_orfs,second_names,coord_psites) = functions.orf_tags(overlaps,overlaps_cds,orfs_fa,transcriptome_fa,proteome_fa,gtf,len_cutoff,max_len_cutoff,folder,seed)
+	append_profile("orf_tags", t0, f"candidates={len(candidates)}")
+	t0 = time.perf_counter()
 	(exc,variants,variants_names,datasets) = functions.exclude_variants(trans_orfs,col_thr,candidates,method,coord_psites,folder,seed)
+	append_profile("exclude_variants", t0, f"exc={len(exc)}")
+	t0 = time.perf_counter()
 	functions.write_output(orfs_fa_file,orfs_bed_file,candidates,exc,variants,variants_names,datasets,appris,supp,gtf,transcriptome_fa,second_names,len_cutoff,max_len_cutoff,col_thr,total_studies,other_overlaps,psites_bed_file,folder,out_name,method,seed,genomic,fgenomic,cds_cases)
+	append_profile("write_output", t0, "")
 
 if __name__ == '__main__':
 	main()
