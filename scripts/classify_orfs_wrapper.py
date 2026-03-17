@@ -41,6 +41,7 @@ def main():
     parser.add_argument("--gtf", help="Reference GTF file (Required for orfquant and orf_type)")
     parser.add_argument("--fasta", help="Reference FASTA file")
     parser.add_argument("--ensembl_dir", help="Ensembl directory (Required for gencode mode)")
+    parser.add_argument("--gencode_impl", choices=["original", "fast"], default="original", help="Implementation to use for gencode mode")
     parser.add_argument("--cpus", type=str, default="1", help="Number of CPUs")
     
     args = parser.parse_args()
@@ -58,6 +59,18 @@ def main():
         if not args.ensembl_dir:
             print("Error: --ensembl_dir is required for gencode mode", file=sys.stderr)
             sys.exit(1)
+
+        if args.gencode_impl == "fast":
+            script = get_script_path("run_gencode_classify_fast.py")
+            cmd = [
+                "python3", script,
+                "--input_prefix", input_base,
+                "--ensembl_dir", args.ensembl_dir,
+                "--output_dir", args.output_dir,
+                "--cpus", args.cpus
+            ]
+            run_command(cmd, "GENCODE Classifier (fast)")
+            return
 
         script = get_script_path("ORF_mapper_to_GENCODE_v1.1.py")
 

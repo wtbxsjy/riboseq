@@ -57,6 +57,7 @@ process CLASSIFY_ORFS_GENCODE {
             --input ${input_prefix} \\
             --output_dir . \\
             --ensembl_dir ${ensembl_dir} \\
+            --gencode_impl ${params.gencode_classify_impl ?: 'original'} \\
             --cpus ${task.cpus} \\
             ${extra_args} 2>&1 | tee classify_gencode.log
         EXIT_CODE=\${PIPESTATUS[0]}
