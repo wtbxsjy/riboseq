@@ -5,6 +5,7 @@ import subprocess
 import os
 import random
 import string
+import time
 from concurrent.futures import ThreadPoolExecutor
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -30,6 +31,55 @@ class trans_object:
         self.start = start
         self.end = end
         self.biotype = biotype
+
+
+class ProgressTicker:
+    """Lightweight progress reporter for long-running terminal loops."""
+
+    def __init__(self, label, total, min_interval=5.0, min_step=0.02):
+        self.label = label
+        self.total = max(int(total), 0)
+        self.min_interval = float(min_interval)
+        self.min_step = float(min_step)
+        self.started_at = time.time()
+        self.last_report_at = self.started_at
+        self.last_fraction = -1.0
+
+    def update(self, current, extra=""):
+        if self.total <= 0:
+            return
+        current = min(max(int(current), 0), self.total)
+        fraction = float(current) / float(self.total)
+        now = time.time()
+        is_done = current >= self.total
+        should_report = (
+            current == 1
+            or is_done
+            or (fraction - self.last_fraction) >= self.min_step
+            or (now - self.last_report_at) >= self.min_interval
+        )
+        if not should_report:
+            return
+
+        elapsed = now - self.started_at
+        message = (
+            "[progress] "
+            + self.label
+            + ": "
+            + str(current)
+            + "/"
+            + str(self.total)
+            + " ("
+            + "{:.1f}".format(fraction * 100.0)
+            + "%, elapsed "
+            + "{:.1f}".format(elapsed)
+            + "s)"
+        )
+        if extra:
+            message += " " + str(extra)
+        print(message, flush=True)
+        self.last_report_at = now
+        self.last_fraction = fraction
 
 
 def lcs(S, T):
@@ -195,6 +245,7 @@ def _process_orf_chunk(
     gtf,
     len_cutoff,
     max_len_cutoff,
+    progress=None,
 ):
     candidates = {}
     trans_orfs = {}
@@ -213,7 +264,9 @@ def _process_orf_chunk(
             )
         return tx_trans_cache[tx_id]
 
-    for orf, overlap_rows in orf_items:
+    for idx, (orf, overlap_rows) in enumerate(orf_items, start=1):
+        if progress is not None:
+            progress.update(idx, "orf=" + str(orf))
         cat2 = "non-coding"
         orf_seq = orf_seq_map.get(orf)
         if orf_seq is None:
@@ -709,6 +762,7 @@ def orf_tags(
     orf_order_map = {orf_id: idx for idx, (orf_id, _) in enumerate(orf_items)}
     fast_cpus = _resolve_fast_cpus()
     chunks = _chunk_items(orf_items, fast_cpus)
+    progress = ProgressTicker("orf_tags", len(orf_items), min_interval=10.0, min_step=0.05)
 
     if fast_cpus > 1 and len(chunks) > 1:
         print(
@@ -735,8 +789,11 @@ def orf_tags(
                 )
                 for chunk in chunks
             ]
-            for future in futures:
+            completed = 0
+            for chunk, future in zip(chunks, futures):
                 results.append(future.result())
+                completed += len(chunk)
+                progress.update(completed, "completed chunk")
     else:
         results = [
             _process_orf_chunk(
@@ -749,6 +806,7 @@ def orf_tags(
                 gtf,
                 len_cutoff,
                 max_len_cutoff,
+                progress=progress,
             )
         ]
 
@@ -765,6 +823,7 @@ def orf_tags(
                 atgstop.write(line)
 
     trans_orfs = _canonicalize_trans_orfs(trans_orfs, orf_order_map)
+    progress.update(len(orf_items), "done")
 
     return candidates, trans_orfs, second_names, coord_psites
 
@@ -802,8 +861,13 @@ def exclude_variants(
     datasets = {}
     processed_pairs = set()
     psite_sets = {}
+    total_pairs_hint = sum(len(rows) for rows in trans_orfs.values())
+    progress = ProgressTicker("exclude_variants", total_pairs_hint, min_interval=10.0, min_step=0.05)
+    processed_orfs = 0
     for trans in trans_orfs:
         for orf in trans_orfs[trans]:
+            processed_orfs += 1
+            progress.update(processed_orfs, "transcript=" + str(trans))
             orf_name = orf[0]
             for orf2_name in ovs.get(orf_name, ()):
                 pair_key = tuple(sorted((orf_name, orf2_name)))
@@ -853,6 +917,7 @@ def exclude_variants(
     variants = {k: sorted(v) for k, v in variants.items()}
     variants_names = {k: sorted(v) for k, v in variants_names.items()}
     datasets = {k: sorted(v) for k, v in datasets.items()}
+    progress.update(total_pairs_hint, "done")
     return exc, variants, variants_names, datasets
 
 
@@ -1008,7 +1073,11 @@ def write_output(
         + ";".join(total_studies)
         + "\n"
     )
+    progress = ProgressTicker("write_output", len(candidates), min_interval=10.0, min_step=0.05)
+    processed_orfs = 0
     for orf in candidates:
+        processed_orfs += 1
+        progress.update(processed_orfs, "orf=" + str(orf))
         if orf in exc:
             continue
         all_t = set()
@@ -1502,6 +1571,7 @@ def write_output(
             + others
             + "\n"
         )
+    progress.update(len(candidates), "done")
     out.close()
     out3.close()
     out3b.close()
