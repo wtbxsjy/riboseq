@@ -1,0 +1,35 @@
+=== ORF Unification Statistics ===
+=== Input Files Summary ===
+Total raw candidates: 1809845
+=== Input Statistics (raw, per tool and per sample) ===
+By Tool:
+  ribotish    : 1314795 ORFs from 4 sample(s): SRR7956050, SRR7956051, SRR7956052, SRR7956053
+  ribotricer  : 350596 ORFs from 4 sample(s): SRR7956050, SRR7956051, SRR7956052, SRR7956053
+  orfquant    : 144454 ORFs from 4 sample(s): SRR7956050, SRR7956051, SRR7956052, SRR7956053
+  SRR7956050          : ribotish=367406, ribotricer= 99030, orfquant= 36087, total=502523
+  SRR7956051          : ribotish=423963, ribotricer=143077, orfquant= 64265, total=631305
+  SRR7956052          : ribotish=338230, ribotricer= 78292, orfquant= 29422, total=445944
+  SRR7956053          : ribotish=185196, ribotricer= 30197, orfquant= 14680, total=230073
+After exact-match merging: 468959
+  Merged 1340886 duplicates
+  warnings.warn(
+  warnings.warn(
+  warnings.warn(
+  warnings.warn(
+  warnings.warn(
+  warnings.warn(
+  CDS in-frame overlap: 388790 ORFs (82.9%)
+After frame-aware merging: 347080
+=== Final Set Statistics (after cross-attribution via overlap grouping) ===
+Note: cross-attribution assigns subset ORF sources to representative, so all tools/samples may appear for each sample.
+Final unified ORFs: 347080
+By Tool:
+  ribotish    : 279133 ORFs
+  ribotricer  :  37364 ORFs
+  orfquant    :  46594 ORFs
+By Sample:
+  SRR7956050          : ribotish=235881, ribotricer= 25421, orfquant= 23245, total=284547
+  SRR7956051          : ribotish=264859, ribotricer= 35528, orfquant= 32383, total=332770
+  SRR7956052          : ribotish=220239, ribotricer= 20332, orfquant= 20500, total=261071
+  SRR7956053          : ribotish=124058, ribotricer=  8584, orfquant= 10705, total=143347
+  Processed 57846/347080 candidates...  Processed 57850/347080 candidates...  Processed 115696/347080 candidates...  Processed 173542/347080 candidates...  Processed 231388/347080 candidates...  Processed 289234/347080 candidates...  Processed 347080/347080 candidates...  Processed 347080/347080 candidates.

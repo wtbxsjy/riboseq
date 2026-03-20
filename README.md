@@ -21,6 +21,14 @@
 
 **nf-core/riboseq** is a bioinformatics pipeline for analysis of Ribo-seq data. It borrows heavily from nf-core/rnaseq in the preprocessing stages.
 
+### Tutorial Resources
+
+For lab-facing onboarding materials and an interactive notebook, see:
+
+- [Lab Tutorial / 实验室教学版 Vignette](docs/lab_tutorial.md)
+- [Guided Tutorial Notebook](docs/notebooks/riboseq_guided_tutorial.ipynb)
+- [Metadata helper script](scripts/fetch_public_metadata.py)
+
 ### Pipeline Overview
 
 ```mermaid

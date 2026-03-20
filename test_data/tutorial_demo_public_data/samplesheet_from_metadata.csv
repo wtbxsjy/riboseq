@@ -1,0 +1,6 @@
+sample,fastq_1,fastq_2,strandedness,type,group,run_accession,input_accession
+patient_50,ftp.sra.ebi.ac.uk/vol1/fastq/SRR111/080/SRR11192680/SRR11192680_1.fastq.gz,ftp.sra.ebi.ac.uk/vol1/fastq/SRR111/080/SRR11192680/SRR11192680_2.fastq.gz,auto,unknown,patient_5,SRR11192680,SRR11192680
+PM2_5_0_1,ftp.sra.ebi.ac.uk/vol1/fastq/SRR154/082/SRR15480782/SRR15480782_1.fastq.gz,ftp.sra.ebi.ac.uk/vol1/fastq/SRR154/082/SRR15480782/SRR15480782_2.fastq.gz,auto,rnaseq,PM2_5_0,SRR15480782,SRR15480782
+PM2_5_400_1,ftp.sra.ebi.ac.uk/vol1/fastq/SRR154/085/SRR15480785/SRR15480785_1.fastq.gz,ftp.sra.ebi.ac.uk/vol1/fastq/SRR154/085/SRR15480785/SRR15480785_2.fastq.gz,auto,rnaseq,PM2_5_400,SRR15480785,SRR15480785
+Ribo-seq_C01,ftp.sra.ebi.ac.uk/vol1/fastq/SRR154/088/SRR15480788/SRR15480788.fastq.gz,,auto,riboseq,Ribo-seq_C,SRR15480788,SRR15480788
+Ribo-seq_P4001,ftp.sra.ebi.ac.uk/vol1/fastq/SRR154/091/SRR15480791/SRR15480791.fastq.gz,,auto,riboseq,Ribo-seq_P400,SRR15480791,SRR15480791
