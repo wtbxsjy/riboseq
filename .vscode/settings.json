@@ -2,5 +2,8 @@
     "markdown.styles": [
         "public/vscode_markdown.css"
     ],
-    "nextflow.telemetry.enabled": true
+    "nextflow.telemetry.enabled": true,
+    "python.defaultInterpreterPath": "/home/renzhe/miniforge3/bin/python",
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda"
 }
