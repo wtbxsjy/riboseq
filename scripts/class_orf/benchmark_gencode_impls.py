@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Run original and fast GENCODE classification implementations on the same input
-prefix and summarize runtime plus key output diffs.
+Run original / fast / indexed_fast GENCODE classification implementations on
+the same input prefix and summarize runtime plus key output diffs.
 """
 
 from __future__ import annotations
@@ -13,6 +13,56 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+
+
+STANDARD_REF_MAP = {
+    "TRANSCRIPTOME_FASTA": [
+        "TRANSCRIPTOME_FASTA",
+        "Mus_musculus.GRCm39.transcriptome.fa",
+    ],
+    "SORTED_TRANSCRIPTOME_GTF": [
+        "SORTED_TRANSCRIPTOME_GTF",
+        "Mus_musculus.GRCm39.110.sorted.chr.gtf",
+        "Mus_musculus.GRCm39.110.sorted.gtf",
+    ],
+    "PROTEOME_FASTA": [
+        "PROTEOME_FASTA",
+        "Mus_musculus.GRCm39.pep.all.fa",
+    ],
+    "TRANSCRIPT_SUPPORT": [
+        "TRANSCRIPT_SUPPORT",
+        "transcript_support_level.txt",
+    ],
+    "PSITES_BED": [
+        "PSITES_BED",
+        "psites.chr.bed",
+        "psites.bed",
+    ],
+}
+
+
+def prepare_standard_ensembl_dir(source_dir: Path, target_dir: Path) -> Path:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    missing = []
+    for standard_name, candidates in STANDARD_REF_MAP.items():
+        source_path = None
+        for candidate in candidates:
+            candidate_path = source_dir / candidate
+            if candidate_path.exists():
+                source_path = candidate_path
+                break
+        if source_path is None or not source_path.exists():
+            missing.append(standard_name)
+            continue
+        link_path = target_dir / standard_name
+        if link_path.exists() or link_path.is_symlink():
+            link_path.unlink()
+        link_path.symlink_to(source_path.resolve())
+    if missing:
+        raise FileNotFoundError(
+            f"Missing required Ensembl files for benchmark: {', '.join(missing)}"
+        )
+    return target_dir
 
 
 def run_impl(
@@ -62,7 +112,7 @@ def compare_outputs(repo_root: Path, left: Path, right: Path, summary: Path) -> 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark original vs fast GENCODE classification")
+    parser = argparse.ArgumentParser(description="Benchmark GENCODE classification implementations")
     parser.add_argument("--repo_root", default=".", help="Repository root")
     parser.add_argument("--input_prefix", required=True, help="Unified ORF input prefix")
     parser.add_argument("--ensembl_dir", required=True, help="Prepared Ensembl directory")
@@ -79,14 +129,20 @@ def main() -> None:
 
     original_dir = workdir / "original"
     fast_dir = workdir / "fast"
-    diff_summary = workdir / "compare.summary.tsv"
+    indexed_fast_dir = workdir / "indexed_fast"
+    diff_fast_summary = workdir / "compare.fast.summary.tsv"
+    diff_indexed_fast_summary = workdir / "compare.indexed_fast.summary.tsv"
     runtime_summary = workdir / "runtime.summary.tsv"
+    standard_ensembl_dir = prepare_standard_ensembl_dir(
+        Path(args.ensembl_dir).resolve(),
+        workdir / "ensembl_standard",
+    )
 
     original_seconds = run_impl(
         repo_root=repo_root,
         impl="original",
         input_prefix=args.input_prefix,
-        ensembl_dir=args.ensembl_dir,
+        ensembl_dir=str(standard_ensembl_dir),
         out_dir=original_dir,
         cpus=1,
     )
@@ -94,8 +150,16 @@ def main() -> None:
         repo_root=repo_root,
         impl="fast",
         input_prefix=args.input_prefix,
-        ensembl_dir=args.ensembl_dir,
+        ensembl_dir=str(standard_ensembl_dir),
         out_dir=fast_dir,
+        cpus=args.cpus,
+    )
+    indexed_fast_seconds = run_impl(
+        repo_root=repo_root,
+        impl="indexed_fast",
+        input_prefix=args.input_prefix,
+        ensembl_dir=str(standard_ensembl_dir),
+        out_dir=indexed_fast_dir,
         cpus=args.cpus,
     )
 
@@ -103,7 +167,13 @@ def main() -> None:
         repo_root=repo_root,
         left=original_dir / "gencode_results.orfs.out",
         right=fast_dir / "gencode_results.orfs.out",
-        summary=diff_summary,
+        summary=diff_fast_summary,
+    )
+    compare_outputs(
+        repo_root=repo_root,
+        left=original_dir / "gencode_results.orfs.out",
+        right=indexed_fast_dir / "gencode_results.orfs.out",
+        summary=diff_indexed_fast_summary,
     )
 
     with runtime_summary.open("w", newline="") as handle:
@@ -111,8 +181,13 @@ def main() -> None:
         writer.writerow(["impl", "seconds"])
         writer.writerow(["original", f"{original_seconds:.6f}"])
         writer.writerow(["fast", f"{fast_seconds:.6f}"])
+        writer.writerow(["indexed_fast", f"{indexed_fast_seconds:.6f}"])
         if fast_seconds > 0:
-            writer.writerow(["speedup_vs_original", f"{original_seconds / fast_seconds:.6f}"])
+            writer.writerow(["fast_speedup_vs_original", f"{original_seconds / fast_seconds:.6f}"])
+        if indexed_fast_seconds > 0:
+            writer.writerow(["indexed_fast_speedup_vs_original", f"{original_seconds / indexed_fast_seconds:.6f}"])
+        if indexed_fast_seconds > 0 and fast_seconds > 0:
+            writer.writerow(["indexed_fast_speedup_vs_fast", f"{fast_seconds / indexed_fast_seconds:.6f}"])
 
 
 if __name__ == "__main__":

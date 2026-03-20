@@ -244,27 +244,32 @@ def build_chunk_inputs(
     chroms: Sequence[str],
     bed_groups: Dict[str, List[str]],
     fasta_records: Dict[str, Tuple[str, str]],
-) -> Tuple[Path, Path, int]:
+) -> Tuple[Path, Path, int, int]:
     chunk_dir.mkdir(parents=True, exist_ok=True)
     bed6_path = chunk_dir / f"chunk_{chunk_index:02d}.orfs.bed6"
     fasta_path = chunk_dir / f"chunk_{chunk_index:02d}.orfs.fa"
     orf_ids: List[str] = []
+    skipped = 0
     with bed6_path.open("w") as bed_handle:
         for chrom in chroms:
             for line in bed_groups[chrom]:
-                bed_handle.write(line + "\n")
                 fields = line.split("\t")
                 if len(fields) >= 4:
-                    orf_ids.append(fields[3])
+                    orf_id = fields[3]
+                    if orf_id not in fasta_records:
+                        skipped += 1
+                        continue
+                    orf_ids.append(orf_id)
+                    bed_handle.write(line + "\n")
 
     with fasta_path.open("w") as fasta_handle:
         for orf_id in orf_ids:
             record = fasta_records.get(orf_id)
             if record is None:
-                raise KeyError(f"ORF {orf_id} present in BED but missing from FASTA")
+                continue
             header, seq = record
             fasta_handle.write(f">{header}\n{seq}\n")
-    return bed6_path, fasta_path, len(orf_ids)
+    return bed6_path, fasta_path, len(orf_ids), skipped
 
 
 def parse_reference_paths(ensembl_dir: Path) -> Dict[str, Path]:
@@ -356,7 +361,7 @@ def prepare_chunk(
 ) -> Dict[str, object]:
     chunk_dir = chunk_root / f"chunk_{chunk_index:02d}"
     build_inputs_started = time.perf_counter()
-    chunk_bed6, chunk_fasta, n_orfs = build_chunk_inputs(
+    chunk_bed6, chunk_fasta, n_orfs, n_skipped = build_chunk_inputs(
         chunk_dir=chunk_dir,
         chunk_index=chunk_index,
         chroms=chroms,
@@ -383,6 +388,7 @@ def prepare_chunk(
         "output_prefix": chunk_dir / "gencode_results",
         "profile_path": chunk_dir / "gencode_mapper.profile.tsv",
         "n_orfs": n_orfs,
+        "n_skipped": n_skipped,
         "n_tx": n_tx,
         "n_prot": n_prot,
         "build_inputs_seconds": build_inputs_seconds,
@@ -538,7 +544,7 @@ def main() -> None:
             (
                 "build_chunk_inputs",
                 float(spec["build_inputs_seconds"]),
-                f"chunk={spec['chunk_index']} chroms={','.join(spec['chroms'])} orfs={spec['n_orfs']}",
+                f"chunk={spec['chunk_index']} chroms={','.join(spec['chroms'])} orfs={spec['n_orfs']} skipped={spec['n_skipped']}",
             )
         )
         timings.append(

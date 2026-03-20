@@ -9,8 +9,12 @@ import argparse
 import csv
 import random
 import re
+import sys
 from pathlib import Path
 from typing import List, Set
+
+
+csv.field_size_limit(sys.maxsize)
 
 
 def read_ids_from_bed(path: Path) -> List[str]:
