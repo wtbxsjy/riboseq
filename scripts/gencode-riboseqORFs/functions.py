@@ -886,7 +886,8 @@ def exclude_variants(
                 orf2 = candidates[orf2_name]
                 if orf_name != orf2_name:
                     if method == "longest_string":
-                        match = len(str(list(lcs(orf[3], orf2[0][7]))[0]))
+                        longest_shared = next(iter(lcs(orf[3], orf2[0][7])), "")
+                        match = len(longest_shared)
                         if match > 0:
                             if (len(orf[3]) >= len(orf2[0][7])) and (
                                 match > (float(len(orf2[0][7])) * col_thr)
