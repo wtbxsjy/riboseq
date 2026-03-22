@@ -128,6 +128,10 @@ def write_profile(profile_file: Path, rows: Iterable[Tuple[str, float, str]]) ->
 
 
 def load_orf_to_study_and_sequences(metadata_file: Path) -> Tuple[Dict[str, str], Dict[str, str]]:
+    try:
+        csv.field_size_limit(sys.maxsize)
+    except OverflowError:
+        csv.field_size_limit(2147483647)
     orf_to_study: Dict[str, str] = {}
     orf_to_nt: Dict[str, str] = {}
     with metadata_file.open(newline="") as handle:
