@@ -41,11 +41,27 @@ def main():
     parser.add_argument("--gtf", help="Reference GTF file (Required for orfquant and orf_type)")
     parser.add_argument("--fasta", help="Reference FASTA file")
     parser.add_argument("--ensembl_dir", help="Ensembl directory (Required for gencode mode)")
-    parser.add_argument("--gencode_impl", choices=["original", "fast", "indexed_fast"], default="original", help="Implementation to use for gencode mode")
+    parser.add_argument("--gencode_impl", default="original", help="Implementation to use for gencode mode")
     parser.add_argument("--cpus", type=str, default="1", help="Number of CPUs")
     
     args = parser.parse_args()
-    
+
+    # Be forgiving about a common typo seen in external configs / CLI invocations.
+    if args.gencode_impl == "findexed_fast":
+        print(
+            "WARNING: Received deprecated/typo value 'findexed_fast' for --gencode_impl; "
+            "using 'indexed_fast' instead.",
+            file=sys.stderr,
+        )
+        args.gencode_impl = "indexed_fast"
+
+    valid_gencode_impls = {"original", "fast", "indexed_fast"}
+    if args.gencode_impl not in valid_gencode_impls:
+        parser.error(
+            f"argument --gencode_impl: invalid choice: {args.gencode_impl!r} "
+            f"(choose from {sorted(valid_gencode_impls)!r})"
+        )
+
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Determine input files based on prefix or full path
