@@ -300,6 +300,10 @@ sanitize_filename <- function(x) {
   gsub("[^A-Za-z0-9._-]", "_", x)
 }
 
+shell_quote <- function(x) {
+  shQuote(x, type = "sh")
+}
+
 load_gtf_cache <- function(gtf_path, cache_env) {
   key <- paste0("gtf::", normalizePath(gtf_path, winslash = "/", mustWork = FALSE))
   if (exists(key, envir = cache_env, inherits = FALSE)) {
@@ -383,12 +387,58 @@ build_range_info_ggribo <- function(annotation, orf_id, cache_env) {
   out
 }
 
-build_ggribo_inputs <- function(samples, riboseqc_dir, signal, cache_env) {
+read_windowed_ggribo_tabular <- function(sample_id, riboseqc_dir, chrom, start_pos, end_pos, strand) {
+  ggribo_path <- file.path(riboseqc_dir, sprintf("%s_ggribo.tsv", sample_id))
+  if (!file.exists(ggribo_path)) {
+    return(NULL)
+  }
+
+  cmd <- sprintf(
+    "awk -F '\\t' -v chr=%s -v start=%s -v end=%s -v strand=%s '$2==chr && $3>=start && $3<=end && $4==strand {print $1\"\\t\"$2\"\\t\"$3\"\\t\"$4}' %s",
+    shell_quote(chrom),
+    as.integer(start_pos),
+    as.integer(end_pos),
+    shell_quote(strand),
+    shell_quote(ggribo_path)
+  )
+  dt <- fread(
+    cmd = cmd,
+    header = FALSE,
+    sep = "\t",
+    col.names = c("count", "chr", "position", "strand"),
+    showProgress = FALSE
+  )
+  if (nrow(dt) == 0L) {
+    return(data.frame(count = numeric(), chr = character(), position = integer(), strand = character()))
+  }
+  dt[, position := as.integer(position)]
+  dt[, count := as.numeric(count)]
+  as.data.frame(dt)
+}
+
+build_ggribo_inputs <- function(samples, riboseqc_dir, signal, row, cache_env) {
   if (signal == "unique") {
+    pad <- 100L
+    window_start <- max(1L, as.integer(row$start) - pad)
+    window_end <- as.integer(row$end) + pad
     lapply(samples, function(sample_id) {
-      df <- copy(read_signal_track(sample_id, riboseqc_dir, signal, cache_env))
-      setnames(df, c("count", "chrom", "pos", "strand"), c("count", "chr", "position", "strand"), skip_absent = TRUE)
-      list(type = "tabular", data = as.data.frame(df[, .(count, chr, position, strand)]))
+      df <- read_windowed_ggribo_tabular(
+        sample_id = sample_id,
+        riboseqc_dir = riboseqc_dir,
+        chrom = row$chrom,
+        start_pos = window_start,
+        end_pos = window_end,
+        strand = row$strand
+      )
+      if (!is.null(df)) {
+        return(list(type = "tabular", data = df))
+      }
+
+      list(
+        type = "bedgraph",
+        plus = file.path(riboseqc_dir, sprintf("%s_P_sites_uniq_plus.bedgraph", sample_id)),
+        minus = file.path(riboseqc_dir, sprintf("%s_P_sites_uniq_minus.bedgraph", sample_id))
+      )
     })
   } else {
     lapply(samples, function(sample_id) {
@@ -409,7 +459,7 @@ build_orf_plot_ggribo <- function(row, gtf_path, riboseqc_dir, available_samples
   selected_samples <- head(selected_samples, max_samples_per_orf)
 
   annotation_info <- augment_gtf_for_txdb(gtf_path, row, outdir, cache_env)
-  Riboseq_inputs <- build_ggribo_inputs(selected_samples, riboseqc_dir, signal, cache_env)
+  Riboseq_inputs <- build_ggribo_inputs(selected_samples, riboseqc_dir, signal, row, cache_env)
   GRangeInfo <- build_range_info_ggribo(annotation_info$path, row$orf_id, cache_env)
 
   ggRibo::ggRibo_tx(
