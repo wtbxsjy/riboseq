@@ -4,6 +4,7 @@ import sys
 import os
 import csv
 import re
+import gc
 from typing import List, Dict, Tuple, Set, Optional
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -1227,13 +1228,16 @@ class BedgraphIndex:
         return int(total_count)
 
 
-def load_bedgraph_indices(bedgraph_dir, sample_list):
+def load_bedgraph_indices(bedgraph_dir, sample_list, metric_types=None):
     """
     Pre-load all bedgraph files into indexed structures.
     Returns: dict of sample -> strand -> type -> BedgraphIndex
     """
     if not bedgraph_dir or not os.path.exists(bedgraph_dir):
         return None
+
+    if metric_types is None:
+        metric_types = ('psite', 'psite_uniq', 'coverage', 'coverage_uniq')
     
     print(f"Pre-loading bedgraph files for {len(sample_list)} samples...", file=sys.stderr)
     indices = {}
@@ -1243,16 +1247,14 @@ def load_bedgraph_indices(bedgraph_dir, sample_list):
         for strand_suffix in ['plus', 'minus']:
             indices[sample][strand_suffix] = {}
             
-            # P-site bedgraphs
-            psite_file = os.path.join(bedgraph_dir, f"{sample}_P_sites_{strand_suffix}.bedgraph")
-            psite_uniq_file = os.path.join(bedgraph_dir, f"{sample}_P_sites_uniq_{strand_suffix}.bedgraph")
-            coverage_file = os.path.join(bedgraph_dir, f"{sample}_coverage_{strand_suffix}.bedgraph")
-            coverage_uniq_file = os.path.join(bedgraph_dir, f"{sample}_coverage_uniq_{strand_suffix}.bedgraph")
-            
-            indices[sample][strand_suffix]['psite'] = BedgraphIndex(psite_file)
-            indices[sample][strand_suffix]['psite_uniq'] = BedgraphIndex(psite_uniq_file)
-            indices[sample][strand_suffix]['coverage'] = BedgraphIndex(coverage_file)
-            indices[sample][strand_suffix]['coverage_uniq'] = BedgraphIndex(coverage_uniq_file)
+            file_map = {
+                'psite': os.path.join(bedgraph_dir, f"{sample}_P_sites_{strand_suffix}.bedgraph"),
+                'psite_uniq': os.path.join(bedgraph_dir, f"{sample}_P_sites_uniq_{strand_suffix}.bedgraph"),
+                'coverage': os.path.join(bedgraph_dir, f"{sample}_coverage_{strand_suffix}.bedgraph"),
+                'coverage_uniq': os.path.join(bedgraph_dir, f"{sample}_coverage_uniq_{strand_suffix}.bedgraph"),
+            }
+            for metric in metric_types:
+                indices[sample][strand_suffix][metric] = BedgraphIndex(file_map[metric])
     
     print(f"Bedgraph indices loaded.", file=sys.stderr)
     return indices
@@ -1342,12 +1344,15 @@ def calculate_statistics_from_bedgraphs(cand, bedgraph_dir, sample_list):
     cand.unique_reads = unique_reads
 
 
-def calculate_statistics_from_indices(cand, bedgraph_indices, sample_list):
+def calculate_statistics_from_indices(cand, bedgraph_indices, sample_list, metric_types=None):
     """
     Calculate statistics using pre-loaded bedgraph indices (fast version)
     """
     if not bedgraph_indices:
         return
+
+    if metric_types is None:
+        metric_types = ('psite', 'psite_uniq', 'coverage', 'coverage_uniq')
     
     total_psites = 0
     unique_psites = 0
@@ -1364,10 +1369,14 @@ def calculate_statistics_from_indices(cand, bedgraph_indices, sample_list):
         
         # Sum across all exon blocks
         for block_start, block_end in cand.blocks:
-            total_psites += idx['psite'].count_in_region(cand.chrom, block_start, block_end)
-            unique_psites += idx['psite_uniq'].count_in_region(cand.chrom, block_start, block_end)
-            total_reads += idx['coverage'].count_in_region(cand.chrom, block_start, block_end)
-            unique_reads += idx['coverage_uniq'].count_in_region(cand.chrom, block_start, block_end)
+            if 'psite' in metric_types:
+                total_psites += idx['psite'].count_in_region(cand.chrom, block_start, block_end)
+            if 'psite_uniq' in metric_types:
+                unique_psites += idx['psite_uniq'].count_in_region(cand.chrom, block_start, block_end)
+            if 'coverage' in metric_types:
+                total_reads += idx['coverage'].count_in_region(cand.chrom, block_start, block_end)
+            if 'coverage_uniq' in metric_types:
+                unique_reads += idx['coverage_uniq'].count_in_region(cand.chrom, block_start, block_end)
     
     cand.total_psites = total_psites
     cand.unique_psites = unique_psites
@@ -1383,7 +1392,7 @@ def process_candidate_batch(batch_data):
     batch_data: tuple of (candidate_dicts, bedgraph_indices, sample_list)
     Returns: list of updated candidate dicts with statistics
     """
-    candidates, bedgraph_indices, sample_list = batch_data
+    candidates, bedgraph_indices, sample_list, metric_types = batch_data
     
     results = []
     for cand_dict in candidates:
@@ -1405,10 +1414,14 @@ def process_candidate_batch(batch_data):
             idx = bedgraph_indices[sample][strand_suffix]
             
             for block_start, block_end in blocks:
-                total_psites += idx['psite'].count_in_region(chrom, block_start, block_end)
-                unique_psites += idx['psite_uniq'].count_in_region(chrom, block_start, block_end)
-                total_reads += idx['coverage'].count_in_region(chrom, block_start, block_end)
-                unique_reads += idx['coverage_uniq'].count_in_region(chrom, block_start, block_end)
+                if 'psite' in metric_types:
+                    total_psites += idx['psite'].count_in_region(chrom, block_start, block_end)
+                if 'psite_uniq' in metric_types:
+                    unique_psites += idx['psite_uniq'].count_in_region(chrom, block_start, block_end)
+                if 'coverage' in metric_types:
+                    total_reads += idx['coverage'].count_in_region(chrom, block_start, block_end)
+                if 'coverage_uniq' in metric_types:
+                    unique_reads += idx['coverage_uniq'].count_in_region(chrom, block_start, block_end)
         
         results.append({
             'id_key': cand_dict['id_key'],
@@ -1421,12 +1434,15 @@ def process_candidate_batch(batch_data):
     return results
 
 
-def calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, num_workers=None):
+def calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, num_workers=None, metric_types=None):
     """
     Calculate P-site statistics for all candidates in parallel.
     """
     if not bedgraph_indices or not sample_list:
         return
+
+    if metric_types is None:
+        metric_types = ('psite', 'psite_uniq', 'coverage', 'coverage_uniq')
     
     if num_workers is None:
         num_workers = min(multiprocessing.cpu_count(), 8)
@@ -1449,7 +1465,7 @@ def calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, num
     if len(final_list) < 100 or num_workers <= 1:
         print(f"Processing {len(final_list)} candidates sequentially...", file=sys.stderr)
         for cand in final_list:
-            calculate_statistics_from_indices(cand, bedgraph_indices, sample_list)
+            calculate_statistics_from_indices(cand, bedgraph_indices, sample_list, metric_types=metric_types)
         return
     
     # Split into batches for parallel processing
@@ -1465,7 +1481,7 @@ def calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, num
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = []
         for batch in batches:
-            futures.append(executor.submit(process_candidate_batch, (batch, bedgraph_indices, sample_list)))
+            futures.append(executor.submit(process_candidate_batch, (batch, bedgraph_indices, sample_list, metric_types)))
         
         processed = 0
         for future in as_completed(futures):
@@ -1481,6 +1497,165 @@ def calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, num
             print(f"  Processed {processed}/{len(final_list)} candidates...", file=sys.stderr, end='\r')
     
     print(f"  Processed {len(final_list)}/{len(final_list)} candidates.", file=sys.stderr)
+
+
+BEDGRAPH_METRIC_FILES = {
+    'psite': 'P_sites',
+    'psite_uniq': 'P_sites_uniq',
+    'coverage': 'coverage',
+    'coverage_uniq': 'coverage_uniq',
+}
+
+
+def _build_candidate_block_bins(final_list, bin_size=BedgraphIndex.BIN_SIZE):
+    """
+    Build a low-memory block index for streaming bedgraph updates.
+    Returns: strand_suffix -> chrom -> bin -> [(cand_idx, block_start, block_end), ...]
+    """
+    block_bins = {
+        'plus': defaultdict(lambda: defaultdict(list)),
+        'minus': defaultdict(lambda: defaultdict(list)),
+    }
+    for cand_idx, cand in enumerate(final_list):
+        strand_suffix = 'plus' if cand.strand == '+' else 'minus'
+        for block_start, block_end in cand.blocks:
+            record = (cand_idx, block_start, block_end)
+            start_bin = (block_start - 1) // bin_size
+            end_bin = (block_end - 1) // bin_size
+            for bin_idx in range(start_bin, end_bin + 1):
+                block_bins[strand_suffix][cand.chrom][bin_idx].append(record)
+    return block_bins
+
+
+def _stream_bedgraph_file_counts(task):
+    """
+    Stream a single bedgraph file and accumulate counts for candidate blocks.
+    """
+    bedgraph_file, chrom_bins = task
+    counts = defaultdict(int)
+
+    if not bedgraph_file or not os.path.exists(bedgraph_file):
+        return counts
+
+    try:
+        with open(bedgraph_file, 'r') as handle:
+            for line in handle:
+                if line.startswith('track') or line.startswith('#'):
+                    continue
+                parts = line.rstrip('\n').split('\t')
+                if len(parts) < 4:
+                    continue
+
+                chrom = parts[0]
+                if chrom not in chrom_bins:
+                    continue
+
+                bg_start = int(parts[1])      # 0-based inclusive
+                bg_end = int(parts[2])        # 0-based exclusive
+                bg_value = float(parts[3])
+                if bg_value == 0:
+                    continue
+
+                start_bin = bg_start // BedgraphIndex.BIN_SIZE
+                end_bin = (bg_end - 1) // BedgraphIndex.BIN_SIZE
+                seen = set()
+                bins_for_chrom = chrom_bins[chrom]
+
+                for bin_idx in range(start_bin, end_bin + 1):
+                    for cand_idx, block_start, block_end in bins_for_chrom.get(bin_idx, []):
+                        block_key = (cand_idx, block_start, block_end)
+                        if block_key in seen:
+                            continue
+                        seen.add(block_key)
+
+                        block_start0 = block_start - 1
+                        overlap_start = max(bg_start, block_start0)
+                        overlap_end = min(bg_end, block_end)
+                        if overlap_start < overlap_end:
+                            counts[cand_idx] += int(bg_value * (overlap_end - overlap_start))
+    except Exception as exc:
+        print(f"Warning: Error streaming bedgraph {bedgraph_file}: {exc}", file=sys.stderr)
+
+    return counts
+
+
+def _estimate_bedgraph_bytes(bedgraph_dir, sample_list, metric_types):
+    total = 0
+    for sample in sample_list:
+        for strand_suffix in ('plus', 'minus'):
+            for metric in metric_types:
+                path = os.path.join(
+                    bedgraph_dir,
+                    f"{sample}_{BEDGRAPH_METRIC_FILES[metric]}_{strand_suffix}.bedgraph"
+                )
+                if os.path.exists(path):
+                    total += os.path.getsize(path)
+    return total
+
+
+def calculate_statistics_streaming(final_list, bedgraph_dir, sample_list, num_workers=None, metric_types=None):
+    """
+    Low-memory statistics path: stream each bedgraph file once and update all ORFs.
+    """
+    if not bedgraph_dir or not os.path.exists(bedgraph_dir) or not sample_list:
+        return
+
+    if metric_types is None:
+        metric_types = ('psite', 'psite_uniq', 'coverage', 'coverage_uniq')
+    if num_workers is None:
+        num_workers = min(multiprocessing.cpu_count(), 4)
+
+    for cand in final_list:
+        cand.total_psites = 0
+        cand.unique_psites = 0
+        cand.total_reads = 0
+        cand.unique_reads = 0
+
+    block_bins = _build_candidate_block_bins(final_list)
+    attr_map = {
+        'psite': 'total_psites',
+        'psite_uniq': 'unique_psites',
+        'coverage': 'total_reads',
+        'coverage_uniq': 'unique_reads',
+    }
+    tasks = []
+    for sample in sample_list:
+        for strand_suffix in ('plus', 'minus'):
+            chrom_bins = block_bins[strand_suffix]
+            if not chrom_bins:
+                continue
+            for metric in metric_types:
+                bedgraph_file = os.path.join(
+                    bedgraph_dir,
+                    f"{sample}_{BEDGRAPH_METRIC_FILES[metric]}_{strand_suffix}.bedgraph"
+                )
+                tasks.append((metric, bedgraph_file, chrom_bins))
+
+    if not tasks:
+        return
+
+    max_workers = max(1, min(num_workers, len(tasks), 4))
+    print(
+        f"Streaming {len(tasks)} bedgraph files with {max_workers} worker(s)...",
+        file=sys.stderr
+    )
+
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(_stream_bedgraph_file_counts, (bedgraph_file, chrom_bins)): metric
+            for metric, bedgraph_file, chrom_bins in tasks
+        }
+        for future in as_completed(future_map):
+            metric = future_map[future]
+            counts = future.result()
+            attr = attr_map[metric]
+            for cand_idx, value in counts.items():
+                setattr(final_list[cand_idx], attr, getattr(final_list[cand_idx], attr) + value)
+            completed += 1
+            print(f"  Streamed {completed}/{len(tasks)} bedgraph files...", file=sys.stderr, end='\r')
+
+    print(f"  Streamed {len(tasks)}/{len(tasks)} bedgraph files.", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -1561,6 +1736,58 @@ def _extract_annotate_chunk(chunk):
 
         results.append((id_key, nt_seq, aa_seq, start_codon, is_cds, gene_ids))
     return results
+
+
+def annotate_sequences_and_cds(candidates, use_parallel, num_workers, genome_fasta, gtf_index):
+    """
+    Populate sequence/CDS-related annotations, streaming chunk results to avoid
+    holding a second full copy of all sequence strings in memory.
+    """
+    if not candidates:
+        return
+
+    if use_parallel and len(candidates) > 200:
+        chunk_size = max(200, len(candidates) // (num_workers * 4))
+        chunk_data = [
+            (c.id_key, c.chrom, c.strand, c.blocks, c.frame, c.length_nt)
+            for c in candidates
+        ]
+        chunks = [chunk_data[i:i + chunk_size] for i in range(0, len(chunk_data), chunk_size)]
+        cand_lookup = {c.id_key: c for c in candidates}
+
+        print(
+            f"Extracting sequences + annotating CDS overlap "
+            f"({len(candidates)} candidates, {num_workers} workers, {len(chunks)} chunks)...",
+            file=sys.stderr
+        )
+        try:
+            ctx = multiprocessing.get_context('fork')
+            processed = 0
+            with ctx.Pool(num_workers) as pool:
+                for chunk_results in pool.imap_unordered(_extract_annotate_chunk, chunks):
+                    for id_key, nt_seq, aa_seq, start_codon, is_cds, gene_ids in chunk_results:
+                        cand = cand_lookup.get(id_key)
+                        if cand:
+                            cand.sequence = nt_seq
+                            cand.aa_sequence = aa_seq
+                            cand.start_codon = start_codon
+                            cand.is_cds_overlap = is_cds
+                            cand.overlapping_gene_ids = gene_ids
+                    processed += len(chunk_results)
+                    print(f"  Annotated {processed}/{len(candidates)} candidates...", file=sys.stderr, end='\r')
+            print(f"  Annotated {len(candidates)}/{len(candidates)} candidates.", file=sys.stderr)
+            return
+        except Exception as exc:
+            print(
+                f"Parallel extract/annotate failed ({exc}), retrying sequentially...",
+                file=sys.stderr
+            )
+
+    print(f"Extracting sequences ({len(candidates)} candidates)...", file=sys.stderr)
+    for cand in candidates:
+        extract_sequence(cand, genome_fasta)
+    print("Annotating CDS overlap and overlapping genes...", file=sys.stderr)
+    annotate_cds_overlap(candidates, gtf_index)
 
 
 def _write_orf_outputs(candidates: list, prefix: str) -> None:
@@ -1662,6 +1889,10 @@ def main():
     parser.add_argument("--bedgraph-dir", help="Directory containing RiboseQC bedgraph files (optional)")
     parser.add_argument("--sample-list", help="Comma-separated list of sample names for bedgraph stats (optional)")
     parser.add_argument("--threads", type=int, default=4, help="Number of threads for parallel processing (default: 4)")
+    parser.add_argument("--stats-mode", choices=["auto", "preload", "stream"], default="auto",
+                        help="Bedgraph statistics mode: preload for speed, stream for low memory, auto to choose based on input size (default: auto)")
+    parser.add_argument("--skip-coverage-stats", action="store_true",
+                        help="Skip coverage/coverage_uniq bedgraph aggregation and only compute P-site statistics")
     # Merging parameters
     parser.add_argument("--frame-merge-min-overlap", type=float, default=0.9,
                         help="Minimum overlap fraction of shorter ORF for single-exon frame-aware merging (default: 0.9)")
@@ -1701,6 +1932,8 @@ def main():
     print(f"Stage 0 TisType exclusions: {exclude_tistypes or '(none)'}", file=sys.stderr)
     if args.atg_only:
         print("Stage 0: ATG-only mode enabled", file=sys.stderr)
+    if args.skip_coverage_stats:
+        print("Bedgraph stats: coverage aggregation disabled (--skip-coverage-stats)", file=sys.stderr)
     
     gtf_index = GTFIndex(args.gtf)
     
@@ -1833,59 +2066,14 @@ def main():
     print(f"  Merged {len(all_candidates) - len(merged_candidates)} duplicates", file=sys.stderr)
     
     final_list = list(merged_candidates.values())
+    del merged_candidates
     # Sort deterministically so ORF_IDs are consistent regardless of parse order
     final_list.sort(key=lambda c: (c.chrom, c.strand, c.start, c.end))
 
+    del all_candidates
+    gc.collect()
+
     skip_stage3 = not args.seq_cluster
-
-    # Stage 2 preparation: extract sequences + annotate CDS overlap for all candidates.
-    # (Already sorted deterministically above; no additional sort needed for I/O locality.)
-
-    if use_parallel and len(final_list) > 200:
-        # Parallel: combine sequence extraction + CDS annotation in one worker pass.
-        # Workers inherit _shared_gtf_index via fork; each opens its own Fasta handle.
-        chunk_size = max(200, len(final_list) // (num_workers * 4))
-        chunk_data = [
-            (c.id_key, c.chrom, c.strand, c.blocks, c.frame, c.length_nt)
-            for c in final_list
-        ]
-        chunks     = [chunk_data[i:i + chunk_size]
-                      for i in range(0, len(chunk_data), chunk_size)]
-        cand_lookup = {c.id_key: c for c in final_list}
-
-        print(f"Extracting sequences + annotating CDS overlap "
-              f"({len(final_list)} candidates, {num_workers} workers, "
-              f"{len(chunks)} chunks)...", file=sys.stderr)
-        try:
-            ctx = multiprocessing.get_context('fork')
-            with ctx.Pool(num_workers) as pool:
-                all_chunk_results = pool.map(_extract_annotate_chunk, chunks)
-            for chunk_results in all_chunk_results:
-                for id_key, nt_seq, aa_seq, start_codon, is_cds, gene_ids in chunk_results:
-                    cand = cand_lookup.get(id_key)
-                    if cand:
-                        cand.sequence             = nt_seq
-                        cand.aa_sequence          = aa_seq
-                        cand.start_codon          = start_codon
-                        cand.is_cds_overlap       = is_cds
-                        cand.overlapping_gene_ids = gene_ids
-        except Exception as exc:
-            print(f"Parallel extract/annotate failed ({exc}), retrying sequentially...",
-                  file=sys.stderr)
-            for cand in final_list:
-                extract_sequence(cand, genome_fasta)
-            annotate_cds_overlap(final_list, gtf_index)
-    else:
-        # Sequential path (threads=1, small dataset, or non-fork platform)
-        print(f"Extracting sequences ({len(final_list)} candidates)...", file=sys.stderr)
-        for cand in final_list:
-            extract_sequence(cand, genome_fasta)
-        print(f"Annotating CDS overlap and overlapping genes...", file=sys.stderr)
-        annotate_cds_overlap(final_list, gtf_index)
-
-    cds_overlap_count = sum(1 for c in final_list if c.is_cds_overlap)
-    print(f"  CDS in-frame overlap: {cds_overlap_count} ORFs "
-          f"({100*cds_overlap_count/max(len(final_list),1):.1f}%)", file=sys.stderr)
 
     # ── Per-tool output mode ────────────────────────────────────────────────
     # When --per-tool-output is set, emit per-tool files based on the exact-match
@@ -1893,6 +2081,7 @@ def main():
     # sequence clustering (Stage 3).  The combined exact-dedup set is also written
     # to args.output.* so downstream tools can consume the full set if needed.
     if args.per_tool_output:
+        annotate_sequences_and_cds(final_list, use_parallel, num_workers, genome_fasta, gtf_index)
         _write_per_tool_outputs(final_list, args.per_tool_output)
         _write_orf_outputs(final_list, args.output)
         print(f"Per-tool outputs written to {args.per_tool_output}_{{ribotish,ribotricer,orfquant}}.*",
@@ -1910,6 +2099,10 @@ def main():
 
     # Stage 3: Sequence-similarity clustering (disabled by default, opt-in with --seq-cluster)
     if not skip_stage3:
+        annotate_sequences_and_cds(final_list, use_parallel, num_workers, genome_fasta, gtf_index)
+        cds_overlap_count = sum(1 for c in final_list if c.is_cds_overlap)
+        print(f"  CDS in-frame overlap: {cds_overlap_count} ORFs "
+              f"({100*cds_overlap_count/max(len(final_list),1):.1f}%)", file=sys.stderr)
         print(f"Clustering by sequence similarity "
               f"(seq_identity={args.seq_identity}, min_length_ratio={args.min_length_ratio}, "
               f"terminus_tolerance={args.terminus_tolerance})...", file=sys.stderr)
@@ -1960,12 +2153,49 @@ def main():
     if args.bedgraph_dir and args.sample_list:
         sample_list = args.sample_list.split(',')
         print(f"Calculating statistics from bedgraphs for {len(sample_list)} samples...", file=sys.stderr)
-        
-        # Load bedgraph files into indexed structures (one-time cost)
-        bedgraph_indices = load_bedgraph_indices(args.bedgraph_dir, sample_list)
-        
-        # Use parallel processing for large datasets
-        calculate_statistics_parallel(final_list, bedgraph_indices, sample_list, args.threads)
+
+        metric_types = ['psite', 'psite_uniq']
+        if not args.skip_coverage_stats:
+            metric_types.extend(['coverage', 'coverage_uniq'])
+
+        stats_mode = args.stats_mode
+        if stats_mode == 'auto':
+            total_bedgraph_bytes = _estimate_bedgraph_bytes(args.bedgraph_dir, sample_list, metric_types)
+            if total_bedgraph_bytes <= 512 * 1024 * 1024 and len(final_list) <= 20000:
+                stats_mode = 'preload'
+            else:
+                stats_mode = 'stream'
+            print(
+                f"Bedgraph stats mode auto-selected '{stats_mode}' "
+                f"(files={total_bedgraph_bytes / (1024 * 1024):.1f} MiB, ORFs={len(final_list)})",
+                file=sys.stderr
+            )
+
+        if stats_mode == 'preload':
+            bedgraph_indices = load_bedgraph_indices(args.bedgraph_dir, sample_list, metric_types=metric_types)
+            calculate_statistics_parallel(
+                final_list,
+                bedgraph_indices,
+                sample_list,
+                args.threads,
+                metric_types=metric_types,
+            )
+            del bedgraph_indices
+        else:
+            calculate_statistics_streaming(
+                final_list,
+                args.bedgraph_dir,
+                sample_list,
+                num_workers=args.threads,
+                metric_types=metric_types,
+            )
+        gc.collect()
+
+    if skip_stage3:
+        annotate_sequences_and_cds(final_list, use_parallel, num_workers, genome_fasta, gtf_index)
+        cds_overlap_count = sum(1 for c in final_list if c.is_cds_overlap)
+        print(f"  CDS in-frame overlap: {cds_overlap_count} ORFs "
+              f"({100*cds_overlap_count/max(len(final_list),1):.1f}%)", file=sys.stderr)
     
     _write_orf_outputs(final_list, args.output)
     print(f"Done. Outputs written to {args.output}.*", file=sys.stderr)
