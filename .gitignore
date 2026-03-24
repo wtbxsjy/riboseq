@@ -12,6 +12,7 @@ null/
 testing/
 testing*
 test_data/
+test_results/
 test_data*
 report_test_*.html
 .nf-test.log
