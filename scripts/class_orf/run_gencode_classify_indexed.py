@@ -113,10 +113,55 @@ def eprint(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def chrom_aliases(chrom: str) -> List[str]:
+    if not chrom:
+        return []
+
+    aliases = [chrom]
+    if chrom.startswith("chr"):
+        base = chrom[3:]
+        aliases.append(base)
+        if base == "M":
+            aliases.append("MT")
+        elif base == "MT":
+            aliases.append("M")
+    else:
+        aliases.append(f"chr{chrom}")
+        if chrom == "MT":
+            aliases.extend(["chrM", "M"])
+        elif chrom == "M":
+            aliases.extend(["chrM", "MT"])
+
+    out = []
+    seen = set()
+    for alias in aliases:
+        if alias and alias not in seen:
+            seen.add(alias)
+            out.append(alias)
+    return out
+
+
 @dataclass
 class SimpleSeqRecord:
     seq: str
     description: str = ""
+
+
+def build_reference_chrom_map(gtf_path: Path) -> Dict[str, str]:
+    ref_chroms: set[str] = set()
+    with gtf_path.open() as handle:
+        for line in handle:
+            if not line or line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t", 1)
+            if parts and parts[0]:
+                ref_chroms.add(parts[0])
+
+    chrom_map = {chrom: chrom for chrom in ref_chroms}
+    for chrom in ref_chroms:
+        for alias in chrom_aliases(chrom):
+            chrom_map.setdefault(alias, chrom)
+    return chrom_map
 
 
 def write_profile(profile_file: Path, rows: Iterable[Tuple[str, float, str]]) -> None:
@@ -154,19 +199,28 @@ def load_orf_to_study_and_sequences(metadata_file: Path) -> Tuple[Dict[str, str]
     return orf_to_study, orf_to_nt
 
 
-def write_bed6(bed12_file: Path, bed6_file: Path, orf_to_study: Dict[str, str]) -> int:
+def write_bed6(
+    bed12_file: Path,
+    bed6_file: Path,
+    orf_to_study: Dict[str, str],
+    chrom_map: Dict[str, str],
+) -> Tuple[int, int]:
     count = 0
+    remapped = 0
     with bed12_file.open() as src, bed6_file.open("w") as dst:
         for line in src:
             parts = line.rstrip("\n").split("\t")
             if len(parts) < 6:
                 continue
             chrom, start, end, name, _, strand = parts[:6]
+            mapped_chrom = chrom_map.get(chrom, chrom)
+            if mapped_chrom != chrom:
+                remapped += 1
             dst.write(
-                f"{chrom}\t{start}\t{end}\t{name}\t{orf_to_study.get(name, 'unified')}\t{strand}\n"
+                f"{mapped_chrom}\t{start}\t{end}\t{name}\t{orf_to_study.get(name, 'unified')}\t{strand}\n"
             )
             count += 1
-    return count
+    return count, remapped
 
 
 def translate_nt(nt_seq: str) -> str:
@@ -772,6 +826,7 @@ def main() -> None:
     for required in (metadata_file, bed12_file, paths["TRANSCRIPTOME_FASTA"], paths["SORTED_TRANSCRIPTOME_GTF"], paths["PROTEOME_FASTA"], paths["TRANSCRIPT_SUPPORT"], paths["PSITES_BED"]):
         if not Path(required).exists():
             raise FileNotFoundError(f"Required input not found: {required}")
+    chrom_map = build_reference_chrom_map(paths["SORTED_TRANSCRIPTOME_GTF"])
 
     timings: List[Tuple[str, float, str]] = []
 
@@ -779,10 +834,11 @@ def main() -> None:
     orf_to_study, orf_to_nt = load_orf_to_study_and_sequences(metadata_file)
     timings.append(("load_metadata", time.perf_counter() - t0, f"orfs={len(orf_to_study)}"))
 
-    if not bed6_file.exists():
-        t0 = time.perf_counter()
-        n_bed = write_bed6(bed12_file, bed6_file, orf_to_study)
-        timings.append(("write_bed6", time.perf_counter() - t0, f"records={n_bed}"))
+    t0 = time.perf_counter()
+    n_bed, remapped = write_bed6(bed12_file, bed6_file, orf_to_study, chrom_map)
+    timings.append(("write_bed6", time.perf_counter() - t0, f"records={n_bed} remapped={remapped}"))
+    if remapped:
+        eprint(f"Remapped {remapped} BED records to reference chromosome names")
 
     if not fasta_file.exists():
         t0 = time.perf_counter()

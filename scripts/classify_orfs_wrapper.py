@@ -5,6 +5,51 @@ import os
 import subprocess
 from pathlib import Path
 
+
+def chrom_aliases(chrom):
+    if not chrom:
+        return []
+
+    aliases = [chrom]
+    if chrom.startswith("chr"):
+        base = chrom[3:]
+        aliases.append(base)
+        if base == "M":
+            aliases.append("MT")
+        elif base == "MT":
+            aliases.append("M")
+    else:
+        aliases.append(f"chr{chrom}")
+        if chrom == "MT":
+            aliases.extend(["chrM", "M"])
+        elif chrom == "M":
+            aliases.extend(["chrM", "MT"])
+
+    out = []
+    seen = set()
+    for alias in aliases:
+        if alias and alias not in seen:
+            seen.add(alias)
+            out.append(alias)
+    return out
+
+
+def build_reference_chrom_map(gtf_path):
+    ref_chroms = set()
+    with open(gtf_path) as handle:
+        for line in handle:
+            if not line or line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t", 1)
+            if parts and parts[0]:
+                ref_chroms.add(parts[0])
+
+    chrom_map = {chrom: chrom for chrom in ref_chroms}
+    for chrom in ref_chroms:
+        for alias in chrom_aliases(chrom):
+            chrom_map.setdefault(alias, chrom)
+    return chrom_map
+
 def run_command(cmd, desc):
     print(f"Running {desc}...", file=sys.stderr)
     print(" ".join(cmd), file=sys.stderr)
@@ -90,6 +135,7 @@ def main():
         fasta_file    = f"{input_base}.orfs.fa"   # protein (AA) FASTA for the mapper
         bed12_file    = f"{input_base}.bed"        # our BED12 output
         bed6_file     = f"{input_base}.orfs.bed6"  # BED6 required by the mapper
+        chrom_map = build_reference_chrom_map(os.path.join(args.ensembl_dir, "SORTED_TRANSCRIPTOME_GTF"))
 
         # ── Step 1: read metadata to build orf_id → study_id mapping ──────────
         # The GENCODE mapper uses BED col[4] as the "study" identifier and
@@ -119,14 +165,20 @@ def main():
         # (col[4] = study ID, not numeric score; col[5] = strand).
         # Our BED12 has col[5]=strand but col[4]="0" (score); we replace it.
         print(f"Generating BED6 for GENCODE mapper from {bed12_file}...", file=sys.stderr)
+        remapped_chroms = 0
         with open(bed12_file) as bf, open(bed6_file, 'w') as b6:
             for line in bf:
                 parts = line.rstrip('\n').split('\t')
                 if len(parts) < 6:
                     continue
                 chrom, start, end, name, _, strand = parts[:6]
+                mapped_chrom = chrom_map.get(chrom, chrom)
+                if mapped_chrom != chrom:
+                    remapped_chroms += 1
                 study_id = orf_to_study.get(name, 'unified')
-                b6.write(f"{chrom}\t{start}\t{end}\t{name}\t{study_id}\t{strand}\n")
+                b6.write(f"{mapped_chrom}\t{start}\t{end}\t{name}\t{study_id}\t{strand}\n")
+        if remapped_chroms:
+            print(f"Remapped {remapped_chroms} BED records to reference chromosome names", file=sys.stderr)
 
         # ── Step 3: generate protein FASTA ────────────────────────────────────
         # The mapper looks up sequences as orfs_fa["{orf_id}--{study_id}"] and

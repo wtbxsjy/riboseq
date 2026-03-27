@@ -41,6 +41,35 @@ except ImportError:
     print("Error: pyfaidx is required. Please install it with 'pip install pyfaidx'", file=sys.stderr)
     sys.exit(1)
 
+
+def _chrom_aliases(chrom: Optional[str]) -> List[str]:
+    """Generate common chromosome-name aliases used across mouse references."""
+    if not chrom:
+        return []
+
+    aliases = [chrom]
+    if chrom.startswith('chr'):
+        base = chrom[3:]
+        aliases.append(base)
+        if base == 'M':
+            aliases.append('MT')
+        elif base == 'MT':
+            aliases.append('M')
+    else:
+        aliases.append(f"chr{chrom}")
+        if chrom == 'MT':
+            aliases.extend(['chrM', 'M'])
+        elif chrom == 'M':
+            aliases.extend(['chrM', 'MT'])
+
+    seen = set()
+    result = []
+    for alias in aliases:
+        if alias and alias not in seen:
+            seen.add(alias)
+            result.append(alias)
+    return result
+
 # GTF Parsing Helper
 class GTFIndex:
     def __init__(self, gtf_file):
@@ -49,6 +78,7 @@ class GTFIndex:
         self.gene_names = {} # gid -> gene_name
         self.cds_by_chrom = {}   # chrom -> sorted list of (start, end, strand, gid)
         self.gene_by_chrom = {}  # chrom -> sorted list of (start, end, strand, gid)
+        self.chrom_names = set()
         self._load_gtf(gtf_file)
 
     def _load_gtf(self, gtf_file):
@@ -64,6 +94,7 @@ class GTFIndex:
                 feature = parts[2]
                 attributes = self._parse_attributes(parts[8])
                 chrom = parts[0]
+                self.chrom_names.add(chrom)
                 strand = parts[6]
                 start, end = int(parts[3]), int(parts[4])
                 gid = attributes.get('gene_id', 'NA')
@@ -119,6 +150,13 @@ class GTFIndex:
                 val = ' '.join(parts[1:]).strip('"')
                 attrs[key] = val
         return attrs
+
+    def resolve_chrom(self, chrom):
+        """Resolve common chr/non-chr/mitochondrial aliases against loaded GTF contigs."""
+        for alias in _chrom_aliases(chrom):
+            if alias in self.chrom_names:
+                return alias
+        return chrom
 
     def get_genomic_blocks(self, tid, start_rel, end_rel, feature_type='exon'):
         """
@@ -192,6 +230,7 @@ class GTFIndex:
     def find_cds_overlap_inframe(self, chrom, strand, orf_start, orf_end, orf_frame):
         """Check if the ORF overlaps in-frame with any annotated CDS interval."""
         import bisect
+        chrom = self.resolve_chrom(chrom)
         intervals = self.cds_by_chrom.get(chrom, [])
         if not intervals:
             return False
@@ -213,6 +252,7 @@ class GTFIndex:
     def find_overlapping_genes(self, chrom, strand, orf_start, orf_end):
         """Return list of gene_ids whose genomic interval overlaps the ORF (same strand)."""
         import bisect
+        chrom = self.resolve_chrom(chrom)
         intervals = self.gene_by_chrom.get(chrom, [])
         if not intervals:
             return []
@@ -870,7 +910,7 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0,
                     import re
                     match = re.search(r'(.+):(\d+)-(\d+):([+-])', genome_pos)
                     if match:
-                        chrom = match.group(1)
+                        chrom = gtf_index.resolve_chrom(match.group(1))
                         t_start = int(match.group(2))
                         t_stop = int(match.group(3))
                         strand = match.group(4)
@@ -954,6 +994,8 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0,
                 
                 blocks = None
                 chrom = parts[col_map.get('chrom', -1)] if 'chrom' in col_map else None
+                if chrom:
+                    chrom = gtf_index.resolve_chrom(chrom)
                 strand = parts[col_map.get('strand', -1)] if 'strand' in col_map else None
                 
                 # Parsing logic for Ribotricer ORF_ID: tid_start_end or tid_start_end_length
@@ -1063,7 +1105,7 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0,
                     current_orf = orf_id
                     current_blocks = []
                     current_attrs = attrs
-                    current_attrs['chrom'] = parts[0]
+                    current_attrs['chrom'] = gtf_index.resolve_chrom(parts[0])
                     current_attrs['strand'] = parts[6]
                 
                 current_blocks.append((int(parts[3]), int(parts[4])))
