@@ -31,3 +31,9 @@ patched_packages/*
 *.pyc
 .claude/
 orfquant_results.*
+
+# shinyapp
+apps/
+
+# tutorial
+tutorial_outputs/
