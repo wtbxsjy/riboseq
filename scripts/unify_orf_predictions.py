@@ -31,15 +31,18 @@ _TOOL_STATS_KEY = {
 try:
     from Bio import SeqIO
     from Bio.Seq import Seq
-except ImportError:
-    print("Error: Biopython is required. Please install it with 'pip install biopython'", file=sys.stderr)
-    sys.exit(1)
+    _BIOPYTHON_IMPORT_ERROR = None
+except ImportError as exc:
+    SeqIO = None
+    Seq = None
+    _BIOPYTHON_IMPORT_ERROR = exc
 
 try:
     from pyfaidx import Fasta
-except ImportError:
-    print("Error: pyfaidx is required. Please install it with 'pip install pyfaidx'", file=sys.stderr)
-    sys.exit(1)
+    _PYFAIDX_IMPORT_ERROR = None
+except ImportError as exc:
+    Fasta = None
+    _PYFAIDX_IMPORT_ERROR = exc
 
 
 def _chrom_aliases(chrom: Optional[str]) -> List[str]:
@@ -69,6 +72,17 @@ def _chrom_aliases(chrom: Optional[str]) -> List[str]:
             seen.add(alias)
             result.append(alias)
     return result
+
+
+def infer_sample_id_from_prediction_path(file_path: str, tool_suffix: str) -> str:
+    """
+    Recover the sample ID from an ORF-prediction filename without truncating
+    dots that are part of the original sample name.
+    """
+    name = os.path.basename(file_path)
+    if name.endswith(tool_suffix):
+        return name[:-len(tool_suffix)]
+    return os.path.splitext(name)[0]
 
 # GTF Parsing Helper
 class GTFIndex:
@@ -1920,6 +1934,13 @@ def _write_per_tool_outputs(candidates: list, per_tool_prefix: str) -> None:
 def main():
     global _shared_gtf_index, _shared_fasta_path
 
+    if _BIOPYTHON_IMPORT_ERROR is not None:
+        print("Error: Biopython is required. Please install it with 'pip install biopython'", file=sys.stderr)
+        sys.exit(1)
+    if _PYFAIDX_IMPORT_ERROR is not None:
+        print("Error: pyfaidx is required. Please install it with 'pip install pyfaidx'", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(description="Unify ORF predictions from multiple tools")
     parser.add_argument("--ribotish", nargs='+', help="Ribo-TISH output files")
     parser.add_argument("--ribotricer", nargs='+', help="Ribotricer output files")
@@ -2024,15 +2045,15 @@ def main():
     parse_tasks = []
     if args.ribotish:
         for f in args.ribotish:
-            sid = os.path.basename(f).split('.')[0].replace('_pred', '')
+            sid = infer_sample_id_from_prediction_path(f, '_pred.txt')
             parse_tasks.append(('Ribo-TISH', f, sid, args.min_len, exclude_tistypes, args.atg_only))
     if args.ribotricer:
         for f in args.ribotricer:
-            sid = os.path.basename(f).split('.')[0].replace('_translating_ORFs', '')
+            sid = infer_sample_id_from_prediction_path(f, '_translating_ORFs.tsv')
             parse_tasks.append(('Ribotricer', f, sid, args.min_len, exclude_tistypes, args.atg_only))
     if args.orfquant:
         for f in args.orfquant:
-            sid = os.path.basename(f).split('.')[0].replace('_Detected_ORFs', '')
+            sid = infer_sample_id_from_prediction_path(f, '_Detected_ORFs.gtf')
             parse_tasks.append(('ORFquant', f, sid, args.min_len, exclude_tistypes, args.atg_only))
 
     # --- Parallel or sequential file parsing ---
