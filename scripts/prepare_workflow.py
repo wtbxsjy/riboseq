@@ -225,8 +225,6 @@ Examples:
                         help='Path to gencode-orf-mapper container for GENCODE ORF classification')
     
     # Pipeline options
-    parser.add_argument('--skip-prefilter-qc', action='store_true',
-                        help='Skip prefilter QC (only run postfilter analysis)')
     parser.add_argument('--run-prefilter-qc', action='store_true',
                         help='Enable prefilter QC for comparison')
     parser.add_argument('--unify-orf-min-len', type=int, default=6,
@@ -256,8 +254,8 @@ Examples:
     
     # Resource allocation options
     parser.add_argument('--aligner', default='star',
-                        choices=['star', 'bowtie2'],
-                        help='Alignment tool to use (default: star)')
+                        choices=['star', 'hisat2'],
+                        help='Genome alignment tool to use (default: star)')
     parser.add_argument('--max-memory', default='150.GB',
                         help='Maximum memory for Nextflow (default: 150.GB)')
     parser.add_argument('--max-cpus', type=int, default=42,

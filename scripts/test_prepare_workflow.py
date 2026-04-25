@@ -82,6 +82,7 @@ def run_prepare_workflow(workdir, mock_env, dry_run=True):
         '-r', str(mock_env['ref_dir']),
         '--species', mock_env['species'],
         '--profile', 'test_local_singularity',
+        '--skip-orf-classify-ensembl',
     ]
     
     # Add contamination directory as additional reference
@@ -168,7 +169,7 @@ def validate_generated_script(script_path, mock_env):
             errors.append("✗ Neither --contaminant_fasta nor --skip_contaminant_filter found")
     
     # 6. --aligner should be present (default: star)
-    if re.search(r'--aligner\s+(star|bowtie2)', content):
+    if re.search(r'--aligner\s+(star|hisat2)', content):
         passed.append("✓ --aligner parameter found")
     else:
         errors.append("✗ --aligner parameter not found")

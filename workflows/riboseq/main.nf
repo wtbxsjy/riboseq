@@ -7,8 +7,6 @@
 //
 // SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
 //
-include { BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS as BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS_GENOME        } from '../../subworkflows/nf-core/bam_dedup_stats_samtools_umitools/main'
-include { BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS as BAM_DEDUP_STATS_SAMTOOLS_UMITOOLS_TRANSCRIPTOME } from '../../subworkflows/nf-core/bam_dedup_stats_samtools_umitools/main'
 include { BAM_SORT_STATS_SAMTOOLS                                                            } from '../../subworkflows/nf-core/bam_sort_stats_samtools/main'
 include { FASTQ_QC_TRIM_FILTER_SETSTRANDEDNESS                                                 } from '../../subworkflows/nf-core/fastq_qc_trim_filter_setstrandedness/main'
 include { BAM_DEDUP_UMI      } from '../../subworkflows/nf-core/bam_dedup_umi'
@@ -36,10 +34,7 @@ include { SAMTOOLS_MERGE_REPLICATES } from '../../modules/local/samtools_merge/m
 //
 include { SAMTOOLS_INDEX                                       } from '../../modules/nf-core/samtools/index'
 include { MULTIQC                                              } from '../../modules/nf-core/multiqc/main'
-include { SAMTOOLS_SORT                                        } from '../../modules/nf-core/samtools/sort'
-include { UMITOOLS_PREPAREFORRSEM as UMITOOLS_PREPAREFORSALMON } from '../../modules/nf-core/umitools/prepareforrsem'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ         } from '../../modules/nf-core/ribotish/quality'
-include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_TISEQ           } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_PREFILTER       } from '../../modules/nf-core/ribotish/predict'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_POSTFILTER      } from '../../modules/nf-core/ribotish/predict'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_ALL             } from '../../modules/nf-core/ribotish/predict'
@@ -99,27 +94,6 @@ workflow RIBOSEQ {
 
     // Get BAM input mode from global params (set by PIPELINE_INITIALISATION)
     def is_bam_input = params.is_bam_input ?: false
-
-    /*
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        VALIDATE INPUTS
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    */
-
-    // Determine whether to filter the GTF or not
-    def filterGtf =
-        ((
-            // Condition 1: Alignment is required and aligner is set
-            !params.skip_alignment && params.aligner
-        ) ||
-        (
-            // Condition 2: Transcript FASTA file is not provided
-            !params.transcript_fasta
-        )) &&
-        (
-            // Condition 3: --skip_gtf_filter is not provided
-            !params.skip_gtf_filter
-        )
 
     ch_multiqc_files = Channel.empty()
     ch_splicesites   = Channel.empty()
