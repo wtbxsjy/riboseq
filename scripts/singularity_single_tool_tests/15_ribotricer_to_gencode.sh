@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Mirrors: modules/local/convert_ribotricer_to_gencode/main.nf
+# Legacy standalone converter; no longer mirrored by an active Nextflow module.
 # Converts Ribotricer translating_ORFs.tsv to gencode-riboseqORFs compatible format
 
 IMG_URL="https://depot.galaxyproject.org/singularity/biopython:1.81"

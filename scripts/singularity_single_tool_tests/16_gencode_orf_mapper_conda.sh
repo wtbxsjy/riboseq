@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Mirrors: modules/local/gencode_orf_mapper/main.nf
+# Legacy standalone mapper; no longer mirrored by an active Nextflow module.
 # Runs gencode-riboseqORFs ORF_mapper_to_GENCODE.py to unify ORF annotations
 # Conda version - simpler and faster than Singularity
 
@@ -124,7 +124,7 @@ REQUIRED_FILES=(
 for file in "${REQUIRED_FILES[@]}"; do
   if [[ ! -f "$ENSEMBL_DIR/$file" ]]; then
     echo "[ERROR] Missing required Ensembl file: $ENSEMBL_DIR/$file" >&2
-    echo "[HINT] Run prepare_ensembl_annotation to download Ensembl files" >&2
+    echo "[HINT] Run a reference preparation helper under scripts/singularity_single_tool_tests/ first" >&2
     exit 2
   fi
 done

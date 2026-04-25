@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Mirrors: modules/local/convert_ribotish_to_gencode/main.nf
+# Legacy standalone converter; no longer mirrored by an active Nextflow module.
 # Converts Ribo-TISH predict output to gencode-riboseqORFs compatible format
 
 IMG_URL="https://depot.galaxyproject.org/singularity/biopython:1.81"
