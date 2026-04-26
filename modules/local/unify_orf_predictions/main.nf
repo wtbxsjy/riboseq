@@ -15,7 +15,7 @@ process UNIFY_ORF_PREDICTIONS {
             'quay.io/biocontainers/biopython:1.79') }"
 
     input:
-    tuple val(ribotish_files), val(ribotricer_files), val(orfquant_files), path(all_inputs)
+    tuple val(ribotish_files), val(ribotricer_files), val(ribocode_files), val(orfquant_files), path(all_inputs)
     path gtf
     path fasta
     path unify_script
@@ -44,6 +44,8 @@ process UNIFY_ORF_PREDICTIONS {
         "--ribotish ${ribotish_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ? 
         "--ribotricer ${ribotricer_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def ribocode_arg = (ribocode_files && ribocode_files instanceof List && ribocode_files.size() > 0) ?
+        "--ribocode ${ribocode_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ? 
         "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     // Bedgraph arguments for P-site statistics from RiboseQC
@@ -146,6 +148,7 @@ process UNIFY_ORF_PREDICTIONS {
             ${seq_cluster} \\
             ${ribotish_arg} \\
             ${ribotricer_arg} \\
+            ${ribocode_arg} \\
             ${orfquant_arg} \\
             ${bedgraph_arg} \\
             ${sample_arg} \\
@@ -156,7 +159,7 @@ process UNIFY_ORF_PREDICTIONS {
         # Extract statistics from the log and save to stats file
         {
             echo "=== ORF Unification Statistics ==="
-            grep -E "^===|^By Tool:|^By Sample:|^Final|^After|^Total|^Note:|^  (ribotish|ribotricer|orfquant|[A-Za-z0-9_])" unify_orf.log || true
+            grep -E "^===|^By Tool:|^By Sample:|^Final|^After|^Total|^Note:|^  (ribotish|ribotricer|ribocode|orfquant|RiboCode|[A-Za-z0-9_])" unify_orf.log || true
         } > ${prefix}.stats.txt
         
         if [ \${EXIT_CODE} -ne 0 ]; then
@@ -229,7 +232,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
             'quay.io/biocontainers/biopython:1.79') }"
 
     input:
-    tuple val(ribotish_files), val(ribotricer_files), val(orfquant_files), path(all_inputs)
+    tuple val(ribotish_files), val(ribotricer_files), val(ribocode_files), val(orfquant_files), path(all_inputs)
     path gtf
     path fasta
     path unify_script
@@ -243,6 +246,9 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     path "${prefix}_ribotricer.metadata.tsv", emit: ribotricer_metadata, optional: true
     path "${prefix}_ribotricer.bed"         , emit: ribotricer_bed     , optional: true
     path "${prefix}_ribotricer.gtf"         , emit: ribotricer_gtf     , optional: true
+    path "${prefix}_ribocode.metadata.tsv"  , emit: ribocode_metadata  , optional: true
+    path "${prefix}_ribocode.bed"           , emit: ribocode_bed       , optional: true
+    path "${prefix}_ribocode.gtf"           , emit: ribocode_gtf       , optional: true
     path "${prefix}_orfquant.metadata.tsv"  , emit: orfquant_metadata  , optional: true
     path "${prefix}_orfquant.bed"           , emit: orfquant_bed       , optional: true
     path "${prefix}_orfquant.gtf"           , emit: orfquant_gtf       , optional: true
@@ -262,6 +268,8 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
         "--ribotish ${ribotish_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ?
         "--ribotricer ${ribotricer_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def ribocode_arg = (ribocode_files && ribocode_files instanceof List && ribocode_files.size() > 0) ?
+        "--ribocode ${ribocode_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ?
         "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def has_bedgraph = (psites_bedgraph instanceof List && psites_bedgraph.size() > 0) ||
@@ -301,7 +309,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
 
     if [ "\${has_valid_input}" = "false" ]; then
         echo "WARNING: All input files are empty/placeholder - creating placeholder outputs"
-        for f in ${prefix}_ribotish ${prefix}_ribotricer ${prefix}_orfquant; do
+        for f in ${prefix}_ribotish ${prefix}_ribotricer ${prefix}_ribocode ${prefix}_orfquant; do
             echo "# Placeholder (no valid input)" > "\${f}.metadata.tsv"
             echo "# Placeholder (no valid input)" > "\${f}.bed"
             echo "# Placeholder (no valid input)" > "\${f}.gtf"
@@ -322,6 +330,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
             --no-frame-merge \\
             ${ribotish_arg} \\
             ${ribotricer_arg} \\
+            ${ribocode_arg} \\
             ${orfquant_arg} \\
             ${bedgraph_arg} \\
             ${sample_arg} \\
@@ -331,13 +340,13 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
 
         {
             echo "=== Per-Tool ORF Unification Statistics ==="
-            grep -E "^===|^By Tool:|^By Sample:|^Final|^After|^Total|^Note:|^  (ribotish|ribotricer|orfquant|Ribo-TISH|Ribotricer|ORFquant|[A-Za-z0-9_])" unify_orf.log || true
+            grep -E "^===|^By Tool:|^By Sample:|^Final|^After|^Total|^Note:|^  (ribotish|ribotricer|ribocode|orfquant|Ribo-TISH|Ribotricer|RiboCode|ORFquant|[A-Za-z0-9_])" unify_orf.log || true
         } > ${prefix}.stats.txt
 
         if [ \${EXIT_CODE} -ne 0 ]; then
             if grep -qiE "(no valid|no ORFs|zero ORFs|empty|no predictions|0 ORFs|ValueError|KeyError|IndexError)" unify_orf.log; then
                 echo "WARNING: ORF unification failed due to insufficient data - creating placeholder files"
-                for f in ${prefix}_ribotish ${prefix}_ribotricer ${prefix}_orfquant; do
+                for f in ${prefix}_ribotish ${prefix}_ribotricer ${prefix}_ribocode ${prefix}_orfquant; do
                     [ ! -f "\${f}.metadata.tsv" ] && echo "# Placeholder" > "\${f}.metadata.tsv"
                     [ ! -f "\${f}.bed" ]          && echo "# Placeholder" > "\${f}.bed"
                     [ ! -f "\${f}.gtf" ]          && echo "# Placeholder" > "\${f}.gtf"
@@ -366,6 +375,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     """
     touch ${prefix}_ribotish.metadata.tsv ${prefix}_ribotish.bed ${prefix}_ribotish.gtf
     touch ${prefix}_ribotricer.metadata.tsv ${prefix}_ribotricer.bed ${prefix}_ribotricer.gtf
+    touch ${prefix}_ribocode.metadata.tsv ${prefix}_ribocode.bed ${prefix}_ribocode.gtf
     touch ${prefix}_orfquant.metadata.tsv ${prefix}_orfquant.bed ${prefix}_orfquant.gtf
     touch ${prefix}.metadata.tsv ${prefix}.bed ${prefix}.gtf ${prefix}.stats.txt
 

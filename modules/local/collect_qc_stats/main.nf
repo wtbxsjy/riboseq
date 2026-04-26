@@ -15,6 +15,7 @@ process COLLECT_QC_STATS {
     path psites_calcs,     stageAs: 'psites/*'           // *_P_sites_calcs per sample (optional)
     path ribotish_all,     stageAs: 'ribotish/*'         // *_all.txt per sample (optional)
     path ribotricer_orfs,  stageAs: 'ribotricer/*'       // *_translating_ORFs.tsv per sample (optional)
+    path ribocode_txt,     stageAs: 'ribocode/*'         // *_collapsed.txt per sample (optional)
     path orfquant_results, stageAs: 'orfquant/*'         // *_final_ORFquant_results per sample (optional)
     path collect_script
 
@@ -42,6 +43,8 @@ process COLLECT_QC_STATS {
                             "--ribotish_all ${ribotish_all.collect{ "ribotish/${it.name}" }.join(' ')}" : ''
     def rtricer_arg   = ribotricer_orfs instanceof List && ribotricer_orfs.size() > 0 ?
                             "--ribotricer_orfs ${ribotricer_orfs.collect{ "ribotricer/${it.name}" }.join(' ')}" : ''
+    def ribocode_arg  = ribocode_txt instanceof List && ribocode_txt.size() > 0 ?
+                            "--ribocode ${ribocode_txt.collect{ "ribocode/${it.name}" }.join(' ')}" : ''
     def orfquant_arg  = orfquant_results instanceof List && orfquant_results.size() > 0 ?
                             "--orfquant ${orfquant_results.collect{ "orfquant/${it.name}" }.join(' ')}" : ''
     """
@@ -51,6 +54,7 @@ process COLLECT_QC_STATS {
         ${psite_arg} \\
         ${rtish_arg} \\
         ${rtricer_arg} \\
+        ${ribocode_arg} \\
         ${orfquant_arg} \\
         --output_dir .
 

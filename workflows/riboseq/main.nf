@@ -46,12 +46,15 @@ include { UNIFY_ORF_PREDICTIONS; UNIFY_ORF_PREDICTIONS_PER_TOOL         } from '
 include { CLASSIFY_ORFS_GENCODE; CLASSIFY_ORFS_ORFQUANT; CLASSIFY_ORFS_ORF_TYPE } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_GENCODE   as CLASSIFY_ORFS_GENCODE_RIBOTISH   } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_GENCODE   as CLASSIFY_ORFS_GENCODE_RIBOTRICER } from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_GENCODE   as CLASSIFY_ORFS_GENCODE_RIBOCODE   } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_GENCODE   as CLASSIFY_ORFS_GENCODE_ORFQUANT   } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORFQUANT  as CLASSIFY_ORFS_ORFQUANT_RIBOTISH  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORFQUANT  as CLASSIFY_ORFS_ORFQUANT_RIBOTRICER} from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORFQUANT  as CLASSIFY_ORFS_ORFQUANT_RIBOCODE  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORFQUANT  as CLASSIFY_ORFS_ORFQUANT_ORFQUANT  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOTISH  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER} from '../../modules/local/classify_orfs/main'
+include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOCODE  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_ORFQUANT  } from '../../modules/local/classify_orfs/main'
 include { COLLECT_QC_STATS                                     } from '../../modules/local/collect_qc_stats/main'
 
@@ -94,6 +97,7 @@ workflow RIBOSEQ {
 
     // Get BAM input mode from global params (set by PIPELINE_INITIALISATION)
     def is_bam_input = params.is_bam_input ?: false
+    def can_run_ribocode = !params.skip_ribocode && !is_bam_input && ['star', 'hisat2'].contains(params.aligner)
 
     ch_multiqc_files = Channel.empty()
     ch_splicesites   = Channel.empty()
@@ -112,6 +116,7 @@ workflow RIBOSEQ {
     ch_qc_ribotish_all   = Channel.empty()
     ch_qc_ribotricer_orfs = Channel.empty()
     ch_qc_orfquant_results = Channel.empty()
+    ch_qc_ribocode_txt    = Channel.empty()
 
     //
     // BAM INPUT MODE: Skip preprocessing and alignment
@@ -316,6 +321,7 @@ workflow RIBOSEQ {
     ch_ribotish_predictions = Channel.empty()
     ch_ribotricer_orfs      = Channel.empty()
     ch_orfquant_gtf         = Channel.empty()
+    ch_ribocode_gtf         = Channel.empty()
 
     if (params.sorf_filter) {
         SORF_BAM_FILTER(
@@ -517,7 +523,7 @@ workflow RIBOSEQ {
     }
 
     if (!params.skip_ribocode && !is_bam_input) {
-        if (params.aligner != 'star' && params.aligner != 'hisat2') {
+        if (!can_run_ribocode) {
             log.warn "RiboCode requires STAR or HISAT2 alignment to generate transcriptome BAMs. Skipping RiboCode."
         } else {
              ch_transcriptome_bam
@@ -531,6 +537,8 @@ workflow RIBOSEQ {
                  ch_fasta
              )
              ch_versions = ch_versions.mix(RIBOCODE.out.versions)
+             ch_ribocode_gtf = RIBOCODE.out.gtf
+             ch_qc_ribocode_txt = RIBOCODE.out.collapsed.map { meta, f -> f }
         }
     } else if (!params.skip_ribocode && is_bam_input) {
         log.warn "RiboCode requires transcriptome BAM which is not available in BAM input mode. Skipping RiboCode."
@@ -596,7 +604,7 @@ workflow RIBOSEQ {
     ch_unify_bed      = Channel.empty()
     ch_unify_gtf      = Channel.empty()
 
-    def has_unify_inputs = (!params.skip_ribotish) || (!params.skip_ribotricer) || (!params.skip_orfquant && !params.skip_riboseqc)
+    def has_unify_inputs = (!params.skip_ribotish) || (!params.skip_ribotricer) || can_run_ribocode || (!params.skip_orfquant && !params.skip_riboseqc)
 
     if (!params.skip_unify_orf_predictions) {
         if (!has_unify_inputs) {
@@ -607,6 +615,8 @@ workflow RIBOSEQ {
             ch_ribotish_list = (params.skip_ribotish ? Channel.value([]) : ch_ribotish_predictions.map { meta, file -> file }.collect())
                 .map { it ?: [] }
             ch_ribotricer_list = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
+                .map { it ?: [] }
+            ch_ribocode_list = (can_run_ribocode ? ch_ribocode_gtf.map { meta, file -> file }.collect() : Channel.value([]))
                 .map { it ?: [] }
             ch_orfquant_list = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
                 .map { it ?: [] }
@@ -632,26 +642,31 @@ workflow RIBOSEQ {
             // Combine three channels with robust handling for nested or flat structures
             ch_unify_inputs = ch_ribotish_list
                 .combine(ch_ribotricer_list)
+                .combine(ch_ribocode_list)
                 .combine(ch_orfquant_list)
                 .map { combined ->
                     def ribotish_files = []
                     def ribotricer_files = []
+                    def ribocode_files = []
                     def orfquant_files = []
 
-                    if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List) {
-                        // Nested structure: [[ribotish_files, ribotricer_files], orfquant_files]
-                        ribotish_files = combined[0][0]
-                        ribotricer_files = combined[0][1]
+                    if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List && combined[0].size() == 2 && combined[0][0] instanceof List) {
+                        // Nested structure from chained combine: [[[ribotish, ribotricer], ribocode], orfquant]
+                        ribotish_files = combined[0][0][0]
+                        ribotricer_files = combined[0][0][1]
+                        ribocode_files = combined[0][1]
                         orfquant_files = combined[1]
-                    } else if (combined instanceof List && combined.size() == 3) {
-                        // Flat structure: [ribotish_files, ribotricer_files, orfquant_files]
+                    } else if (combined instanceof List && combined.size() == 4) {
+                        // Flat structure: [ribotish_files, ribotricer_files, ribocode_files, orfquant_files]
                         ribotish_files = combined[0]
                         ribotricer_files = combined[1]
-                        orfquant_files = combined[2]
+                        ribocode_files = combined[2]
+                        orfquant_files = combined[3]
                     } else if (combined instanceof List) {
                         // Flat list of files - split by tool-specific suffix
                         ribotish_files = combined.findAll { it.getName().endsWith('_pred.txt') }
                         ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
+                        ribocode_files = combined.findAll { it.getName().endsWith('.gtf') && !it.getName().endsWith('_Detected_ORFs.gtf') }
                         orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') }
                     } else {
                         ribotish_files = combined
@@ -659,16 +674,19 @@ workflow RIBOSEQ {
 
                     def ribotish_list = ribotish_files instanceof List ? ribotish_files : (ribotish_files ? [ribotish_files] : [])
                     def ribotricer_list = ribotricer_files instanceof List ? ribotricer_files : (ribotricer_files ? [ribotricer_files] : [])
+                    def ribocode_list = ribocode_files instanceof List ? ribocode_files : (ribocode_files ? [ribocode_files] : [])
                     def orfquant_list = orfquant_files instanceof List ? orfquant_files : (orfquant_files ? [orfquant_files] : [])
 
                     def all_files = []
                     all_files.addAll(ribotish_list)
                     all_files.addAll(ribotricer_list)
+                    all_files.addAll(ribocode_list)
                     all_files.addAll(orfquant_list)
                     def ribotish_names = ribotish_list.collect{ it.getName() }
                     def ribotricer_names = ribotricer_list.collect{ it.getName() }
+                    def ribocode_names = ribocode_list.collect{ it.getName() }
                     def orfquant_names = orfquant_list.collect{ it.getName() }
-                    [ ribotish_names, ribotricer_names, orfquant_names, all_files ]
+                    [ ribotish_names, ribotricer_names, ribocode_names, orfquant_names, all_files ]
                 }
 
             UNIFY_ORF_PREDICTIONS(
@@ -710,6 +728,8 @@ workflow RIBOSEQ {
                     .map { it ?: [] }
                 def ch_ribotricer_list_pt = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
                     .map { it ?: [] }
+                def ch_ribocode_list_pt = (can_run_ribocode ? ch_ribocode_gtf.map { meta, file -> file }.collect() : Channel.value([]))
+                    .map { it ?: [] }
                 def ch_orfquant_list_pt = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
                     .map { it ?: [] }
                 def ch_psites_bedgraph_pt = params.skip_riboseqc ?
@@ -721,23 +741,26 @@ workflow RIBOSEQ {
 
                 def ch_unify_inputs_pt = ch_ribotish_list_pt
                     .combine(ch_ribotricer_list_pt)
+                    .combine(ch_ribocode_list_pt)
                     .combine(ch_orfquant_list_pt)
                     .map { combined ->
-                        def ribotish_files = []; def ribotricer_files = []; def orfquant_files = []
-                        if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List) {
-                            ribotish_files = combined[0][0]; ribotricer_files = combined[0][1]; orfquant_files = combined[1]
-                        } else if (combined instanceof List && combined.size() == 3) {
-                            ribotish_files = combined[0]; ribotricer_files = combined[1]; orfquant_files = combined[2]
+                        def ribotish_files = []; def ribotricer_files = []; def ribocode_files = []; def orfquant_files = []
+                        if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List && combined[0].size() == 2 && combined[0][0] instanceof List) {
+                            ribotish_files = combined[0][0][0]; ribotricer_files = combined[0][0][1]; ribocode_files = combined[0][1]; orfquant_files = combined[1]
+                        } else if (combined instanceof List && combined.size() == 4) {
+                            ribotish_files = combined[0]; ribotricer_files = combined[1]; ribocode_files = combined[2]; orfquant_files = combined[3]
                         } else if (combined instanceof List) {
                             ribotish_files  = combined.findAll { it.getName().endsWith('_pred.txt') }
                             ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
+                            ribocode_files  = combined.findAll { it.getName().endsWith('.gtf') && !it.getName().endsWith('_Detected_ORFs.gtf') }
                             orfquant_files  = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') }
                         } else { ribotish_files = combined }
                         def rt  = ribotish_files  instanceof List ? ribotish_files  : (ribotish_files  ? [ribotish_files]  : [])
                         def rtr = ribotricer_files instanceof List ? ribotricer_files : (ribotricer_files ? [ribotricer_files] : [])
+                        def rc  = ribocode_files   instanceof List ? ribocode_files   : (ribocode_files   ? [ribocode_files]   : [])
                         def oq  = orfquant_files   instanceof List ? orfquant_files   : (orfquant_files   ? [orfquant_files]   : [])
-                        def all = []; all.addAll(rt); all.addAll(rtr); all.addAll(oq)
-                        [ rt.collect{ it.getName() }, rtr.collect{ it.getName() }, oq.collect{ it.getName() }, all ]
+                        def all = []; all.addAll(rt); all.addAll(rtr); all.addAll(rc); all.addAll(oq)
+                        [ rt.collect{ it.getName() }, rtr.collect{ it.getName() }, rc.collect{ it.getName() }, oq.collect{ it.getName() }, all ]
                     }
 
                 UNIFY_ORF_PREDICTIONS_PER_TOOL(
@@ -750,8 +773,7 @@ workflow RIBOSEQ {
                 )
                 ch_versions = ch_versions.mix(UNIFY_ORF_PREDICTIONS_PER_TOOL.out.versions)
 
-                // Helper closure: run all three classifiers for a given tool's outputs
-                // tool_suffix: 'ribotish' | 'ribotricer' | 'orfquant'
+                // Run all three classifiers for each tool's exact-deduplicated outputs.
                 def ch_ensembl_dir = params.orf_classify_ensembl_dir ?
                     Channel.value(file(params.orf_classify_ensembl_dir, checkIfExists: true)) :
                     Channel.empty()
@@ -826,6 +848,42 @@ workflow RIBOSEQ {
                         "${base_classify_dir}/per_tool/ribotricer/orf_type"
                     )
                     ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER.out.versions)
+                }
+
+                if (can_run_ribocode) {
+                    def rc_prefix = "${classify_prefix}_ribocode"
+                    if (params.orf_classify_ensembl_dir) {
+                        CLASSIFY_ORFS_GENCODE_RIBOCODE(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_bed,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_metadata,
+                            rc_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            gencode_orf_dir,
+                            file(params.orf_classify_ensembl_dir, checkIfExists: true),
+                            "${base_classify_dir}/per_tool/ribocode/gencode"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_RIBOCODE.out.versions)
+                    }
+                    CLASSIFY_ORFS_ORFQUANT_RIBOCODE(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_gtf,
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_metadata,
+                        rc_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/ribocode/orfquant"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOCODE.out.versions)
+                    CLASSIFY_ORFS_ORF_TYPE_RIBOCODE(
+                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_metadata,
+                        rc_prefix,
+                        classify_wrapper,
+                        class_orf_dir,
+                        ch_gtf,
+                        "${base_classify_dir}/per_tool/ribocode/orf_type"
+                    )
+                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE_RIBOCODE.out.versions)
                 }
 
                 if (!params.skip_orfquant && !params.skip_riboseqc) {
@@ -920,6 +978,7 @@ workflow RIBOSEQ {
             ch_qc_psites_calcs.collect().ifEmpty([]),
             ch_qc_ribotish_all.collect().ifEmpty([]),
             ch_qc_ribotricer_orfs.collect().ifEmpty([]),
+            ch_qc_ribocode_txt.collect().ifEmpty([]),
             ch_qc_orfquant_results.collect().ifEmpty([]),
             ch_collect_script
         )

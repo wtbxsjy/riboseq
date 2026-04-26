@@ -234,6 +234,12 @@ Ribotricer filters candidate ORFs using a phase score that measures 3-nt periodi
 
 Setting this to `null` (the default) uses ribotricer's built-in default.
 
+### RiboCode
+
+RiboCode can be enabled with `--skip_ribocode false` and accepts additional command-line options through `--extra_ribocode_args`. It requires transcriptome BAMs produced by STAR or HISAT2, so it is skipped automatically when the pipeline starts from pre-aligned BAM input.
+
+RiboCode GTF outputs are passed into unified ORF prediction and, when per-tool classification is requested, into the same GENCODE, ORFquant, and ORF-type classification routes as the other ORF callers.
+
 ### QC statistics aggregation
 
 The pipeline collects per-sample QC metrics (alignment statistics, sORF filter pass rates, ORF prediction counts) into a summary table (`collect_qc_stats/`) via the `COLLECT_QC_STATS` module. To skip this step:
@@ -275,7 +281,7 @@ To disable this correction and use the original RiboseQC for_ORFquant file:
 
 ### Unified ORF Predictions with P-site Statistics
 
-When multiple ORF prediction tools are run (Ribo-TISH, Ribotricer, ORFquant), the pipeline can merge their results into a unified output. This unified prediction step now integrates RiboseQC P-site bedgraph data to calculate standardized P-site statistics for ALL predicted ORFs, regardless of which tool originally detected them.
+When multiple ORF prediction tools are run (Ribo-TISH, Ribotricer, RiboCode, ORFquant), the pipeline can merge their results into a unified output. This unified prediction step now integrates RiboseQC P-site bedgraph data to calculate standardized P-site statistics for ALL predicted ORFs, regardless of which tool originally detected them.
 
 **Key features:**
 

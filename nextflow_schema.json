@@ -499,7 +499,7 @@
                     "default": false,
                     "fa_icon": "fas fa-compress-arrows-alt",
                     "description": "Merge BAMs from biological/technical replicates sharing the same 'group' field before ORF calling.",
-                    "help_text": "When enabled, samples sharing the same 'group' value in the samplesheet are merged (samtools merge) after SORF_BAM_FILTER. The merged BAM (id: '{group}_merged') runs through ALL ORF prediction tools (Ribo-TISH, Ribotricer, RiboseQC, ORFquant) in addition to the individual replicates. This improves reproducibility and helps filter random ORF calls. The 'group' column must be added to the samplesheet CSV."
+                    "help_text": "When enabled, samples sharing the same 'group' value in the samplesheet are merged (samtools merge) after SORF_BAM_FILTER. The merged BAM (id: '{group}_merged') runs through ALL ORF prediction tools (Ribo-TISH, Ribotricer, RiboCode, RiboseQC, ORFquant) in addition to the individual replicates. This improves reproducibility and helps filter random ORF calls. The 'group' column must be added to the samplesheet CSV."
                 },
                 "extra_ribotish_quality_args": {
                     "type": "string",
@@ -516,6 +516,10 @@
                 "extra_ribotricer_detectorfs_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to the ribotricer detect-orfs command in addition to defaults defined by the pipeline."
+                },
+                "extra_ribocode_args": {
+                    "type": "string",
+                    "description": "Extra arguments to pass to RiboCode_onestep in addition to defaults defined by the pipeline."
                 },
                 "ribotricer_phase_score_cutoff": {
                     "type": "number",
@@ -729,7 +733,12 @@
                 },
                 "skip_ribotricer": {
                     "type": "boolean",
-                    "description": "Skip Riboricer.",
+                    "description": "Skip Ribotricer.",
+                    "fa_icon": "fas fa-fast-forward"
+                },
+                "skip_ribocode": {
+                    "type": "boolean",
+                    "description": "Skip RiboCode ORF detection.",
                     "fa_icon": "fas fa-fast-forward"
                 },
                 "skip_riboseqc": {

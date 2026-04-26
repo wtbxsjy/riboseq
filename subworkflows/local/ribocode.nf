@@ -24,6 +24,10 @@ workflow RIBOCODE {
     ch_versions = ch_versions.mix(RIBOCODE_DETECT.out.versions)
 
     emit:
-    results  = RIBOCODE_DETECT.out.results
-    versions = ch_versions
+    txt       = RIBOCODE_DETECT.out.txt
+    collapsed = RIBOCODE_DETECT.out.collapsed
+    gtf       = RIBOCODE_DETECT.out.gtf
+    bed       = RIBOCODE_DETECT.out.bed
+    results   = RIBOCODE_DETECT.out.results
+    versions  = ch_versions
 }

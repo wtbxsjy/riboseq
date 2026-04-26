@@ -16,8 +16,12 @@ process RIBOCODE_DETECT {
     path fasta
 
     output:
-    tuple val(meta), path("${meta.id}*"), emit: results, optional: true
-    path "versions.yml"                 , emit: versions
+    tuple val(meta), path("${meta.id}.txt")          , emit: txt
+    tuple val(meta), path("${meta.id}_collapsed.txt"), emit: collapsed
+    tuple val(meta), path("${meta.id}.gtf")          , emit: gtf
+    tuple val(meta), path("${meta.id}.bed")          , emit: bed
+    tuple val(meta), path("${meta.id}*")             , emit: results
+    path "versions.yml"                              , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -85,12 +89,27 @@ PY
         -r $bam \\
         --stranded $strandedness \\
         -o ${meta.id} \\
+        -outgtf \\
+        -outbed \\
         $args || {
         echo "RiboCode failed for ${meta.id} - likely due to insufficient periodicity in data"
         echo "This is common for low-depth or test datasets"
-        # Create a marker file to indicate failure
+        # Create marker and placeholder files so downstream channels stay stable.
         echo "FAILED: No periodicity detected" > ${meta.id}.ribocode_failed.txt
+        echo -e "ORF_ID\\tORF_type\\ttranscript_id\\tgene_id\\tchrom\\tstrand\\tORF_length\\tORF_gstart\\tORF_gstop\\tpval_combined\\tadjusted_pval" > ${meta.id}.txt
+        cp ${meta.id}.txt ${meta.id}_collapsed.txt
+        touch ${meta.id}.gtf ${meta.id}_collapsed.gtf ${meta.id}.bed ${meta.id}_collapsed.bed
     }
+
+    # Older RiboCode failures can leave only partial output; normalize to an empty
+    # tabular/interval set rather than letting downstream workflow wiring fail.
+    if [ ! -f ${meta.id}.txt ]; then
+        echo -e "ORF_ID\\tORF_type\\ttranscript_id\\tgene_id\\tchrom\\tstrand\\tORF_length\\tORF_gstart\\tORF_gstop\\tpval_combined\\tadjusted_pval" > ${meta.id}.txt
+    fi
+    if [ ! -f ${meta.id}_collapsed.txt ]; then
+        cp ${meta.id}.txt ${meta.id}_collapsed.txt
+    fi
+    touch ${meta.id}.gtf ${meta.id}_collapsed.gtf ${meta.id}.bed ${meta.id}_collapsed.bed
 
     ribocode_ver="\$(RiboCode_onestep --version 2>&1 | sed 's/^.* //')"
     printf '"%s":\\n    ribocode: "%s"\\n' "${task.process}" "\$ribocode_ver" > versions.yml

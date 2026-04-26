@@ -24,6 +24,7 @@ _shared_fasta_path = None   # str path to genome FASTA (workers open their own h
 _TOOL_STATS_KEY = {
     'Ribo-TISH': 'ribotish',
     'Ribotricer': 'ribotricer',
+    'RiboCode':   'ribocode',
     'ORFquant':   'orfquant',
 }
 
@@ -1161,6 +1162,190 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0,
     
     return candidates
 
+def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
+                   exclude_tistypes=None, atg_only=False):
+    candidates = []
+    print(f"Parsing RiboCode: {file_path}", file=sys.stderr)
+
+    try:
+        with open(file_path, 'r') as f:
+            first_line = f.readline().strip()
+            if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
+                print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
+                return []
+            if first_line.startswith('FAILED'):
+                print(f"  -> Failure marker detected, skipping", file=sys.stderr)
+                return []
+    except Exception:
+        pass
+
+    def parse_attrs(attr_str):
+        attrs = {}
+        for item in attr_str.split(';'):
+            item = item.strip()
+            if not item:
+                continue
+            parts = item.split(' ', 1)
+            if len(parts) == 2:
+                attrs[parts[0]] = parts[1].strip().strip('"')
+        return attrs
+
+    def score_from_pvalue(pvalue):
+        if pvalue is None:
+            return None
+        try:
+            pval = float(pvalue)
+            if pval > 0:
+                import math
+                return -math.log10(pval)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return None
+
+    def load_txt_metrics(path):
+        metrics = {}
+        if not path or not os.path.exists(path):
+            return metrics
+        try:
+            with open(path, 'r') as f:
+                header = f.readline().strip().split('\t')
+                col_map = {name: i for i, name in enumerate(header)}
+                if 'ORF_ID' not in col_map:
+                    return metrics
+                for line in f:
+                    if not line.strip() or line.startswith('#'):
+                        continue
+                    parts = line.rstrip('\n').split('\t')
+                    if len(parts) <= col_map['ORF_ID']:
+                        continue
+                    orf_id = parts[col_map['ORF_ID']]
+                    pvalue = None
+                    for col in ('adjusted_pval', 'pval_combined'):
+                        if col in col_map and col_map[col] < len(parts):
+                            try:
+                                pvalue = float(parts[col_map[col]])
+                                break
+                            except ValueError:
+                                pass
+                    metrics[orf_id] = {
+                        'pvalue': pvalue,
+                        'score': score_from_pvalue(pvalue),
+                    }
+        except Exception as e:
+            print(f"Warning: could not read RiboCode sidecar metrics {path}: {e}", file=sys.stderr)
+        return metrics
+
+    def sidecar_txt_path(path):
+        root, ext = os.path.splitext(path)
+        if ext == '.gtf' or ext == '.bed':
+            return root + '.txt'
+        return path if ext == '.txt' else None
+
+    metrics = load_txt_metrics(sidecar_txt_path(file_path))
+
+    if file_path.endswith('.gtf'):
+        grouped = {}
+        try:
+            with open(file_path, 'r') as f:
+                for line in f:
+                    if line.startswith('#') or not line.strip():
+                        continue
+                    parts = line.rstrip('\n').split('\t')
+                    if len(parts) < 9:
+                        continue
+                    attrs = parse_attrs(parts[8])
+                    orf_id = attrs.get('orf_id') or attrs.get('ORF_ID')
+                    if not orf_id:
+                        continue
+                    rec = grouped.setdefault(orf_id, {
+                        'chrom': gtf_index.resolve_chrom(parts[0]),
+                        'strand': parts[6],
+                        'blocks': [],
+                        'orf_span': None,
+                        'attrs': attrs,
+                    })
+                    rec['attrs'].update(attrs)
+                    feature = parts[2]
+                    block = (int(parts[3]), int(parts[4]))
+                    if feature == 'exon':
+                        rec['blocks'].append(block)
+                    elif feature == 'ORF':
+                        rec['orf_span'] = block
+
+            for orf_id, rec in grouped.items():
+                blocks = rec['blocks'] or ([rec['orf_span']] if rec['orf_span'] else [])
+                if not blocks:
+                    continue
+                length_nt = sum(e - s + 1 for s, e in blocks)
+                if length_nt // 3 < min_len:
+                    continue
+                attrs = rec['attrs']
+                tid = attrs.get('transcript_id', 'NA')
+                gid = attrs.get('gene_id') or gtf_index.gene_map.get(tid, 'NA')
+                metric = metrics.get(orf_id, {})
+                cand = ORFCandidate(
+                    rec['chrom'],
+                    rec['strand'],
+                    blocks,
+                    tid,
+                    gid,
+                    'RiboCode',
+                    sample_id,
+                    score=metric.get('score'),
+                    pvalue=metric.get('pvalue'),
+                )
+                candidates.append(cand)
+        except Exception as e:
+            print(f"Error parsing RiboCode GTF file: {e}", file=sys.stderr)
+        return candidates
+
+    try:
+        with open(file_path, 'r') as f:
+            header = f.readline().strip().split('\t')
+            col_map = {name: i for i, name in enumerate(header)}
+            required = {'ORF_ID', 'chrom', 'strand', 'ORF_gstart', 'ORF_gstop'}
+            if not required.issubset(col_map):
+                print("Warning: RiboCode file missing required columns. Skipping.", file=sys.stderr)
+                return []
+            for line in f:
+                if not line.strip() or line.startswith('#'):
+                    continue
+                parts = line.rstrip('\n').split('\t')
+                orf_id = parts[col_map['ORF_ID']]
+                chrom = gtf_index.resolve_chrom(parts[col_map['chrom']])
+                strand = parts[col_map['strand']]
+                gstart = int(parts[col_map['ORF_gstart']])
+                gstop = int(parts[col_map['ORF_gstop']])
+                start, end = sorted((gstart, gstop))
+                if (end - start + 1) // 3 < min_len:
+                    continue
+                tid = parts[col_map['transcript_id']] if 'transcript_id' in col_map and col_map['transcript_id'] < len(parts) else 'NA'
+                gid = parts[col_map['gene_id']] if 'gene_id' in col_map and col_map['gene_id'] < len(parts) else gtf_index.gene_map.get(tid, 'NA')
+                pvalue = None
+                for col in ('adjusted_pval', 'pval_combined'):
+                    if col in col_map and col_map[col] < len(parts):
+                        try:
+                            pvalue = float(parts[col_map[col]])
+                            break
+                        except ValueError:
+                            pass
+                cand = ORFCandidate(
+                    chrom,
+                    strand,
+                    [(start, end)],
+                    tid,
+                    gid,
+                    'RiboCode',
+                    sample_id,
+                    score=score_from_pvalue(pvalue),
+                    pvalue=pvalue,
+                )
+                candidates.append(cand)
+    except Exception as e:
+        print(f"Error parsing RiboCode file: {e}", file=sys.stderr)
+
+    return candidates
+
 def extract_sequence(cand, genome_fasta):
     """Extract nucleotide + amino acid sequence for a candidate ORF.
     Sets cand.sequence (nt) and cand.aa_sequence (aa).
@@ -1735,6 +1920,7 @@ def _parse_file_task(task):
     _parse_fn = {
         'Ribo-TISH': parse_ribotish,
         'Ribotricer': parse_ribotricer,
+        'RiboCode':   parse_ribocode,
         'ORFquant':   parse_orfquant,
     }[tool]
     orfs = _parse_fn(file_path, _shared_gtf_index, sid, min_len,
@@ -1916,7 +2102,12 @@ def _write_orf_outputs(candidates: list, prefix: str) -> None:
 
 
 # Canonical tool names (as stored in ORFCandidate.sources) → file suffix
-_TOOL_NAMES = [("Ribo-TISH", "ribotish"), ("Ribotricer", "ribotricer"), ("ORFquant", "orfquant")]
+_TOOL_NAMES = [
+    ("Ribo-TISH", "ribotish"),
+    ("Ribotricer", "ribotricer"),
+    ("RiboCode", "ribocode"),
+    ("ORFquant", "orfquant"),
+]
 
 
 def _write_per_tool_outputs(candidates: list, per_tool_prefix: str) -> None:
@@ -1944,6 +2135,7 @@ def main():
     parser = argparse.ArgumentParser(description="Unify ORF predictions from multiple tools")
     parser.add_argument("--ribotish", nargs='+', help="Ribo-TISH output files")
     parser.add_argument("--ribotricer", nargs='+', help="Ribotricer output files")
+    parser.add_argument("--ribocode", nargs='+', help="RiboCode GTF/TXT output files")
     parser.add_argument("--orfquant", nargs='+', help="ORFquant GTF output files")
     parser.add_argument("--gtf", required=True, help="Reference GTF file for coordinate mapping")
     parser.add_argument("--fasta", required=True, help="Genome FASTA file for validation")
@@ -1981,7 +2173,7 @@ def main():
     # Per-tool output mode: exact-match dedup per tool, no cross-tool merging
     parser.add_argument("--per-tool-output", type=str, default=None,
                         help="When set, output per-tool BED12/metadata/GTF files with this prefix "
-                             "(e.g. 'ribotish_orfs', 'ribotricer_orfs', 'orfquant_orfs') in addition "
+                             "(e.g. 'ribotish_orfs', 'ribotricer_orfs', 'ribocode_orfs', 'orfquant_orfs') in addition "
                              "to the combined exact-dedup output at --output. "
                              "Skips Stage 2b (cross-tool frame-aware merge) and Stage 3 (seq clustering). "
                              "Use this for per-tool classification without cross-tool merging.")
@@ -2030,6 +2222,10 @@ def main():
     if args.ribotricer:
         for f in args.ribotricer:
             print(f"  - {f}", file=sys.stderr)
+    print(f"RiboCode files: {len(args.ribocode) if args.ribocode else 0}", file=sys.stderr)
+    if args.ribocode:
+        for f in args.ribocode:
+            print(f"  - {f}", file=sys.stderr)
     print(f"ORFquant files: {len(args.orfquant) if args.orfquant else 0}", file=sys.stderr)
     if args.orfquant:
         for f in args.orfquant:
@@ -2039,7 +2235,7 @@ def main():
 
     # Track statistics by tool
     tool_stats   = defaultdict(lambda: {'count': 0, 'samples': set()})
-    sample_stats = defaultdict(lambda: {'ribotish': 0, 'ribotricer': 0, 'orfquant': 0})
+    sample_stats = defaultdict(lambda: {'ribotish': 0, 'ribotricer': 0, 'ribocode': 0, 'orfquant': 0})
 
     # Build task list: (tool_name, file_path, sample_id, min_len, excl, atg_only)
     parse_tasks = []
@@ -2051,6 +2247,11 @@ def main():
         for f in args.ribotricer:
             sid = infer_sample_id_from_prediction_path(f, '_translating_ORFs.tsv')
             parse_tasks.append(('Ribotricer', f, sid, args.min_len, exclude_tistypes, args.atg_only))
+    if args.ribocode:
+        for f in args.ribocode:
+            suffix = '_collapsed.gtf' if f.endswith('_collapsed.gtf') else '_collapsed.txt' if f.endswith('_collapsed.txt') else '.gtf' if f.endswith('.gtf') else '.txt'
+            sid = infer_sample_id_from_prediction_path(f, suffix)
+            parse_tasks.append(('RiboCode', f, sid, args.min_len, exclude_tistypes, args.atg_only))
     if args.orfquant:
         for f in args.orfquant:
             sid = infer_sample_id_from_prediction_path(f, '_Detected_ORFs.gtf')
@@ -2081,6 +2282,7 @@ def main():
         _parse_fn_map = {
             'Ribo-TISH': parse_ribotish,
             'Ribotricer': parse_ribotricer,
+            'RiboCode':   parse_ribocode,
             'ORFquant':   parse_orfquant,
         }
         for tool, file_path, sid, min_len, excl, atg in parse_tasks:
@@ -2097,7 +2299,7 @@ def main():
     # Print statistics before merging
     print("\n=== Input Statistics (raw, per tool and per sample) ===", file=sys.stderr)
     print("By Tool:", file=sys.stderr)
-    for tool in ['ribotish', 'ribotricer', 'orfquant']:
+    for tool in ['ribotish', 'ribotricer', 'ribocode', 'orfquant']:
         if tool in tool_stats:
             count = tool_stats[tool]['count']
             samples_ran = sorted(tool_stats[tool]['samples'])
@@ -2109,9 +2311,9 @@ def main():
     all_input_samples = sorted(set(sample_stats.keys()))
     for sample in all_input_samples:
         stats = sample_stats[sample]
-        total = stats['ribotish'] + stats['ribotricer'] + stats['orfquant']
+        total = stats['ribotish'] + stats['ribotricer'] + stats['ribocode'] + stats['orfquant']
         if total > 0:
-            print(f"  {sample:20s}: ribotish={stats['ribotish']:6d}, ribotricer={stats['ribotricer']:6d}, orfquant={stats['orfquant']:6d}, total={total:6d}", file=sys.stderr)
+            print(f"  {sample:20s}: ribotish={stats['ribotish']:6d}, ribotricer={stats['ribotricer']:6d}, ribocode={stats['ribocode']:6d}, orfquant={stats['orfquant']:6d}, total={total:6d}", file=sys.stderr)
     
     # Stage 1: Exact match merging (same chrom, strand, and exact block coordinates).
     # Sort first so the same (gid, tid) is always chosen as the representative when
@@ -2147,7 +2349,7 @@ def main():
         annotate_sequences_and_cds(final_list, use_parallel, num_workers, genome_fasta, gtf_index)
         _write_per_tool_outputs(final_list, args.per_tool_output)
         _write_orf_outputs(final_list, args.output)
-        print(f"Per-tool outputs written to {args.per_tool_output}_{{ribotish,ribotricer,orfquant}}.*",
+        print(f"Per-tool outputs written to {args.per_tool_output}_{{ribotish,ribotricer,ribocode,orfquant}}.*",
               file=sys.stderr)
         print(f"Combined exact-dedup output written to {args.output}.*", file=sys.stderr)
         print(f"Done. Outputs written to {args.output}.*", file=sys.stderr)
@@ -2194,7 +2396,12 @@ def main():
                 final_sample_stats[sample][tool] += 1
     
     # Map canonical tool names used in ORFCandidate.sources to display names
-    TOOL_KEYS = {'Ribo-TISH': 'ribotish', 'Ribotricer': 'ribotricer', 'ORFquant': 'orfquant'}
+    TOOL_KEYS = {
+        'Ribo-TISH': 'ribotish',
+        'Ribotricer': 'ribotricer',
+        'RiboCode': 'ribocode',
+        'ORFquant': 'orfquant',
+    }
 
     print(f"Final unified ORFs: {len(final_list)}", file=sys.stderr)
     print("By Tool:", file=sys.stderr)
@@ -2207,10 +2414,11 @@ def main():
         tool_counts = final_sample_stats[sample]
         ribotish_cnt   = tool_counts.get('Ribo-TISH', 0)
         ribotricer_cnt = tool_counts.get('Ribotricer', 0)
+        ribocode_cnt   = tool_counts.get('RiboCode', 0)
         orfquant_cnt   = tool_counts.get('ORFquant', 0)
-        total = ribotish_cnt + ribotricer_cnt + orfquant_cnt
+        total = ribotish_cnt + ribotricer_cnt + ribocode_cnt + orfquant_cnt
         if total > 0:
-            print(f"  {sample:20s}: ribotish={ribotish_cnt:6d}, ribotricer={ribotricer_cnt:6d}, orfquant={orfquant_cnt:6d}, total={total:6d}", file=sys.stderr)
+            print(f"  {sample:20s}: ribotish={ribotish_cnt:6d}, ribotricer={ribotricer_cnt:6d}, ribocode={ribocode_cnt:6d}, orfquant={orfquant_cnt:6d}, total={total:6d}", file=sys.stderr)
     
     # Calculate statistics from bedgraphs if provided (using optimized indexed version)
     if args.bedgraph_dir and args.sample_list:

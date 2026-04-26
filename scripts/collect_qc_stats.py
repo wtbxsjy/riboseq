@@ -157,6 +157,7 @@ def main():
     ap.add_argument("--psites_calcs",    nargs="*", default=[], help="*_P_sites_calcs files")
     ap.add_argument("--ribotish_all",    nargs="*", default=[], help="Ribo-TISH *_all.txt files")
     ap.add_argument("--ribotricer_orfs", nargs="*", default=[], help="Ribotricer *_translating_ORFs.tsv files")
+    ap.add_argument("--ribocode",        nargs="*", default=[], help="RiboCode *_collapsed.txt files")
     ap.add_argument("--orfquant",        nargs="*", default=[], help="ORFquant *_final_ORFquant_results files")
     ap.add_argument("--output_dir",      default=".",          help="Output directory (default: .)")
     args = ap.parse_args()
@@ -169,11 +170,12 @@ def main():
     psite_map   = discover_files(args.psites_calcs,    "_P_sites_calcs")
     rtish_map   = discover_files(args.ribotish_all,    "_all.txt")
     rtricer_map = discover_files(args.ribotricer_orfs, "_translating_ORFs.tsv")
+    ribocode_map = discover_files(args.ribocode,       "_collapsed.txt")
     orfq_map    = discover_files(args.orfquant,        "_final_ORFquant_results")
 
     all_samples = sorted(set(
         list(star_map) + list(sorf_map) + list(psite_map) +
-        list(rtish_map) + list(rtricer_map) + list(orfq_map)
+        list(rtish_map) + list(rtricer_map) + list(ribocode_map) + list(orfq_map)
     ))
 
     if not all_samples:
@@ -209,6 +211,7 @@ def main():
         orf_row = {"sample": s}
         orf_row["ribotish_all"]   = count_lines_minus_header(rtish_map[s])   if s in rtish_map   else ""
         orf_row["ribotricer"]     = count_lines_minus_header(rtricer_map[s]) if s in rtricer_map else ""
+        orf_row["ribocode"]       = count_lines_minus_header(ribocode_map[s]) if s in ribocode_map else ""
         orf_row["orfquant"]       = count_lines_minus_header(orfq_map[s])    if s in orfq_map    else ""
         ps_sum = psite_summary(parse_psites_calcs(psite_map[s])) if s in psite_map else {}
         orf_row.update(ps_sum)
@@ -240,7 +243,7 @@ def main():
     ])
 
     write_csv("orf_counts.csv", orf_rows, [
-        "sample", "ribotish_all", "ribotricer", "orfquant",
+        "sample", "ribotish_all", "ribotricer", "ribocode", "orfquant",
         "dominant_rl", "dominant_offset", "dominant_frame_pref", "best_frame_pref", "n_valid_rl",
     ])
 
@@ -276,6 +279,7 @@ def main():
             "n_valid_rl":            o.get("n_valid_rl", ""),
             "ribotish_all":          o.get("ribotish_all", ""),
             "ribotricer":            o.get("ribotricer", ""),
+            "ribocode":              o.get("ribocode", ""),
             "orfquant":              o.get("orfquant", ""),
         })
         summary_rows.append(row)
@@ -285,7 +289,7 @@ def main():
         "total_reads", "unique_pct", "multi_pct", "unmapped_short_pct",
         "total_primary_mapped", "kept_primary_mapped", "pct_kept",
         "dominant_rl", "dominant_offset", "best_frame_pref", "n_valid_rl",
-        "ribotish_all", "ribotricer", "orfquant",
+        "ribotish_all", "ribotricer", "ribocode", "orfquant",
     ])
 
     print(f"\nDone. Output written to: {args.output_dir}", file=sys.stderr)
