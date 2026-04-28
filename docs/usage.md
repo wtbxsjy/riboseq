@@ -240,6 +240,14 @@ RiboCode can be enabled with `--skip_ribocode false` and accepts additional comm
 
 RiboCode GTF outputs are passed into unified ORF prediction and, when per-tool classification is requested, into the same GENCODE, ORFquant, and ORF-type classification routes as the other ORF callers.
 
+RiboCode can be memory-heavy when many samples run concurrently. The pipeline therefore runs RiboCode serially by default:
+
+```bash
+--ribocode_maxForks 1 --ribocode_memory 36.GB
+```
+
+Increase `--ribocode_maxForks` only when the HPC scheduler can reserve enough memory for multiple simultaneous RiboCode jobs. Increase `--ribocode_memory` if a single RiboCode task is killed by the scheduler for exceeding its memory request.
+
 ### QC statistics aggregation
 
 The pipeline collects per-sample QC metrics (alignment statistics, sORF filter pass rates, ORF prediction counts) into a summary table (`collect_qc_stats/`) via the `COLLECT_QC_STATS` module. To skip this step:

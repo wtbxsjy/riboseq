@@ -521,6 +521,16 @@
                     "type": "string",
                     "description": "Extra arguments to pass to RiboCode_onestep in addition to defaults defined by the pipeline."
                 },
+                "ribocode_maxForks": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Maximum number of RiboCode ORF-detection tasks to run concurrently. Keep at 1 for memory-constrained HPC nodes."
+                },
+                "ribocode_memory": {
+                    "type": "string",
+                    "default": "36.GB",
+                    "description": "Memory request for each RiboCode ORF-detection task. Increase if a single RiboCode job is killed for exceeding memory."
+                },
                 "ribotricer_phase_score_cutoff": {
                     "type": "number",
                     "description": "Phase score cutoff for Ribotricer's metagene periodicity detection. When not set, uses Ribotricer's default (3/7 ≈ 0.429). Set to a lower value (e.g. 0.1) for plant or low-depth samples where canonical CDS coverage is sparse."
