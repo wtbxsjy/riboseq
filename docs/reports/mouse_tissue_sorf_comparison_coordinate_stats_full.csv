@@ -1,0 +1,3 @@
+dataset,paper_total,pred_total,coord_exact_blocks,coord_1codon_tolerant,coord_1codon_tolerant_non_exact,coord_pred_contains_paper,coord_pred_contained_by_paper,coord_contains_or_contained,coord_1codon_tolerant_rate
+ribotish+gencode,9555,57545,0,6482,6482,1183,6712,7134,0.678388
+unification+gencode,9555,604017,0,8532,8532,4547,8577,9247,0.892936

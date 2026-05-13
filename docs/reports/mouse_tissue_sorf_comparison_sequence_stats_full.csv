@@ -1,0 +1,3 @@
+dataset,paper_total,pred_total,seq_exact_aa_only,seq_exact_aa_chr_strand,seq_exact_coord,seq_1codon_tolerant,seq_1codon_tolerant_non_exact,seq_pred_contains_paper,seq_pred_contained_by_paper,seq_contains_or_contained,seq_no_match,seq_1codon_tolerant_rate
+ribotish+gencode,9555,57545,6469,6469,0,6466,6466,5,6461,6466,3086,0.676714
+unification+gencode,9555,604017,8532,8532,0,8524,8524,7,8525,8529,1023,0.892098

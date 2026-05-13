@@ -1,0 +1,904 @@
+---
+title: "mouse_tissue：sORF 对比报告（全量详细统计）"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+  message: false
+jupyter: python3
+---
+
+## 1. 说明
+
+本报告仅保留**全量结果**，不再纳入小批量验证结果。  
+比较对象：
+
+1. `ribotish+gencode`（`ribotish-gencode-cache`）
+2. `unification+gencode`（`orf_unification`）
+3. 参考集：`sORF.xlsx`（paper）
+
+按你的要求，分别提供**坐标维度**与**序列维度**统计，重点输出：
+
+- 序列完全匹配数量
+- 1 codon（`<=3 nt`）容忍匹配数量
+- 包含 / 被包含数量
+
+并新增一层“文章同风格过滤”用于 `ribotish+gencode` 和 `unification+gencode` 的 scoped 结果（uORF/dORF/lncRNA）：
+
+1. 起始密码子：AUG（由于 `.orfs.out` 无核酸起始密码子，使用 `pep` 首氨基酸为 `M` 作为代理）
+2. 终止密码子：存在 in-frame stop（`pep` 以 `*` 结尾且仅 1 个 `*`）
+3. 注释背景：位于注释转录本（`trans` 含 `ENSMUST`）
+4. 长度阈值：`orf_length >= 18 nt`
+5. 表达量过滤：`n_datasets >= 1`（可用字段下的背景代理）
+6. 翻译证据：`n_datasets >= 1`（可用字段下的活跃翻译代理）
+
+> 注：第 1/5/6 条为在现有结果字段可实现的**代理规则**，用于最大程度仿照论文筛选逻辑。
+
+```{python}
+from __future__ import annotations
+
+import bisect
+import csv
+import re
+import time
+from collections import defaultdict
+from pathlib import Path
+from typing import NamedTuple
+
+import pandas as pd
+
+csv.field_size_limit(1_000_000_000)
+
+RIBOTISH_DIR = Path("~/riboseq/run/mouse_tissue_old/result/ribotish-gencode-cache").expanduser()
+UNIFICATION_DIR = Path("~/riboseq/run/mouse_tissue_old/result/orf_unification").expanduser()
+SORF_XLSX = Path("~/riboseq/data/mouse_tissue/sORF.xlsx").expanduser()
+
+RIBOTISH_GTF = RIBOTISH_DIR / "gencode_results.orfs.gtf"
+RIBOTISH_FA = RIBOTISH_DIR / "gencode_results.orfs.fa"
+RIBOTISH_GENCODE_OUT = RIBOTISH_DIR / "gencode_results.orfs.out"
+UNIFIED_META = UNIFICATION_DIR / "unified_orfs.metadata.tsv"
+UNIFICATION_GENCODE_OUT = Path("~/riboseq/run/mouse_tissue_old/result/orf_classification/gencode/gencode_results.orfs.out").expanduser()
+OUTPUT_DIR = Path(".")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+GENOMEPOS_RE = re.compile(r"^\s*(chr[^:]+|[^:]+):(\d+)-(\d+):([+-])\s*$")
+ORF_ID_RE = re.compile(r'orf_id "([^"]+)"')
+```
+
+## 2. 解析函数
+
+```{python}
+class ORFRec(NamedTuple):
+    rec_id: str
+    chrom: str
+    strand: str
+    class_label: str
+    aa: str
+    blocks_text: str
+    start_codon: int
+    stop_codon: int
+    span_start: int
+    span_end: int
+
+
+def normalize_chrom(chrom: str) -> str:
+    c = str(chrom).strip()
+    if not c:
+        return ""
+    return c if c.startswith("chr") else f"chr{c}"
+
+
+def normalize_aa(seq: str | None) -> str:
+    if seq is None:
+        return ""
+    return str(seq).strip().upper().rstrip("*")
+
+
+def parse_blocks(blocks_text: str | None) -> list[tuple[int, int]]:
+    if blocks_text is None:
+        return []
+    text = str(blocks_text).strip()
+    if not text or text.upper() == "NA":
+        return []
+    out = []
+    for part in text.split(","):
+        part = part.strip()
+        if "-" not in part:
+            continue
+        s, e = part.split("-", 1)
+        try:
+            s_i, e_i = int(s), int(e)
+        except ValueError:
+            continue
+        if e_i < s_i:
+            s_i, e_i = e_i, s_i
+        out.append((s_i, e_i))
+    return sorted(out, key=lambda x: (x[0], x[1]))
+
+
+def blocks_to_text(blocks: list[tuple[int, int]]) -> str:
+    return ",".join(f"{s}-{e}" for s, e in blocks)
+
+
+def coding_positions(blocks: list[tuple[int, int]], strand: str) -> tuple[int, int]:
+    if strand == "-":
+        ordered = sorted(blocks, key=lambda x: (x[0], x[1]), reverse=True)
+        return ordered[0][1], ordered[-1][0]
+    ordered = sorted(blocks, key=lambda x: (x[0], x[1]))
+    return ordered[0][0], ordered[-1][1]
+
+
+def make_record(
+    rec_id: str,
+    chrom: str,
+    strand: str,
+    blocks: list[tuple[int, int]],
+    aa: str,
+    class_label: str = "",
+) -> ORFRec | None:
+    aa_norm = normalize_aa(aa)
+    chrom_norm = normalize_chrom(chrom)
+    if not aa_norm or not chrom_norm or strand not in {"+", "-"} or not blocks:
+        return None
+    start_codon, stop_codon = coding_positions(blocks, strand)
+    span_start = min(s for s, _ in blocks)
+    span_end = max(e for _, e in blocks)
+    return ORFRec(
+        rec_id=rec_id,
+        chrom=chrom_norm,
+        strand=strand,
+        class_label=(class_label or "").strip(),
+        aa=aa_norm,
+        blocks_text=blocks_to_text(blocks),
+        start_codon=start_codon,
+        stop_codon=stop_codon,
+        span_start=span_start,
+        span_end=span_end,
+    )
+```
+
+```{python}
+def parse_fasta(path: Path) -> dict[str, str]:
+    out = {}
+    cur_id = None
+    seq_buf = []
+    with path.open("r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                if cur_id is not None:
+                    out[cur_id] = "".join(seq_buf)
+                cur_id = line[1:].split()[0]
+                seq_buf = []
+            else:
+                seq_buf.append(line)
+    if cur_id is not None:
+        out[cur_id] = "".join(seq_buf)
+    return out
+
+
+def load_ribotish_records(gtf_path: Path, fa_path: Path) -> list[ORFRec]:
+    aa_map = parse_fasta(fa_path)
+    block_map: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    chrom_map: dict[str, str] = {}
+    strand_map: dict[str, str] = {}
+
+    with gtf_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if not line or line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 9 or parts[2] != "CDS":
+                continue
+            m = ORF_ID_RE.search(parts[8])
+            if not m:
+                continue
+            orf_id = m.group(1)
+            s, e = int(parts[3]), int(parts[4])
+            if e < s:
+                s, e = e, s
+            block_map[orf_id].append((s, e))
+            if orf_id not in chrom_map:
+                chrom_map[orf_id] = normalize_chrom(parts[0])
+                strand_map[orf_id] = parts[6]
+
+    records = []
+    for orf_id, blocks in block_map.items():
+        rec = make_record(
+            rec_id=orf_id,
+            chrom=chrom_map.get(orf_id, ""),
+            strand=strand_map.get(orf_id, ""),
+            blocks=sorted(blocks, key=lambda x: (x[0], x[1])),
+            aa=aa_map.get(orf_id, ""),
+            class_label="",
+        )
+        if rec is not None:
+            records.append(rec)
+    return records
+
+
+def load_unification_records(meta_path: Path) -> list[ORFRec]:
+    records = []
+    with meta_path.open("r", encoding="utf-8") as f:
+        header = f.readline().rstrip("\n").split("\t")
+        idx = {name: i for i, name in enumerate(header)}
+        need = ["orf_id", "chrom", "strand", "exon_blocks", "aa_sequence"]
+        max_idx = max(idx[k] for k in need)
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) <= max_idx:
+                continue
+            rec = make_record(
+                rec_id=parts[idx["orf_id"]],
+                chrom=parts[idx["chrom"]],
+                strand=parts[idx["strand"]],
+                blocks=parse_blocks(parts[idx["exon_blocks"]]),
+                aa=parts[idx["aa_sequence"]],
+                class_label="",
+            )
+            if rec is not None:
+                records.append(rec)
+    return records
+
+
+def load_sorf_records(xlsx_path: Path) -> tuple[list[ORFRec], pd.DataFrame]:
+    records = []
+    sheet_rows = []
+    xl = pd.ExcelFile(xlsx_path)
+    sheet_to_class = {
+        "upstream ORFs (uORFs)": "uORF",
+        "downstream ORFs (dORFs)": "dORF",
+        "lncRNA-derived smORFs": "lncRNA",
+    }
+    for sheet in xl.sheet_names:
+        df = pd.read_excel(xlsx_path, sheet_name=sheet, dtype=str)
+        if "GenomePos" not in df.columns:
+            df = pd.read_excel(xlsx_path, sheet_name=sheet, header=1, dtype=str)
+        if "GenomePos" not in df.columns:
+            sheet_rows.append({"sheet": sheet, "n_valid_orfs": 0})
+            continue
+
+        n_sheet = 0
+        for _, row in df.iterrows():
+            m = GENOMEPOS_RE.match(str(row.get("GenomePos", "")))
+            if not m:
+                continue
+            chrom = normalize_chrom(m.group(1))
+            strand = m.group(4)
+            blocks = parse_blocks(row.get("Blocks", ""))
+            if not blocks:
+                s, e = int(m.group(2)), int(m.group(3))
+                if e < s:
+                    s, e = e, s
+                blocks = [(s, e)]
+            rec = make_record(
+                rec_id=str(row.get("orf_name", "")),
+                chrom=chrom,
+                strand=strand,
+                blocks=blocks,
+                aa=str(row.get("AASeq", "")),
+                class_label=sheet_to_class.get(sheet, ""),
+            )
+            if rec is not None:
+                records.append(rec)
+                n_sheet += 1
+        sheet_rows.append({"sheet": sheet, "n_valid_orfs": n_sheet})
+    return records, pd.DataFrame(sheet_rows)
+
+
+def map_gencode_biotype_to_scope_class(orf_biotype: str) -> str:
+    b = (orf_biotype or "").strip()
+    if b in {"uORF", "uoORF"}:
+        return "uORF"
+    if b in {"dORF", "doORF"}:
+        return "dORF"
+    if b == "lncRNA":
+        return "lncRNA"
+    return ""
+
+
+def parse_starts_ends_to_blocks(starts_text: str, ends_text: str) -> list[tuple[int, int]]:
+    starts = [x for x in re.split(r"[;,]", str(starts_text).strip()) if x]
+    ends = [x for x in re.split(r"[;,]", str(ends_text).strip()) if x]
+    n = min(len(starts), len(ends))
+    blocks = []
+    for i in range(n):
+        try:
+            s = int(starts[i])
+            e = int(ends[i])
+        except ValueError:
+            continue
+        if e < s:
+            s, e = e, s
+        blocks.append((s, e))
+    return sorted(blocks, key=lambda x: (x[0], x[1]))
+
+
+def parse_int_safe(text: str, default: int = 0) -> int:
+    try:
+        return int(float(str(text).strip()))
+    except Exception:
+        return default
+
+
+def is_annotated_transcript(trans_field: str) -> bool:
+    tokens = [x.strip() for x in re.split(r"[;,]", str(trans_field)) if x.strip()]
+    return any(t.startswith("ENSMUST") for t in tokens)
+
+
+ARTICLE_FILTER_ORDER = [
+    "aug_start_proxy",
+    "in_frame_stop",
+    "annotated_transcript",
+    "length_ge_18nt",
+    "expression_above_bg_proxy",
+    "active_translation_proxy",
+]
+
+
+def evaluate_article_like_flags(parts: list[str], idx: dict[str, int]) -> dict[str, bool]:
+    pep = str(parts[idx["pep"]]).strip().upper()
+    orf_len = parse_int_safe(parts[idx["orf_length"]], 0) if "orf_length" in idx else 0
+    n_datasets = parse_int_safe(parts[idx["n_datasets"]], 0) if "n_datasets" in idx else 0
+    trans = str(parts[idx["trans"]]) if "trans" in idx else ""
+    return {
+        "aug_start_proxy": pep.startswith("M"),
+        "in_frame_stop": pep.endswith("*") and pep.count("*") == 1,
+        "annotated_transcript": is_annotated_transcript(trans),
+        "length_ge_18nt": orf_len >= 18,
+        "expression_above_bg_proxy": n_datasets >= 1,
+        "active_translation_proxy": n_datasets >= 1,
+    }
+
+
+def load_gencode_out_records(
+    path: Path,
+    restrict_scope: bool = False,
+    apply_article_like_filters: bool = False,
+) -> tuple[list[ORFRec], dict]:
+    records = []
+    summary = defaultdict(int)
+    with path.open("r", encoding="utf-8") as f:
+        header = f.readline().rstrip("\n").split("\t")
+        idx = {name: i for i, name in enumerate(header)}
+        need = ["orf_id", "chrm", "starts", "ends", "strand", "orf_biotype", "pep", "trans", "orf_length", "n_datasets"]
+        max_idx = max(idx[k] for k in need)
+
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) <= max_idx:
+                continue
+            summary["input_total"] += 1
+
+            class_label = map_gencode_biotype_to_scope_class(parts[idx["orf_biotype"]])
+            if restrict_scope and not class_label:
+                continue
+            summary["in_scope_total"] += 1
+
+            flags = evaluate_article_like_flags(parts, idx)
+            alive = True
+            for key in ARTICLE_FILTER_ORDER:
+                summary[f"pass_{key}_independent"] += int(flags[key])
+                if alive and flags[key]:
+                    summary[f"after_{key}"] += 1
+                else:
+                    alive = False
+                    summary[f"fail_{key}"] += int(not flags[key])
+
+            if apply_article_like_filters and not all(flags[k] for k in ARTICLE_FILTER_ORDER):
+                continue
+
+            rec = make_record(
+                rec_id=parts[idx["orf_id"]],
+                chrom=parts[idx["chrm"]],
+                strand=parts[idx["strand"]],
+                blocks=parse_starts_ends_to_blocks(parts[idx["starts"]], parts[idx["ends"]]),
+                aa=parts[idx["pep"]],
+                class_label=class_label,
+            )
+            if rec is not None:
+                records.append(rec)
+                summary["final_kept_records"] += 1
+    return records, dict(summary)
+```
+
+## 3. 索引与比较函数
+
+```{python}
+def build_interval_index(pred_records: list[ORFRec]):
+    grouped = defaultdict(list)
+    for r in pred_records:
+        grouped[(r.chrom, r.strand)].append(r)
+
+    out = {}
+    for key, recs in grouped.items():
+        recs_asc = sorted(recs, key=lambda x: (x.span_start, x.span_end))
+        starts_asc = [r.span_start for r in recs_asc]
+        prefix_max_end = []
+        prefix_max_rec = []
+        cur_end = -1
+        cur_rec = None
+        for r in recs_asc:
+            if r.span_end > cur_end:
+                cur_end = r.span_end
+                cur_rec = r
+            prefix_max_end.append(cur_end)
+            prefix_max_rec.append(cur_rec)
+
+        recs_desc = sorted(recs, key=lambda x: (x.span_start, x.span_end), reverse=True)
+        neg_starts_asc = [-r.span_start for r in recs_desc]
+        prefix_min_end_desc = []
+        prefix_min_rec_desc = []
+        cur_min = 10**18
+        cur_min_rec = None
+        for r in recs_desc:
+            if r.span_end < cur_min:
+                cur_min = r.span_end
+                cur_min_rec = r
+            prefix_min_end_desc.append(cur_min)
+            prefix_min_rec_desc.append(cur_min_rec)
+
+        out[key] = {
+            "starts_asc": starts_asc,
+            "prefix_max_end": prefix_max_end,
+            "prefix_max_rec": prefix_max_rec,
+            "neg_starts_asc": neg_starts_asc,
+            "prefix_min_end_desc": prefix_min_end_desc,
+            "prefix_min_rec_desc": prefix_min_rec_desc,
+        }
+    return out
+
+
+def get_pred_contains_record(idx: dict, q_start: int, q_end: int) -> ORFRec | None:
+    starts = idx["starts_asc"]
+    pref_end = idx["prefix_max_end"]
+    pref_rec = idx["prefix_max_rec"]
+    i = bisect.bisect_right(starts, q_start) - 1
+    if i >= 0 and pref_end[i] >= q_end:
+        return pref_rec[i]
+    return None
+
+
+def get_pred_contained_by_record(idx: dict, q_start: int, q_end: int) -> ORFRec | None:
+    neg_starts = idx["neg_starts_asc"]
+    pref_min_end = idx["prefix_min_end_desc"]
+    pref_min_rec = idx["prefix_min_rec_desc"]
+    i = bisect.bisect_right(neg_starts, -q_start) - 1
+    if i >= 0 and pref_min_end[i] <= q_end:
+        return pref_min_rec[i]
+    return None
+
+
+def choose_best_by_codon_distance(s: ORFRec, cands: list[ORFRec]) -> ORFRec:
+    def score(c: ORFRec):
+        ds = abs(c.start_codon - s.start_codon)
+        de = abs(c.stop_codon - s.stop_codon)
+        return (ds + de, ds, de)
+    return min(cands, key=score)
+
+
+def build_detail_row(dataset_label: str, dimension: str, relation: str, paper_rec: ORFRec, pred_rec: ORFRec) -> dict:
+    return {
+        "dataset": dataset_label,
+        "dimension": dimension,
+        "relation": relation,
+        "paper_orf_id": paper_rec.rec_id,
+        "paper_chrom": paper_rec.chrom,
+        "paper_strand": paper_rec.strand,
+        "paper_blocks": paper_rec.blocks_text,
+        "paper_start_codon": paper_rec.start_codon,
+        "paper_stop_codon": paper_rec.stop_codon,
+        "paper_span_start": paper_rec.span_start,
+        "paper_span_end": paper_rec.span_end,
+        "paper_aa_len": len(paper_rec.aa),
+        "pred_orf_id": pred_rec.rec_id,
+        "pred_blocks": pred_rec.blocks_text,
+        "pred_start_codon": pred_rec.start_codon,
+        "pred_stop_codon": pred_rec.stop_codon,
+        "pred_span_start": pred_rec.span_start,
+        "pred_span_end": pred_rec.span_end,
+        "pred_aa_len": len(pred_rec.aa),
+        "delta_start_nt": abs(pred_rec.start_codon - paper_rec.start_codon),
+        "delta_stop_nt": abs(pred_rec.stop_codon - paper_rec.stop_codon),
+    }
+
+
+def summarize_full(sorf_records: list[ORFRec], pred_records: list[ORFRec], dataset_label: str):
+    aa_only_set = {r.aa for r in pred_records}
+    seq_key_to_records = defaultdict(list)
+    for r in pred_records:
+        seq_key_to_records[(r.chrom, r.strand, r.aa)].append(r)
+
+    coord_exact_set = {(r.chrom, r.strand, r.blocks_text) for r in pred_records}
+    codon_set = {(r.chrom, r.strand, r.start_codon, r.stop_codon) for r in pred_records}
+    interval_index = build_interval_index(pred_records)
+
+    seq_stats = defaultdict(int)
+    coord_stats = defaultdict(int)
+    detail_rows = []
+    paper_total = len(sorf_records)
+
+    for s in sorf_records:
+        # sequence dimension
+        if s.aa in aa_only_set:
+            seq_stats["seq_exact_aa_only"] += 1
+
+        cands = seq_key_to_records.get((s.chrom, s.strand, s.aa), [])
+        if cands:
+            seq_stats["seq_exact_aa_chr_strand"] += 1
+
+            has_exact_coord = any(c.blocks_text == s.blocks_text for c in cands)
+            if has_exact_coord:
+                seq_stats["seq_exact_coord"] += 1
+
+            has_tol = any(
+                abs(c.start_codon - s.start_codon) <= 3 and abs(c.stop_codon - s.stop_codon) <= 3
+                for c in cands
+            )
+            if has_tol:
+                seq_stats["seq_1codon_tolerant"] += 1
+            if has_tol and not has_exact_coord:
+                seq_stats["seq_1codon_tolerant_non_exact"] += 1
+
+            contains_cands = [c for c in cands if c.span_start <= s.span_start and c.span_end >= s.span_end]
+            contained_cands = [c for c in cands if c.span_start >= s.span_start and c.span_end <= s.span_end]
+
+            if contains_cands:
+                seq_stats["seq_pred_contains_paper"] += 1
+                best = choose_best_by_codon_distance(s, contains_cands)
+                detail_rows.append(build_detail_row(dataset_label, "sequence", "pred_contains_paper", s, best))
+
+            if contained_cands:
+                seq_stats["seq_pred_contained_by_paper"] += 1
+                best = choose_best_by_codon_distance(s, contained_cands)
+                detail_rows.append(build_detail_row(dataset_label, "sequence", "pred_contained_by_paper", s, best))
+
+            if contains_cands or contained_cands:
+                seq_stats["seq_contains_or_contained"] += 1
+        else:
+            seq_stats["seq_no_match"] += 1
+
+        # coordinate dimension
+        if (s.chrom, s.strand, s.blocks_text) in coord_exact_set:
+            coord_stats["coord_exact_blocks"] += 1
+
+        has_coord_tol = False
+        for ds in range(-3, 4):
+            if has_coord_tol:
+                break
+            for de in range(-3, 4):
+                if (s.chrom, s.strand, s.start_codon + ds, s.stop_codon + de) in codon_set:
+                    has_coord_tol = True
+                    break
+        if has_coord_tol:
+            coord_stats["coord_1codon_tolerant"] += 1
+        if has_coord_tol and (s.chrom, s.strand, s.blocks_text) not in coord_exact_set:
+            coord_stats["coord_1codon_tolerant_non_exact"] += 1
+
+        idx = interval_index.get((s.chrom, s.strand))
+        if idx is not None:
+            pred_contains = get_pred_contains_record(idx, s.span_start, s.span_end)
+            pred_contained = get_pred_contained_by_record(idx, s.span_start, s.span_end)
+            if pred_contains is not None:
+                coord_stats["coord_pred_contains_paper"] += 1
+                detail_rows.append(build_detail_row(dataset_label, "coordinate", "pred_contains_paper", s, pred_contains))
+            if pred_contained is not None:
+                coord_stats["coord_pred_contained_by_paper"] += 1
+                detail_rows.append(build_detail_row(dataset_label, "coordinate", "pred_contained_by_paper", s, pred_contained))
+            if pred_contains is not None or pred_contained is not None:
+                coord_stats["coord_contains_or_contained"] += 1
+
+    seq_row = {
+        "dataset": dataset_label,
+        "paper_total": paper_total,
+        "pred_total": len(pred_records),
+        "seq_exact_aa_only": seq_stats["seq_exact_aa_only"],
+        "seq_exact_aa_chr_strand": seq_stats["seq_exact_aa_chr_strand"],
+        "seq_exact_coord": seq_stats["seq_exact_coord"],
+        "seq_1codon_tolerant": seq_stats["seq_1codon_tolerant"],
+        "seq_1codon_tolerant_non_exact": seq_stats["seq_1codon_tolerant_non_exact"],
+        "seq_pred_contains_paper": seq_stats["seq_pred_contains_paper"],
+        "seq_pred_contained_by_paper": seq_stats["seq_pred_contained_by_paper"],
+        "seq_contains_or_contained": seq_stats["seq_contains_or_contained"],
+        "seq_no_match": seq_stats["seq_no_match"],
+        "seq_1codon_tolerant_rate": round(seq_stats["seq_1codon_tolerant"] / paper_total, 6) if paper_total else 0.0,
+    }
+
+    coord_row = {
+        "dataset": dataset_label,
+        "paper_total": paper_total,
+        "pred_total": len(pred_records),
+        "coord_exact_blocks": coord_stats["coord_exact_blocks"],
+        "coord_1codon_tolerant": coord_stats["coord_1codon_tolerant"],
+        "coord_1codon_tolerant_non_exact": coord_stats["coord_1codon_tolerant_non_exact"],
+        "coord_pred_contains_paper": coord_stats["coord_pred_contains_paper"],
+        "coord_pred_contained_by_paper": coord_stats["coord_pred_contained_by_paper"],
+        "coord_contains_or_contained": coord_stats["coord_contains_or_contained"],
+        "coord_1codon_tolerant_rate": round(coord_stats["coord_1codon_tolerant"] / paper_total, 6) if paper_total else 0.0,
+    }
+    detail_df = pd.DataFrame(detail_rows).drop_duplicates()
+    return seq_row, coord_row, detail_df
+
+
+def aggregate_rows(rows: list[dict], dataset_label: str, kind: str) -> dict:
+    if not rows:
+        return {"dataset": dataset_label}
+    out = {"dataset": dataset_label}
+    for k in rows[0].keys():
+        if k == "dataset":
+            continue
+        v0 = rows[0][k]
+        if isinstance(v0, (int, float)):
+            out[k] = sum(float(r[k]) for r in rows)
+    if kind == "seq":
+        out["seq_1codon_tolerant_rate"] = round(out["seq_1codon_tolerant"] / out["paper_total"], 6) if out["paper_total"] else 0.0
+    if kind == "coord":
+        out["coord_1codon_tolerant_rate"] = round(out["coord_1codon_tolerant"] / out["paper_total"], 6) if out["paper_total"] else 0.0
+    return out
+
+
+def summarize_scoped(sorf_records: list[ORFRec], pred_records: list[ORFRec], dataset_label: str):
+    classes = ["uORF", "dORF", "lncRNA"]
+    seq_rows = []
+    coord_rows = []
+    details = []
+
+    for cls in classes:
+        s_cls = [r for r in sorf_records if r.class_label == cls]
+        p_cls = [r for r in pred_records if r.class_label == cls]
+        seq_row, coord_row, detail_df = summarize_full(s_cls, p_cls, f"{dataset_label}:{cls}")
+        seq_row["scope_class"] = cls
+        coord_row["scope_class"] = cls
+        if not detail_df.empty:
+            detail_df["scope_class"] = cls
+        seq_rows.append(seq_row)
+        coord_rows.append(coord_row)
+        details.append(detail_df)
+
+    seq_overall = aggregate_rows([{k: v for k, v in r.items() if k != "scope_class"} for r in seq_rows], f"{dataset_label}:scoped_total", "seq")
+    coord_overall = aggregate_rows([{k: v for k, v in r.items() if k != "scope_class"} for r in coord_rows], f"{dataset_label}:scoped_total", "coord")
+    seq_overall["scope_class"] = "ALL"
+    coord_overall["scope_class"] = "ALL"
+
+    seq_df = pd.DataFrame(seq_rows + [seq_overall])
+    coord_df = pd.DataFrame(coord_rows + [coord_overall])
+    detail_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
+    if not detail_df.empty:
+        detail_df = detail_df.drop_duplicates()
+    return seq_df, coord_df, detail_df
+```
+
+## 4. 全量运行
+
+```{python}
+t0 = time.perf_counter()
+sorf_full, sorf_sheet_df = load_sorf_records(SORF_XLSX)
+t1 = time.perf_counter()
+ribotish_full = load_ribotish_records(RIBOTISH_GTF, RIBOTISH_FA)
+t2 = time.perf_counter()
+unify_full = load_unification_records(UNIFIED_META)
+t3 = time.perf_counter()
+ribotish_scoped_pred, ribotish_filter_summary = load_gencode_out_records(
+    RIBOTISH_GENCODE_OUT,
+    restrict_scope=True,
+    apply_article_like_filters=True,
+)
+t4 = time.perf_counter()
+unify_scoped_pred, unify_filter_summary = load_gencode_out_records(
+    UNIFICATION_GENCODE_OUT,
+    restrict_scope=True,
+    apply_article_like_filters=True,
+)
+t5 = time.perf_counter()
+
+runtime_df = pd.DataFrame(
+    [
+        {"stage": "load_sORF_full", "seconds": round(t1 - t0, 3)},
+        {"stage": "load_ribotish_full", "seconds": round(t2 - t1, 3)},
+        {"stage": "load_unification_full", "seconds": round(t3 - t2, 3)},
+        {"stage": "load_ribotish_scoped_gencode_out", "seconds": round(t4 - t3, 3)},
+        {"stage": "load_unification_scoped_gencode_out", "seconds": round(t5 - t4, 3)},
+        {"stage": "total_load", "seconds": round(t5 - t0, 3)},
+    ]
+)
+
+t6 = time.perf_counter()
+seq_ribo, coord_ribo, detail_ribo_df = summarize_full(sorf_full, ribotish_full, "ribotish+gencode")
+seq_uni, coord_uni, detail_uni_df = summarize_full(sorf_full, unify_full, "unification+gencode")
+t7 = time.perf_counter()
+scoped_seq_ribo_df, scoped_coord_ribo_df, scoped_detail_ribo_df = summarize_scoped(sorf_full, ribotish_scoped_pred, "ribotish+gencode")
+scoped_seq_uni_df, scoped_coord_uni_df, scoped_detail_uni_df = summarize_scoped(sorf_full, unify_scoped_pred, "unification+gencode")
+t8 = time.perf_counter()
+runtime_df.loc[len(runtime_df)] = {"stage": "full_compare_background", "seconds": round(t7 - t6, 3)}
+runtime_df.loc[len(runtime_df)] = {"stage": "full_compare_scoped", "seconds": round(t8 - t7, 3)}
+runtime_df
+```
+
+### 4.1 文章同风格过滤（scoped 候选通过情况）
+
+```{python}
+article_like_filter_summary_df = pd.DataFrame(
+    [
+        {"dataset": "ribotish+gencode", **ribotish_filter_summary},
+        {"dataset": "unification+gencode", **unify_filter_summary},
+    ]
+).fillna(0)
+
+article_like_filter_key_df = article_like_filter_summary_df[
+    [
+        "dataset",
+        "input_total",
+        "in_scope_total",
+        "after_aug_start_proxy",
+        "after_in_frame_stop",
+        "after_annotated_transcript",
+        "after_length_ge_18nt",
+        "after_expression_above_bg_proxy",
+        "after_active_translation_proxy",
+        "final_kept_records",
+    ]
+].copy()
+article_like_filter_key_df
+```
+
+## 5. 关键统计（按你的问题口径）
+
+### 5.1 推荐口径：同范畴（uORF/dORF/lncRNA）+ 文章同风格过滤后比较
+
+```{python}
+scoped_sequence_stats_df = pd.concat([scoped_seq_ribo_df, scoped_seq_uni_df], ignore_index=True)
+scoped_coordinate_stats_df = pd.concat([scoped_coord_ribo_df, scoped_coord_uni_df], ignore_index=True)
+scoped_key_metrics_df = pd.DataFrame(
+    [
+        {
+            "dataset": "ribotish+gencode:scoped_total",
+            "paper_total": int(scoped_seq_ribo_df.loc[scoped_seq_ribo_df["scope_class"] == "ALL", "paper_total"].iloc[0]),
+            "sequence_exact_match": int(scoped_seq_ribo_df.loc[scoped_seq_ribo_df["scope_class"] == "ALL", "seq_exact_aa_chr_strand"].iloc[0]),
+            "sequence_1codon_tolerant": int(scoped_seq_ribo_df.loc[scoped_seq_ribo_df["scope_class"] == "ALL", "seq_1codon_tolerant"].iloc[0]),
+            "sequence_contains_or_contained": int(scoped_seq_ribo_df.loc[scoped_seq_ribo_df["scope_class"] == "ALL", "seq_contains_or_contained"].iloc[0]),
+            "coordinate_exact_match": int(scoped_coord_ribo_df.loc[scoped_coord_ribo_df["scope_class"] == "ALL", "coord_exact_blocks"].iloc[0]),
+            "coordinate_1codon_tolerant": int(scoped_coord_ribo_df.loc[scoped_coord_ribo_df["scope_class"] == "ALL", "coord_1codon_tolerant"].iloc[0]),
+            "coordinate_contains_or_contained": int(scoped_coord_ribo_df.loc[scoped_coord_ribo_df["scope_class"] == "ALL", "coord_contains_or_contained"].iloc[0]),
+        },
+        {
+            "dataset": "unification+gencode:scoped_total",
+            "paper_total": int(scoped_seq_uni_df.loc[scoped_seq_uni_df["scope_class"] == "ALL", "paper_total"].iloc[0]),
+            "sequence_exact_match": int(scoped_seq_uni_df.loc[scoped_seq_uni_df["scope_class"] == "ALL", "seq_exact_aa_chr_strand"].iloc[0]),
+            "sequence_1codon_tolerant": int(scoped_seq_uni_df.loc[scoped_seq_uni_df["scope_class"] == "ALL", "seq_1codon_tolerant"].iloc[0]),
+            "sequence_contains_or_contained": int(scoped_seq_uni_df.loc[scoped_seq_uni_df["scope_class"] == "ALL", "seq_contains_or_contained"].iloc[0]),
+            "coordinate_exact_match": int(scoped_coord_uni_df.loc[scoped_coord_uni_df["scope_class"] == "ALL", "coord_exact_blocks"].iloc[0]),
+            "coordinate_1codon_tolerant": int(scoped_coord_uni_df.loc[scoped_coord_uni_df["scope_class"] == "ALL", "coord_1codon_tolerant"].iloc[0]),
+            "coordinate_contains_or_contained": int(scoped_coord_uni_df.loc[scoped_coord_uni_df["scope_class"] == "ALL", "coord_contains_or_contained"].iloc[0]),
+        },
+    ]
+)
+scoped_key_metrics_df
+```
+
+```{python}
+scoped_sequence_stats_df
+```
+
+```{python}
+scoped_coordinate_stats_df
+```
+
+### 5.2 全量背景：序列维度
+
+```{python}
+sequence_stats_df = pd.DataFrame([seq_ribo, seq_uni])
+sequence_stats_df
+```
+
+### 5.3 全量背景：坐标维度
+
+```{python}
+coordinate_stats_df = pd.DataFrame([coord_ribo, coord_uni])
+coordinate_stats_df
+```
+
+### 5.4 全量背景汇总表（便于快速阅读）
+
+```{python}
+key_metrics_df = pd.DataFrame(
+    [
+        {
+            "dataset": seq_ribo["dataset"],
+            "paper_total": seq_ribo["paper_total"],
+            "sequence_exact_match": seq_ribo["seq_exact_aa_chr_strand"],
+            "sequence_1codon_tolerant": seq_ribo["seq_1codon_tolerant"],
+            "sequence_contains_or_contained": seq_ribo["seq_contains_or_contained"],
+            "coordinate_exact_match": coord_ribo["coord_exact_blocks"],
+            "coordinate_1codon_tolerant": coord_ribo["coord_1codon_tolerant"],
+            "coordinate_contains_or_contained": coord_ribo["coord_contains_or_contained"],
+        },
+        {
+            "dataset": seq_uni["dataset"],
+            "paper_total": seq_uni["paper_total"],
+            "sequence_exact_match": seq_uni["seq_exact_aa_chr_strand"],
+            "sequence_1codon_tolerant": seq_uni["seq_1codon_tolerant"],
+            "sequence_contains_or_contained": seq_uni["seq_contains_or_contained"],
+            "coordinate_exact_match": coord_uni["coord_exact_blocks"],
+            "coordinate_1codon_tolerant": coord_uni["coord_1codon_tolerant"],
+            "coordinate_contains_or_contained": coord_uni["coord_contains_or_contained"],
+        },
+    ]
+)
+key_metrics_df
+```
+
+### 5.5 包含/被包含配对明细统计（全量）
+
+```{python}
+containment_detail_summary_df = pd.concat([detail_ribo_df, detail_uni_df], ignore_index=True)
+containment_detail_summary_df.groupby(["dataset", "dimension", "relation"], as_index=False).size()
+```
+
+### 5.6 包含/被包含配对明细统计（同范畴）
+
+```{python}
+scoped_containment_detail_summary_df = pd.concat([scoped_detail_ribo_df, scoped_detail_uni_df], ignore_index=True)
+scoped_containment_detail_summary_df.groupby(["dataset", "dimension", "relation", "scope_class"], as_index=False).size()
+```
+
+## 6. 结果导出
+
+```{python}
+key_csv = OUTPUT_DIR / "mouse_tissue_sorf_comparison_key_metrics_full.csv"
+seq_csv = OUTPUT_DIR / "mouse_tissue_sorf_comparison_sequence_stats_full.csv"
+coord_csv = OUTPUT_DIR / "mouse_tissue_sorf_comparison_coordinate_stats_full.csv"
+scoped_key_csv = OUTPUT_DIR / "mouse_tissue_sorf_comparison_key_metrics_scoped.csv"
+scoped_seq_csv = OUTPUT_DIR / "mouse_tissue_sorf_comparison_sequence_stats_scoped.csv"
+scoped_coord_csv = OUTPUT_DIR / "mouse_tissue_sorf_comparison_coordinate_stats_scoped.csv"
+detail_ribo_csv = OUTPUT_DIR / "mouse_tissue_sorf_containment_details_ribotish_gencode_full.csv"
+detail_uni_csv = OUTPUT_DIR / "mouse_tissue_sorf_containment_details_unification_gencode_full.csv"
+detail_summary_csv = OUTPUT_DIR / "mouse_tissue_sorf_containment_details_summary_full.csv"
+scoped_detail_ribo_csv = OUTPUT_DIR / "mouse_tissue_sorf_containment_details_ribotish_gencode_scoped.csv"
+scoped_detail_uni_csv = OUTPUT_DIR / "mouse_tissue_sorf_containment_details_unification_gencode_scoped.csv"
+scoped_detail_summary_csv = OUTPUT_DIR / "mouse_tissue_sorf_containment_details_summary_scoped.csv"
+article_filter_summary_csv = OUTPUT_DIR / "mouse_tissue_article_like_filter_summary.csv"
+sheet_csv = OUTPUT_DIR / "mouse_tissue_sorf_sheet_summary.csv"
+runtime_csv = OUTPUT_DIR / "mouse_tissue_sorf_full_runtime.csv"
+
+key_metrics_df.to_csv(key_csv, index=False)
+sequence_stats_df.to_csv(seq_csv, index=False)
+coordinate_stats_df.to_csv(coord_csv, index=False)
+scoped_key_metrics_df.to_csv(scoped_key_csv, index=False)
+scoped_sequence_stats_df.to_csv(scoped_seq_csv, index=False)
+scoped_coordinate_stats_df.to_csv(scoped_coord_csv, index=False)
+detail_ribo_df.to_csv(detail_ribo_csv, index=False)
+detail_uni_df.to_csv(detail_uni_csv, index=False)
+containment_detail_summary_df.groupby(["dataset", "dimension", "relation"], as_index=False).size().to_csv(detail_summary_csv, index=False)
+scoped_detail_ribo_df.to_csv(scoped_detail_ribo_csv, index=False)
+scoped_detail_uni_df.to_csv(scoped_detail_uni_csv, index=False)
+scoped_containment_detail_summary_df.groupby(["dataset", "dimension", "relation", "scope_class"], as_index=False).size().to_csv(scoped_detail_summary_csv, index=False)
+article_like_filter_summary_df.to_csv(article_filter_summary_csv, index=False)
+sorf_sheet_df.to_csv(sheet_csv, index=False)
+runtime_df.to_csv(runtime_csv, index=False)
+
+pd.DataFrame(
+    [
+        {"file": str(key_csv)},
+        {"file": str(seq_csv)},
+        {"file": str(coord_csv)},
+        {"file": str(scoped_key_csv)},
+        {"file": str(scoped_seq_csv)},
+        {"file": str(scoped_coord_csv)},
+        {"file": str(detail_ribo_csv)},
+        {"file": str(detail_uni_csv)},
+        {"file": str(detail_summary_csv)},
+        {"file": str(scoped_detail_ribo_csv)},
+        {"file": str(scoped_detail_uni_csv)},
+        {"file": str(scoped_detail_summary_csv)},
+        {"file": str(article_filter_summary_csv)},
+        {"file": str(sheet_csv)},
+        {"file": str(runtime_csv)},
+    ]
+)
+```

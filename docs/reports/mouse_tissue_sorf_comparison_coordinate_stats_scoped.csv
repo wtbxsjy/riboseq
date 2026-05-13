@@ -1,0 +1,9 @@
+dataset,paper_total,pred_total,coord_exact_blocks,coord_1codon_tolerant,coord_1codon_tolerant_non_exact,coord_pred_contains_paper,coord_pred_contained_by_paper,coord_contains_or_contained,coord_1codon_tolerant_rate,scope_class
+ribotish+gencode:uORF,6702.0,7468.0,0.0,4115.0,4115.0,589.0,4223.0,4473.0,0.613996,uORF
+ribotish+gencode:dORF,830.0,5380.0,0.0,602.0,602.0,40.0,604.0,629.0,0.725301,dORF
+ribotish+gencode:lncRNA,2023.0,40468.0,0.0,1499.0,1499.0,268.0,1564.0,1651.0,0.740979,lncRNA
+ribotish+gencode:scoped_total,9555.0,53316.0,0.0,6216.0,6216.0,897.0,6391.0,6753.0,0.650549,ALL
+unification+gencode:uORF,6702.0,7540.0,0.0,3915.0,3915.0,622.0,4016.0,4357.0,0.584154,uORF
+unification+gencode:dORF,830.0,5216.0,0.0,574.0,574.0,40.0,575.0,605.0,0.691566,dORF
+unification+gencode:lncRNA,2023.0,32756.0,0.0,1422.0,1422.0,284.0,1481.0,1634.0,0.702916,lncRNA
+unification+gencode:scoped_total,9555.0,45512.0,0.0,5911.0,5911.0,946.0,6072.0,6596.0,0.618629,ALL

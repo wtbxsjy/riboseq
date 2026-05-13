@@ -1,0 +1,9 @@
+dataset,paper_total,pred_total,seq_exact_aa_only,seq_exact_aa_chr_strand,seq_exact_coord,seq_1codon_tolerant,seq_1codon_tolerant_non_exact,seq_pred_contains_paper,seq_pred_contained_by_paper,seq_contains_or_contained,seq_no_match,seq_1codon_tolerant_rate,scope_class
+ribotish+gencode:uORF,6702.0,7468.0,4109.0,4109.0,0.0,4107.0,4107.0,1.0,4108.0,4109.0,2593.0,0.612802,uORF
+ribotish+gencode:dORF,830.0,5380.0,601.0,601.0,0.0,601.0,601.0,0.0,599.0,599.0,229.0,0.724096,dORF
+ribotish+gencode:lncRNA,2023.0,40468.0,1494.0,1494.0,0.0,1494.0,1494.0,3.0,1490.0,1493.0,529.0,0.738507,lncRNA
+ribotish+gencode:scoped_total,9555.0,53316.0,6204.0,6204.0,0.0,6202.0,6202.0,4.0,6197.0,6201.0,3351.0,0.649084,ALL
+unification+gencode:uORF,6702.0,7540.0,3910.0,3910.0,0.0,3909.0,3909.0,1.0,3909.0,3910.0,2792.0,0.583259,uORF
+unification+gencode:dORF,830.0,5216.0,573.0,573.0,0.0,573.0,573.0,0.0,571.0,571.0,257.0,0.690361,dORF
+unification+gencode:lncRNA,2023.0,32756.0,1419.0,1419.0,0.0,1419.0,1419.0,2.0,1416.0,1418.0,604.0,0.701434,lncRNA
+unification+gencode:scoped_total,9555.0,45512.0,5902.0,5902.0,0.0,5901.0,5901.0,3.0,5896.0,5899.0,3653.0,0.617582,ALL

@@ -1,0 +1,9 @@
+stage,seconds
+load_sORF_full,3.71
+load_ribotish_full,1.574
+load_unification_full,14.057
+load_ribotish_scoped_gencode_out,2.426
+load_unification_scoped_gencode_out,2.779
+total_load,24.546
+full_compare_background,3.635
+full_compare_scoped,0.568

@@ -170,7 +170,7 @@ def main():
     
     try:
         with open(args.output_csv, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=headers)
+            writer = csv.DictWriter(csvfile, fieldnames=headers, extrasaction='ignore')
             writer.writeheader()
             for row in csv_rows:
                 writer.writerow(row)

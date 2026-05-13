@@ -8,6 +8,7 @@
 
 1. **`quantify_orfs_from_psites.R`** - 从RiboseQC的P-site bedgraph重新定量统一的GENCODE ORFs
 2. **`analyze_tool_comparison.R`** - 多工具方法学比较分析
+3. **`extract_unified_orf_sample_pn.R`** - 基于 `unified_orfs.bed` + RiboseQC bedgraph 计算每个 ORF 在每个样品中的 long-format pN
 
 ## 依赖包安装
 
@@ -104,6 +105,24 @@ Rscript analyze_tool_comparison.R \
   --outdir tool_comparison_results \
   --min-samples 10 \
   --min-tools 2
+```
+
+### 附加：导出每样品每 ORF 的 pN（long format）
+
+当你需要 `sample, orf_id, p_sites, pN` 这样的长表（而不是按样品汇总）时，可直接运行：
+
+```bash
+Rscript extract_unified_orf_sample_pn.R \
+  --unified-bed results/orf_unification/unified_orfs.bed \
+  --bedgraph-dir results/riboseq_qc/riboseqc/postfilter \
+  --sample-pattern "^(.+)_P_sites_(plus|minus)\\.bedgraph$" \
+  --output orf_sample_pN.long.tsv
+```
+
+若要按 unique P-site 计算，可将 `--sample-pattern` 改为：
+
+```bash
+"^(.+)_P_sites_uniq_(plus|minus)\\.bedgraph$"
 ```
 
 #### 参数说明

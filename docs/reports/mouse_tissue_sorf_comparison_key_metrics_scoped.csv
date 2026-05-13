@@ -1,0 +1,3 @@
+dataset,paper_total,sequence_exact_match,sequence_1codon_tolerant,sequence_contains_or_contained,coordinate_exact_match,coordinate_1codon_tolerant,coordinate_contains_or_contained
+ribotish+gencode:scoped_total,9555,6204,6202,6201,0,6216,6753
+unification+gencode:scoped_total,9555,5902,5901,5899,0,5911,6596

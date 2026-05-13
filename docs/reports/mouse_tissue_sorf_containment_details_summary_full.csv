@@ -1,0 +1,9 @@
+dataset,dimension,relation,size
+ribotish+gencode,coordinate,pred_contained_by_paper,6704
+ribotish+gencode,coordinate,pred_contains_paper,1182
+ribotish+gencode,sequence,pred_contained_by_paper,6453
+ribotish+gencode,sequence,pred_contains_paper,5
+unification+gencode,coordinate,pred_contained_by_paper,8568
+unification+gencode,coordinate,pred_contains_paper,4538
+unification+gencode,sequence,pred_contained_by_paper,8517
+unification+gencode,sequence,pred_contains_paper,7
