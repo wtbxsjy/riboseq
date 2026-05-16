@@ -1,0 +1,83 @@
+process RIBOWALTZ {
+    tag "$meta.id"
+    label 'process_medium'
+
+    conda "${moduleDir}/environment.yml"
+    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+        'oras://community.wave.seqera.io/library/ribowaltz_bioconductor-genomicfeatures_r-data.table:latest' :
+        'community.wave.seqera.io/library/ribowaltz_bioconductor-genomicfeatures_r-data.table:latest' }"
+
+    input:
+    tuple val(meta), path(bam), path(bai)
+    path gtf
+    path fasta
+
+    output:
+    tuple val(meta), path("*_psite_offset.tsv")       , emit: psite_offset
+    tuple val(meta), path("*_psite_offset.txt")       , emit: psite_offset_txt
+    tuple val(meta), path("*_cds_coverage.tsv")       , emit: cds_coverage, optional: true
+    tuple val(meta), path("*_codon_usage.tsv")        , emit: codon_usage, optional: true
+    tuple val(meta), path("*_frame_distribution.tsv") , emit: frame_distribution, optional: true
+    tuple val(meta), path("*_region_distribution.tsv"), emit: region_distribution, optional: true
+    tuple val(meta), path("*_ribowaltz_plots")        , emit: plots
+    path "versions.yml"                               , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    def read_lengths = params.ribowaltz_read_lengths ?: [28, 29, 30]
+    // Convert Groovy list to R vector string: [28, 29, 30] -> "c(28, 29, 30)"
+    def read_lengths_r = "c(${read_lengths.join(', ')})"
+    """
+    #!/bin/bash
+    set -euo pipefail
+
+    # Install riboWaltz if not already available
+    cat <<'INSTALL_SCRIPT' > install_ribowaltz.R
+    if (!requireNamespace("riboWaltz", quietly = TRUE)) {
+        cat("Installing riboWaltz...\\n")
+        # riboWaltz is available on GitHub or as local source
+        if (file.exists("${workflow.projectDir}/patched_packages/riboWaltz")) {
+            install.packages("${workflow.projectDir}/patched_packages/riboWaltz",
+                repos = NULL, type = "source")
+        } else {
+            # Try installing from Bioconductor/CRAN alternative
+            if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+            remotes::install_github("LabTranslationalArchitectomics/riboWaltz", upgrade = "never")
+        }
+    }
+    cat("riboWaltz version:", as.character(packageVersion("riboWaltz")), "\\n")
+INSTALL_SCRIPT
+
+    # Run installation
+    Rscript install_ribowaltz.R
+
+    # Run main analysis
+    cat <<'RSCRIPT' > script.R
+    ${template('run_ribowaltz.R')}
+RSCRIPT
+
+    Rscript script.R
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    touch ${prefix}_psite_offset.tsv
+    touch ${prefix}_psite_offset.txt
+    touch ${prefix}_cds_coverage.tsv
+    touch ${prefix}_codon_usage.tsv
+    touch ${prefix}_frame_distribution.tsv
+    touch ${prefix}_region_distribution.tsv
+    mkdir -p ${prefix}_ribowaltz_plots
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ribowaltz: "2.0"
+        r-data.table: "1.14.8"
+        r-ggplot2: "3.4.4"
+    END_VERSIONS
+    """
+}

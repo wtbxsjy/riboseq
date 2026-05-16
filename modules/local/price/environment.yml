@@ -1,0 +1,7 @@
+name: price
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - openjdk=8
+  - r-base=4.0

@@ -784,6 +784,45 @@
                     "description": "Run QC analysis on unfiltered BAMs (with MT reads) for comparison with postfilter results. Increases runtime and storage requirements.",
                     "fa_icon": "fas fa-filter",
                     "help_text": "By default, only postfilter QC (MT-removed BAMs) is performed. Enable this to also run prefilter QC for comparison purposes."
+                },
+                "skip_ribowaltz": {
+                    "type": "boolean",
+                    "description": "Skip riboWaltz P-site offset calculation and QC analysis.",
+                    "fa_icon": "fas fa-fast-forward"
+                },
+                "ribowaltz_read_lengths": {
+                    "type": "string",
+                    "default": "28,29,30",
+                    "description": "Comma-separated list of read lengths to analyze with riboWaltz.",
+                    "fa_icon": "fas fa-ruler"
+                },
+                "skip_price": {
+                    "type": "boolean",
+                    "description": "Skip GEDI PRICE ORF detection pipeline.",
+                    "fa_icon": "fas fa-fast-forward"
+                },
+                "skip_te_analysis": {
+                    "type": "boolean",
+                    "description": "Skip translational efficiency (TE) analysis with DESeq2 deltaTE.",
+                    "fa_icon": "fas fa-fast-forward"
+                },
+                "te_lfc_threshold": {
+                    "type": "number",
+                    "default": 0.2630344,
+                    "description": "Log2 fold change threshold for TE classification.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "rna_lfc_threshold": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Log2 fold change threshold for total RNA changes.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "ribo_lfc_threshold": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Log2 fold change threshold for translated mRNA changes.",
+                    "fa_icon": "fas fa-sliders-h"
                 }
             }
         },

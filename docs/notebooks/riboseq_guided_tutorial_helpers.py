@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import sys
 import re
 import shlex
 import subprocess
@@ -41,12 +42,91 @@ def find_repo_root(start: Path | None = None) -> Path:
 
 
 REPO_ROOT = find_repo_root()
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 DEMO_DIR = REPO_ROOT / "test_data" / "tutorial_demo_public_data"
-SCRIPT_PATH = REPO_ROOT / "scripts" / "fetch_public_metadata.py"
+SCRIPT_PATH = SCRIPTS_DIR / "fetch_public_metadata.py"
 OUTPUT_DIR = REPO_ROOT / "tutorial_outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 STATE: dict[str, object] = {}
+
+TUTORIAL_CSS = """
+<style>
+:root {
+  color-scheme: light dark;
+  --rb-card-bg: #ffffff;
+  --rb-page-bg: #f7f9fc;
+  --rb-gradient-start: #f7fbff;
+  --rb-gradient-end: #eef5ff;
+  --rb-intro-start: #fffdf7;
+  --rb-intro-end: #f4f8ff;
+  --rb-text-primary: #1c2f52;
+  --rb-text-heading: #15345b;
+  --rb-text-secondary: #526074;
+  --rb-text-muted: #5b6778;
+  --rb-text-note: #667085;
+  --rb-text-desc: #475467;
+  --rb-text-label: #444444;
+  --rb-text-hint: #666666;
+  --rb-border: #dbe4f0;
+  --rb-border-accent: #ccd7e6;
+  --rb-info: #1f5aa6;
+  --rb-warn: #8a5a00;
+  --rb-error: #a61f2d;
+  --rb-ok: #1d6d2e;
+  --rb-chart-blue: #2f6db5;
+  --rb-chart-orange: #f28e2b;
+  --rb-chart-green: #59a14f;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rb-card-bg: #2d2d2d;
+    --rb-page-bg: #1e1e1e;
+    --rb-gradient-start: #252535;
+    --rb-gradient-end: #222240;
+    --rb-intro-start: #2a2a2a;
+    --rb-intro-end: #252530;
+    --rb-text-primary: #e0e0e0;
+    --rb-text-heading: #c8c8ff;
+    --rb-text-secondary: #b0b0c0;
+    --rb-text-muted: #9999aa;
+    --rb-text-note: #a0a0b0;
+    --rb-text-desc: #b0b0c0;
+    --rb-text-label: #cccccc;
+    --rb-text-hint: #aaaaaa;
+    --rb-border: #404060;
+    --rb-border-accent: #454570;
+    --rb-info: #6ea8fe;
+    --rb-warn: #ffc107;
+    --rb-error: #ea868f;
+    --rb-ok: #75b798;
+    --rb-chart-blue: #6ea8fe;
+    --rb-chart-orange: #ffb347;
+    --rb-chart-green: #75b798;
+  }
+  code {
+    background: var(--rb-gradient-end);
+    color: var(--rb-text-primary);
+  }
+  table.dataframe {
+    color: var(--rb-text-primary);
+    background: transparent;
+  }
+  table.dataframe th {
+    background: var(--rb-gradient-end);
+    color: var(--rb-text-heading);
+  }
+  table.dataframe td {
+    background: transparent;
+  }
+  table.dataframe tr:nth-child(even) td {
+    background: var(--rb-card-bg);
+  }
+}
+</style>
+"""
 
 
 def read_table(path: Path, sep: str = "\t") -> pd.DataFrame:
@@ -78,16 +158,16 @@ def normalize_accessions(raw_text: str) -> list[str]:
 
 
 def render_message(text: str, kind: str = "info") -> None:
-    color = {
-        "info": "#1f5aa6",
-        "warn": "#8a5a00",
-        "error": "#a61f2d",
-        "ok": "#1d6d2e",
-    }.get(kind, "#1f5aa6")
+    color_var = {
+        "info": "var(--rb-info)",
+        "warn": "var(--rb-warn)",
+        "error": "var(--rb-error)",
+        "ok": "var(--rb-ok)",
+    }.get(kind, "var(--rb-info)")
     display(
         HTML(
-            f"<div style='padding:8px 10px;border-left:4px solid {color};"
-            f"background:#f7f9fc;margin:8px 0'>{text}</div>"
+            f"<div style='padding:8px 10px;border-left:4px solid {color_var};"
+            f"background:var(--rb-page-bg);margin:8px 0'>{text}</div>"
         )
     )
 
@@ -107,10 +187,10 @@ def render_cards(cards: list[tuple[str, str, str]]) -> widgets.HTML:
     for title, value, note in cards:
         blocks.append(
             "<div style='flex:1 1 180px;min-width:180px;padding:12px 14px;"
-            "border:1px solid #dbe4f0;border-radius:10px;background:#ffffff'>"
-            f"<div style='font-size:12px;color:#5b6778;text-transform:uppercase;letter-spacing:.04em'>{html.escape(title)}</div>"
-            f"<div style='font-size:24px;font-weight:700;color:#1c2f52;margin-top:4px'>{html.escape(value)}</div>"
-            f"<div style='font-size:12px;color:#667085;margin-top:6px'>{html.escape(note)}</div>"
+            "border:1px solid var(--rb-border);border-radius:10px;background:var(--rb-card-bg)'>"
+            f"<div style='font-size:12px;color:var(--rb-text-muted);text-transform:uppercase;letter-spacing:.04em'>{html.escape(title)}</div>"
+            f"<div style='font-size:24px;font-weight:700;color:var(--rb-text-primary);margin-top:4px'>{html.escape(value)}</div>"
+            f"<div style='font-size:12px;color:var(--rb-text-note);margin-top:6px'>{html.escape(note)}</div>"
             "</div>"
         )
     return widgets.HTML(
@@ -186,10 +266,10 @@ def build_state_summary_html() -> str:
     ]
     card_html = render_cards(cards).value
     return (
-        "<div style='padding:14px 16px;border:1px solid #ccd7e6;border-radius:12px;"
-        "background:linear-gradient(135deg,#f7fbff 0%,#eef5ff 100%);margin:10px 0 18px 0'>"
-        "<div style='font-size:18px;font-weight:700;color:#15345b'>Notebook state / 当前进度</div>"
-        "<div style='font-size:13px;color:#526074;margin-top:4px'>"
+        "<div style='padding:14px 16px;border:1px solid var(--rb-border-accent);border-radius:12px;"
+        "background:linear-gradient(135deg,var(--rb-gradient-start) 0%,var(--rb-gradient-end) 100%);margin:10px 0 18px 0'>"
+        "<div style='font-size:18px;font-weight:700;color:var(--rb-text-heading)'>Notebook state / 当前进度</div>"
+        "<div style='font-size:13px;color:var(--rb-text-secondary);margin-top:4px'>"
         f"Guided outputs default to <code>{html.escape(str(OUTPUT_DIR))}</code>. "
         "Re-running an upstream step will clear downstream cached outputs so the notebook stays consistent."
         "</div>"
@@ -423,9 +503,9 @@ def build_review_widgets(df: pd.DataFrame, refresh_callback: Callable[[], None] 
         header = widgets.HTML(
             value=(
                 f"<b>{row['run_accession']}</b> | <code>{row['sample_title']}</code><br>"
-                f"<span style='color:#444'>strategy={row['library_strategy']} | "
+                f"<span style='color:var(--rb-text-label)'>strategy={row['library_strategy']} | "
                 f"inferred={row['inferred_type']} | suggested_group={row['suggested_group']}</span><br>"
-                f"<span style='color:#666'>type evidence: {row['type_evidence']} | "
+                f"<span style='color:var(--rb-text-hint)'>type evidence: {row['type_evidence']} | "
                 f"group evidence: {row['group_evidence']}</span>"
             )
         )
@@ -646,15 +726,51 @@ def build_nextflow_command(
     return " ".join(shlex.quote(part) for part in cmd)
 
 
+def resolve_geo_accession(geo_acc: str, timeout: int = 30) -> list[str]:
+    """Resolve a GEO accession (GSE/GDS) to SRA run accessions.
+
+    Calls through to ``fetch_public_metadata.resolve_geo_to_sra`` to get SRA
+    study accessions, then queries ENA with each study to enumerate all runs.
+    Returns a flat list of run accessions (SRR/ERR/DRR).
+    """
+    from fetch_public_metadata import resolve_geo_to_sra as _resolve_to_sra
+    from fetch_public_metadata import query_ena
+
+    study_accs = _resolve_to_sra(geo_acc.strip().upper(), timeout)
+    if not study_accs:
+        return []
+
+    runs: list[str] = []
+    for study in study_accs:
+        try:
+            for row in query_ena(study, timeout):
+                run_acc = row.get("run_accession", "")
+                if run_acc and run_acc not in runs:
+                    runs.append(run_acc)
+        except Exception:
+            continue
+    return runs
+
+
 def plot_demo_orf_summary(df: pd.DataFrame) -> None:
     exploded_tools = []
     for cell in df["tools"]:
         exploded_tools.extend([tool.strip() for tool in str(cell).split(",") if tool.strip()])
     tool_counts = pd.Series(exploded_tools).value_counts().sort_values(ascending=False)
+    # Neutral gray tones readable on both light and dark backgrounds
+    NEUTRAL = "#999999"
     plt.figure(figsize=(6, 3.5))
+    ax = plt.gca()
+    ax.set_facecolor("none")
+    plt.gcf().patch.set_alpha(0)
     tool_counts.plot(kind="bar", color=["#2f6db5", "#f28e2b", "#59a14f"])
-    plt.title("Demo ORFs by tool / 示例 ORF 来源工具")
-    plt.ylabel("Count")
+    plt.title("Demo ORFs by tool / \u793a\u4f8b ORF \u6765\u6e90\u5de5\u5177", color=NEUTRAL)
+    plt.ylabel("Count", color=NEUTRAL)
+    for spine in ax.spines.values():
+        spine.set_color(NEUTRAL)
+    ax.tick_params(colors=NEUTRAL)
+    ax.xaxis.label.set_color(NEUTRAL)
+    ax.yaxis.label.set_color(NEUTRAL)
     plt.tight_layout()
     plt.show()
 
@@ -666,25 +782,26 @@ def launch_tutorial() -> None:
             + ", ".join(sorted(set(MISSING_NOTEBOOK_DEPS + ["pandas", "ipywidgets", "matplotlib"])))
         )
 
+    display(HTML(TUTORIAL_CSS))
     render_message(f"Repo root detected at: <code>{REPO_ROOT}</code>", "ok")
     render_message("Run Step 0 to Step 4 in order. The notebook is optimized for teaching, review, and reproducible command generation.", "info")
 
     intro = widgets.HTML(
         value=(
-            "<div style='padding:18px 20px;border:1px solid #dbe4f0;border-radius:14px;"
-            "background:linear-gradient(135deg,#fffdf7 0%,#f4f8ff 100%)'>"
+            "<div style='padding:18px 20px;border:1px solid var(--rb-border);border-radius:14px;"
+            "background:linear-gradient(135deg,var(--rb-intro-start) 0%,var(--rb-intro-end) 100%)'>"
             "<h2 style='margin:0 0 8px 0'>Ribo-seq Guided Tutorial</h2>"
-            "<p style='margin:0 0 12px 0;color:#475467'>"
+            "<p style='margin:0 0 12px 0;color:var(--rb-text-desc)'>"
             "This notebook is a guided launcher for new users: public-data discovery, metadata review, "
             "download preparation, samplesheet generation, Nextflow command assembly, and demo ORF orientation."
             "</p>"
             "<div style='display:flex;flex-wrap:wrap;gap:18px'>"
             "<div style='flex:1 1 240px'><b>What you will produce</b><br>"
-            "<span style='color:#526074'>Reviewed metadata CSV, download shell script, samplesheet CSV, run command.</span></div>"
+            "<span style='color:var(--rb-text-secondary)'>Reviewed metadata CSV, download shell script, samplesheet CSV, run command.</span></div>"
             "<div style='flex:1 1 240px'><b>Recommended rhythm</b><br>"
-            "<span style='color:#526074'>Review first, export second, execute last. The notebook intentionally blocks risky steps when metadata is incomplete.</span></div>"
+            "<span style='color:var(--rb-text-secondary)'>Review first, export second, execute last. The notebook intentionally blocks risky steps when metadata is incomplete.</span></div>"
             "<div style='flex:1 1 240px'><b>Good follow-up reading</b><br>"
-            "<span style='color:#526074'><code>docs/lab_tutorial.md</code>, <code>docs/usage.md</code>, <code>docs/output.md</code></span></div>"
+            "<span style='color:var(--rb-text-secondary)'><code>docs/lab_tutorial.md</code>, <code>docs/usage.md</code>, <code>docs/output.md</code></span></div>"
             "</div></div>"
         )
     )
@@ -700,6 +817,45 @@ def launch_tutorial() -> None:
         description="Accessions",
         layout=widgets.Layout(width="720px", height="120px"),
     )
+    geo_accession_box = widgets.Text(
+        value="",
+        placeholder="e.g. GSE149973",
+        description="GEO",
+        layout=widgets.Layout(width="300px"),
+    )
+    resolve_geo_btn = widgets.Button(description="Resolve GEO", button_style="info")
+    geo_out = widgets.Output()
+
+    def on_resolve_geo(_: widgets.Button) -> None:
+        with geo_out:
+            clear_output()
+            geo_acc = geo_accession_box.value.strip()
+            if not geo_acc:
+                render_message("Please enter a GEO accession (e.g. GSE149973).", "error")
+                return
+            render_message(f"Resolving {geo_acc} to SRA runs via NCBI E-utilities...", "info")
+            try:
+                runs = resolve_geo_accession(geo_acc)
+            except Exception as exc:
+                render_message(f"GEO resolution failed: {exc}", "error")
+                return
+            if not runs:
+                render_message(
+                    f"Could not resolve {geo_acc} to any SRA run accessions. "
+                    "Check that the accession is correct and public.",
+                    "error",
+                )
+                return
+            # Replace accession_box content with resolved runs
+            accession_box.value = "\n".join(runs)
+            render_message(
+                f"Resolved {geo_acc} → {len(runs)} SRA run(s). "
+                "Accessions list has been populated. Review, then click Step 0 to fetch metadata.",
+                "ok",
+            )
+
+    resolve_geo_btn.on_click(on_resolve_geo)
+
     source_dropdown = widgets.Dropdown(
         options=["ena-first", "ncbi-first", "ena-only", "ncbi-only"],
         value="ena-first",
@@ -721,12 +877,12 @@ def launch_tutorial() -> None:
                 layout=widgets.Layout(width="720px"),
             )
             status_text = widgets.HTML(
-                "<span style='color:#1f5aa6'>Preparing metadata query...</span>"
+                "<span style='color:var(--rb-info)'>Preparing metadata query...</span>"
             )
             display(widgets.VBox([status_bar, status_text]))
 
             def update_status(message: str) -> None:
-                status_text.value = f"<span style='color:#1f5aa6'>{message}</span>"
+                status_text.value = f"<span style='color:var(--rb-info)'>{message}</span>"
 
             raw_accessions = [line for line in accession_box.value.splitlines() if line.strip()]
             accessions = normalize_accessions(accession_box.value)
@@ -748,7 +904,7 @@ def launch_tutorial() -> None:
                 df = load_demo_metadata()
                 status_bar.bar_style = "success"
                 status_bar.value = 100
-                status_text.value = "<span style='color:#1d6d2e'>Done. Bundled metadata loaded.</span>"
+                status_text.value = "<span style='color:var(--rb-ok)'>Done. Bundled metadata loaded.</span>"
                 render_message("Loaded bundled demo metadata from test_data/tutorial_demo_public_data/.", "ok")
             else:
                 prefix = OUTPUT_DIR / "notebook_public_metadata"
@@ -757,13 +913,13 @@ def launch_tutorial() -> None:
                     df = run_metadata_query(accessions, source_dropdown.value, prefix, progress_callback=update_status)
                     status_bar.bar_style = "success"
                     status_bar.value = 100
-                    status_text.value = "<span style='color:#1d6d2e'>Done. Metadata query completed.</span>"
+                    status_text.value = "<span style='color:var(--rb-ok)'>Done. Metadata query completed.</span>"
                     render_message("Metadata query completed successfully.", "ok")
                     print(STATE["last_query_cmd"])
                 except Exception as exc:
                     status_bar.bar_style = "danger"
                     status_bar.value = 100
-                    status_text.value = "<span style='color:#a61f2d'>Failed. Check error details below.</span>"
+                    status_text.value = "<span style='color:var(--rb-error)'>Failed. Check error details below.</span>"
                     render_message(str(exc), "error")
                     if STATE.get("last_query_stderr"):
                         print(STATE["last_query_stderr"])
@@ -960,19 +1116,26 @@ def launch_tutorial() -> None:
             intro,
             state_panel,
             widgets.HTML("<h3>Step 0: Find public data</h3>"),
-            widgets.HTML("<p style='color:#526074;margin-top:-6px'>Paste SRR/ERR/DRR/SRP/PRJNA-style accessions. Comments and duplicates are cleaned automatically.</p>"),
+            widgets.HTML(
+                "<p style='color:var(--rb-text-secondary);margin-top:-6px'>"
+                "Paste SRR/ERR/DRR/SRP/PRJNA-style accessions directly, "
+                "or use a GEO accession (GSE/GDS) and click <b>Resolve GEO</b> to populate runs automatically. "
+                "Comments and duplicates are cleaned automatically.</p>"
+            ),
             accession_box,
+            widgets.HBox([geo_accession_box, resolve_geo_btn]),
+            geo_out,
             widgets.HBox([source_dropdown, use_demo_checkbox, query_button]),
             step0_out,
             widgets.HTML("<h3>Step 1: Generate download commands</h3>"),
-            widgets.HTML("<p style='color:#526074;margin-top:-6px'>This step is review-first: preview the manifest, export a script, then run only if you truly want to fetch data from public services.</p>"),
+            widgets.HTML("<p style='color:var(--rb-text-secondary);margin-top:-6px'>This step is review-first: preview the manifest, export a script, then run only if you truly want to fetch data from public services.</p>"),
             widgets.HBox([download_method, download_dir, show_downloads_btn]),
             download_cmd_path,
             export_downloads_btn,
             widgets.HBox([allow_exec, run_download_btn]),
             download_out,
             widgets.HTML("<h3>Step 2: Build samplesheet</h3>"),
-            widgets.HTML("<p style='color:#526074;margin-top:-6px'>The notebook blocks this step when any row is still `unknown`, so that downstream analyses are not silently misconfigured.</p>"),
+            widgets.HTML("<p style='color:var(--rb-text-secondary);margin-top:-6px'>The notebook blocks this step when any row is still `unknown`, so that downstream analyses are not silently misconfigured.</p>"),
             widgets.HBox([strandedness_widget, build_samplesheet_btn]),
             samplesheet_path_widget,
             samplesheet_out,
@@ -983,7 +1146,7 @@ def launch_tutorial() -> None:
             build_cmd_btn,
             command_out,
             widgets.HTML("<h3>Step 4: Explore demo outputs</h3>"),
-            widgets.HTML("<p style='color:#526074;margin-top:-6px'>Use the bundled ORF demo to learn what a unified ORF table looks like before you wait for a full pipeline run.</p>"),
+            widgets.HTML("<p style='color:var(--rb-text-secondary);margin-top:-6px'>Use the bundled ORF demo to learn what a unified ORF table looks like before you wait for a full pipeline run.</p>"),
             demo_orfs_btn,
             demo_out,
         ]

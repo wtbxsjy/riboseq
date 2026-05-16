@@ -1,0 +1,6 @@
+name: merge_counts
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - conda-forge::r-base=4.0

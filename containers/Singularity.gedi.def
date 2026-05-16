@@ -1,0 +1,79 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    Author nf-core/riboseq
+    Description GEDI platform with PRICE Ribo-seq ORF detection pipeline
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends \
+        openjdk-8-jdk \
+        maven \
+        git \
+        r-base \
+        python3 \
+        procps \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Set Java 8 as default
+    update-alternatives --set java /usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java
+
+    # Create installation directory
+    mkdir -p /opt/gedi
+
+%files
+    # Copy GEDI source from patched_packages
+    patched_packages/gedi /opt/gedi/source
+
+%post
+    # Build GEDI from source
+    cd /opt/gedi/source/Gedi
+    mvn package -DskipTests -q
+
+    # Create symlinks
+    ln -sf /opt/gedi/source/Gedi/target/*.jar /opt/gedi/gedi.jar
+    ln -sf /opt/gedi/source/Gedi/lib /opt/gedi/lib
+
+    # Create gedi launcher script
+    cat > /usr/local/bin/gedi << 'GEDI_SCRIPT'
+#!/bin/bash
+# GEDI launcher script
+GEDI_HOME="/opt/gedi"
+JAVA_OPTS="-Xmx\${GEDI_MEMORY:-16g} -server -Djava.awt.headless=true"
+
+CP="\$GEDI_HOME/gedi.jar"
+if [ -d "\$GEDI_HOME/lib" ]; then
+    for jar in "\$GEDI_HOME/lib"/*.jar; do
+        CP="\$CP:\$jar"
+    done
+fi
+
+exec java \$JAVA_OPTS -cp "\$CP" gedi.app.Gedi -e "\$@"
+GEDI_SCRIPT
+    chmod +x /usr/local/bin/gedi
+
+%environment
+    export GEDI_HOME="/opt/gedi"
+    export GEDI_MEMORY="16g"
+    export PATH="/opt/gedi:\$PATH"
+
+%runscript
+    exec /usr/local/bin/gedi "$@"
+
+%help
+    GEDI (Genomic Data Integration) platform by the Erhard Lab.
+
+    Key tools for Ribo-seq analysis:
+      - Price: PRICE ORF detection pipeline (16 stages)
+      - PriceAnalyze: Post-PRICE analysis (major isoform, codon profiles)
+      - EstimateRiboModel: EM-based ribosome cleavage model estimation
+      - InferOrfsNew: ORF inference with statistical testing
+      - RiboView: GUI viewer for Ribo-seq results
+      - Bam2CIT: BAM to CIT format conversion
+      - CIT2Bam: CIT to BAM format conversion
+
+    Usage:
+      gedi -e Price [parameters]
+      gedi -e Bam2CIT [parameters]
+      gedi -e InferOrfsNew [parameters]

@@ -22,6 +22,12 @@ include { ORFQUANT           } from '../../subworkflows/local/orfquant'
 include { SORF_BAM_FILTER } from '../../modules/local/sorf_bam_filter'
 // Local module: merge replicate BAMs (same-group samples) before ORF prediction
 include { SAMTOOLS_MERGE_REPLICATES } from '../../modules/local/samtools_merge/main'
+// Local module: riboWaltz P-site analysis and QC
+include { RIBOWALTZ                                         } from '../../modules/local/ribowaltz/main'
+// Local subworkflow: TE analysis (RNA-seq + Ribo-seq integration)
+include { TE_ANALYSIS                                       } from '../../subworkflows/local/te_analysis'
+// Local module: PRICE ORF detection (GEDI platform)
+include { PRICE                                             } from '../../modules/local/price/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -307,6 +313,11 @@ workflow RIBOSEQ {
         }
 
     ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_genome_bam_index)
+
+    // Prepare channels for TE analysis (RNA-seq + Ribo-seq BAMs)
+    ch_rnaseq_bam_bai = ch_genome_bam_by_type.rnaseq.join(ch_genome_bam_index)
+    ch_te_bams = Channel.empty()
+
     // Create fasta+gtf tuple with a meaningful meta id for tools that need it (e.g., ribotricer)
     // Use .first() to convert to a value channel so it broadcasts to all per-sample invocations
     ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> 
@@ -400,6 +411,21 @@ workflow RIBOSEQ {
         log.info "Replicate merging enabled: merged BAMs will be created for each 'group' and run through all ORF prediction tools."
     } else {
         log.info "Replicate merging disabled (set --merge_replicates to enable)."
+    }
+
+    //
+    // Prepare TE analysis input channel: combine RNA-seq + Ribo-seq BAMs
+    // RNA-seq BAMs use unfiltered data; Ribo-seq BAMs use filtered data (post-sORF filter)
+    //
+    if (!params.skip_te_analysis && params.contrasts) {
+        // Ribo-seq BAMs for TE: use postfilter BAMs (stripping filter_status for consistent meta)
+        ch_riboseq_te_bams = ch_bams_for_postfilter
+            .map { meta, bam, bai ->
+                def te_meta = meta.clone()
+                te_meta.sample_type = 'riboseq'
+                [ te_meta, bam, bai ]
+            }
+        ch_te_bams = ch_rnaseq_bam_bai.mix(ch_riboseq_te_bams)
     }
 
     if (!params.skip_ribotish){
@@ -545,6 +571,20 @@ workflow RIBOSEQ {
     }
 
     //
+    // PRICE: GEDI-based ORF detection pipeline (Erhard Lab)
+    //
+    ch_price_gtf = Channel.empty()
+    if (!params.skip_price) {
+        PRICE(
+            ch_bams_for_sorf_prediction,
+            ch_fasta,
+            ch_gtf
+        )
+        ch_versions = ch_versions.mix(PRICE.out.versions)
+        ch_price_gtf = PRICE.out.gtf
+    }
+
+    //
     // RiboseQC: Comprehensive quality control for Ribo-seq data
     //
     ch_riboseqc_annotation = Channel.empty()
@@ -577,6 +617,26 @@ workflow RIBOSEQ {
     }
 
     //
+    // riboWaltz: P-site offset calculation and QC analysis
+    // Complementary to RiboseQC; provides metagene profiles, codon usage, CDS coverage
+    //
+    if (!params.skip_ribowaltz) {
+        RIBOWALTZ(
+            ch_bams_for_postfilter,
+            ch_gtf,
+            ch_fasta
+        )
+        ch_versions = ch_versions.mix(RIBOWALTZ.out.versions)
+        // Feed QC outputs to MultiQC-compatible collection
+        ch_multiqc_files = ch_multiqc_files.mix(
+            RIBOWALTZ.out.psite_offset.map { meta, f -> f },
+            RIBOWALTZ.out.cds_coverage.map { meta, f -> f }.ifEmpty(Channel.empty()),
+            RIBOWALTZ.out.codon_usage.map { meta, f -> f }.ifEmpty(Channel.empty()),
+            RIBOWALTZ.out.frame_distribution.map { meta, f -> f }.ifEmpty(Channel.empty())
+        )
+    }
+
+    //
     // ORFquant: ORF detection and quantification using RiboseQC output
     // Requires RiboseQC to generate the *_for_ORFquant input files
     //
@@ -604,7 +664,7 @@ workflow RIBOSEQ {
     ch_unify_bed      = Channel.empty()
     ch_unify_gtf      = Channel.empty()
 
-    def has_unify_inputs = (!params.skip_ribotish) || (!params.skip_ribotricer) || can_run_ribocode || (!params.skip_orfquant && !params.skip_riboseqc)
+    def has_unify_inputs = (!params.skip_ribotish) || (!params.skip_ribotricer) || can_run_ribocode || (!params.skip_orfquant && !params.skip_riboseqc) || (!params.skip_price)
 
     if (!params.skip_unify_orf_predictions) {
         if (!has_unify_inputs) {
@@ -619,6 +679,8 @@ workflow RIBOSEQ {
             ch_ribocode_list = (can_run_ribocode ? ch_ribocode_gtf.map { meta, file -> file }.collect() : Channel.value([]))
                 .map { it ?: [] }
             ch_orfquant_list = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
+                .map { it ?: [] }
+            ch_price_list = (params.skip_price ? Channel.value([]) : ch_price_gtf.map { meta, file -> file }.collect())
                 .map { it ?: [] }
 
             // Collect RiboseQC P-site bedgraph files for unified P-site statistics
@@ -639,35 +701,52 @@ workflow RIBOSEQ {
                     .collect()
                     .map { it ?: [] }
 
-            // Combine three channels with robust handling for nested or flat structures
+            // Combine five channels with robust handling for nested or flat structures
             ch_unify_inputs = ch_ribotish_list
                 .combine(ch_ribotricer_list)
                 .combine(ch_ribocode_list)
                 .combine(ch_orfquant_list)
+                .combine(ch_price_list)
                 .map { combined ->
                     def ribotish_files = []
                     def ribotricer_files = []
                     def ribocode_files = []
                     def orfquant_files = []
+                    def price_files = []
 
-                    if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List && combined[0].size() == 2 && combined[0][0] instanceof List) {
-                        // Nested structure from chained combine: [[[ribotish, ribotricer], ribocode], orfquant]
-                        ribotish_files = combined[0][0][0]
-                        ribotricer_files = combined[0][0][1]
-                        ribocode_files = combined[0][1]
-                        orfquant_files = combined[1]
-                    } else if (combined instanceof List && combined.size() == 4) {
-                        // Flat structure: [ribotish_files, ribotricer_files, ribocode_files, orfquant_files]
+                    if (combined instanceof List && combined.size() == 2 && combined[0] instanceof List && combined[0].size() == 2 && combined[0][0] instanceof List && combined[0][0].size() == 2 && combined[0][0][0] instanceof List) {
+                        // 5-level nested: [[[[ribotish, ribotricer], ribocode], orfquant], price]
+                        ribotish_files = combined[0][0][0][0]
+                        ribotricer_files = combined[0][0][0][1]
+                        ribocode_files = combined[0][0][1]
+                        orfquant_files = combined[0][1]
+                        price_files = combined[1]
+                    } else if (combined instanceof List && combined.size() == 5) {
+                        // Flat 5-element structure
                         ribotish_files = combined[0]
                         ribotricer_files = combined[1]
                         ribocode_files = combined[2]
                         orfquant_files = combined[3]
+                        price_files = combined[4]
+                    } else if (combined instanceof List && combined.size() == 4) {
+                        // Flat 4-element (no price)
+                        ribotish_files = combined[0]
+                        ribotricer_files = combined[1]
+                        ribocode_files = combined[2]
+                        orfquant_files = combined[3]
+                    } else if (combined instanceof List && combined[0] instanceof List && combined[0].size() == 2 && combined[0][0] instanceof List) {
+                        // 4-level nested: [[[ribotish, ribotricer], ribocode], orfquant]
+                        ribotish_files = combined[0][0][0]
+                        ribotricer_files = combined[0][0][1]
+                        ribocode_files = combined[0][1]
+                        orfquant_files = combined[1]
                     } else if (combined instanceof List) {
                         // Flat list of files - split by tool-specific suffix
                         ribotish_files = combined.findAll { it.getName().endsWith('_pred.txt') }
                         ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
                         ribocode_files = combined.findAll { it.getName().endsWith('.gtf') && !it.getName().endsWith('_Detected_ORFs.gtf') }
-                        orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') }
+                        orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') && !it.getName().contains('PRICE') }
+                        price_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') && it.getName().contains('PRICE') || it.getName().endsWith('.orfs.tsv') }
                     } else {
                         ribotish_files = combined
                     }
@@ -676,17 +755,20 @@ workflow RIBOSEQ {
                     def ribotricer_list = ribotricer_files instanceof List ? ribotricer_files : (ribotricer_files ? [ribotricer_files] : [])
                     def ribocode_list = ribocode_files instanceof List ? ribocode_files : (ribocode_files ? [ribocode_files] : [])
                     def orfquant_list = orfquant_files instanceof List ? orfquant_files : (orfquant_files ? [orfquant_files] : [])
+                    def price_list = price_files instanceof List ? price_files : (price_files ? [price_files] : [])
 
                     def all_files = []
                     all_files.addAll(ribotish_list)
                     all_files.addAll(ribotricer_list)
                     all_files.addAll(ribocode_list)
                     all_files.addAll(orfquant_list)
+                    all_files.addAll(price_list)
                     def ribotish_names = ribotish_list.collect{ it.getName() }
                     def ribotricer_names = ribotricer_list.collect{ it.getName() }
                     def ribocode_names = ribocode_list.collect{ it.getName() }
                     def orfquant_names = orfquant_list.collect{ it.getName() }
-                    [ ribotish_names, ribotricer_names, ribocode_names, orfquant_names, all_files ]
+                    def price_names = price_list.collect{ it.getName() }
+                    [ ribotish_names, ribotricer_names, ribocode_names, orfquant_names, price_names, all_files ]
                 }
 
             UNIFY_ORF_PREDICTIONS(
@@ -963,6 +1045,44 @@ workflow RIBOSEQ {
                 orftype_outdir
             )
             ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORF_TYPE.out.versions)
+        }
+    }
+
+    //
+    // Translational Efficiency (TE) Analysis
+    // Integrates RNA-seq and Ribo-seq data to detect differentially translated genes
+    //
+    if (!params.skip_te_analysis && params.contrasts) {
+        // Parse contrasts CSV file
+        def contrasts_file = file(params.contrasts, checkIfExists: true)
+        ch_contrasts = Channel.fromPath(params.contrasts, checkIfExists: true)
+            .splitCsv(header: true)
+            .map { row ->
+                def contrast_meta = [id: row.id]
+                [ contrast_meta, row.variable, row.reference, row.target ]
+            }
+
+        // Get unified ORFs BED for quantification annotation
+        def ch_unified_bed_for_te = params.skip_unify_orf_predictions ?
+            Channel.empty() :
+            ch_unify_bed.map { meta, f -> f }.first()
+
+        if (ch_unified_bed_for_te) {
+            TE_ANALYSIS(
+                ch_te_bams,
+                ch_unified_bed_for_te,
+                ch_contrasts,
+                ch_gtf
+            )
+            ch_versions = ch_versions.mix(TE_ANALYSIS.out.versions)
+
+            // Feed TE outputs to MultiQC
+            ch_multiqc_files = ch_multiqc_files.mix(
+                TE_ANALYSIS.out.te_results.map { meta, f -> f },
+                TE_ANALYSIS.out.te_genes.map { meta, f -> f }
+            )
+        } else {
+            log.warn "TE analysis requires unified ORF BED annotation. Run with --skip_unify_orf_predictions=false."
         }
     }
 

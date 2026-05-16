@@ -1,0 +1,36 @@
+name: "merge_counts"
+description: "Merge per-sample featureCounts outputs into a combined count matrix for DESeq2 TE analysis"
+keywords:
+  - count matrix
+  - featureCounts
+  - merge
+tools:
+  - "R":
+      description: "R statistical computing environment"
+      homepage: "https://www.r-project.org/"
+      licence: "GPL-2.0"
+input:
+  - count_files:
+      type: file
+      description: featureCounts output files (*_counts.tsv)
+      pattern: "*_counts.tsv"
+  - sample_sheet_csv:
+      type: file
+      description: CSV sample sheet with sample, type, treatment columns
+output:
+  - counts:
+      type: file
+      description: Merged count matrix (genes x samples)
+      pattern: "merged_counts.tsv"
+  - sample_sheet:
+      type: file
+      description: Copied sample sheet for DESeq2 input
+      pattern: "sample_sheet.csv"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+authors:
+  - "@renzhe"
+maintainers:
+  - "@renzhe"

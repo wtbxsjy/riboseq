@@ -1,0 +1,54 @@
+name: "deseq2_deltate"
+description: "DESeq2 deltaTE analysis for differential translational efficiency from paired Ribo-seq and RNA-seq data"
+keywords:
+  - riboseq
+  - rnaseq
+  - translational efficiency
+  - differential translation
+  - deseq2
+tools:
+  - "deseq2":
+      description: "Differential gene expression analysis based on the negative binomial distribution"
+      homepage: "https://bioconductor.org/packages/release/bioc/html/DESeq2.html"
+      doi: "10.1186/s13059-014-0550-8"
+      licence: "LGPL-3.0"
+  - "apeglm":
+      description: "Approximate posterior estimation for GLM coefficients"
+      homepage: "https://bioconductor.org/packages/release/bioc/html/apeglm.html"
+      doi: "10.1093/bioinformatics/bty895"
+      licence: "GPL-2.0"
+input:
+  - meta:
+      type: map
+      description: Groovy Map containing contrast information [ id, contrast_variable, reference, target ]
+  - samplesheet:
+      type: file
+      description: CSV samplesheet with sample, type, treatment columns
+  - counts:
+      type: file
+      description: Count matrix (genes x samples) TSV file
+output:
+  - translation:
+      type: file
+      description: DESeq2 results for TE interaction term
+      pattern: "*.translation.deltate.results.tsv"
+  - translated_mrna:
+      type: file
+      description: DESeq2 results for translated mRNA (Ribo-seq)
+      pattern: "*.translated_mRNA.deltate.results.tsv"
+  - total_mrna:
+      type: file
+      description: DESeq2 results for total mRNA (RNA-seq)
+      pattern: "*.total_mRNA.deltate.results.tsv"
+  - fold_change_plot:
+      type: file
+      description: Fold change scatter plot (Ribo-seq vs RNA-seq log2FC)
+      pattern: "*.fold_change.png"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+authors:
+  - "@renzhe"
+maintainers:
+  - "@renzhe"

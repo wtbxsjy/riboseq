@@ -1,0 +1,56 @@
+name: "price"
+description: "PRICE (ProRibo-sEq) ORF detection pipeline from the GEDI platform (Erhard Lab)"
+keywords:
+  - riboseq
+  - orf prediction
+  - price
+  - gedi
+  - translation
+tools:
+  - "gedi":
+      description: "Genomic Data Integration platform for Ribo-seq analysis"
+      homepage: "https://github.com/erhard-lab/gedi"
+      doi: "10.1038/s41592-019-0401-2"
+      licence: "GPL-3.0"
+  - "price":
+      description: "PRICE pipeline for detecting actively translated ORFs from Ribo-seq data"
+      homepage: "https://github.com/erhard-lab/gedi"
+      doi: "10.1038/s41592-019-0401-2"
+      licence: "GPL-3.0"
+input:
+  - meta:
+      type: map
+      description: Groovy Map containing sample information [ id, sample_type ]
+  - bam:
+      type: file
+      description: BAM file from ribosome profiling alignment
+      pattern: "*.bam"
+  - bai:
+      type: file
+      description: BAM index file
+      pattern: "*.bai"
+  - fasta:
+      type: file
+      description: Genome FASTA file
+      pattern: "*.fasta"
+  - gtf:
+      type: file
+      description: GTF annotation file
+      pattern: "*.gtf"
+output:
+  - gtf:
+      type: file
+      description: PRICE-detected ORFs in GTF format for unification pipeline
+      pattern: "*_Detected_ORFs.gtf"
+  - orfs_tsv:
+      type: file
+      description: Raw PRICE ORF table
+      pattern: "*.orfs.tsv"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+authors:
+  - "@renzhe"
+maintainers:
+  - "@renzhe"

@@ -1,0 +1,56 @@
+name: "ribowaltz"
+description: "riboWaltz P-site offset calculation and Ribo-seq QC analysis"
+keywords:
+  - riboseq
+  - p-site
+  - quality control
+  - metagene
+  - codon usage
+tools:
+  - "ribowaltz":
+      description: "Optimization of ribosome P-site positioning in ribosome profiling data"
+      homepage: "https://github.com/LabTranslationalArchitectomics/riboWaltz"
+      documentation: "https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1006169"
+      doi: "10.1371/journal.pcbi.1006169"
+      licence: "GPL-3.0"
+input:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information, e.g. [ id:'test', sample_type:'riboseq' ]
+  - bam:
+      type: file
+      description: BAM file from ribosome profiling alignment
+      pattern: "*.bam"
+  - bai:
+      type: file
+      description: BAM index file
+      pattern: "*.bai"
+  - gtf:
+      type: file
+      description: GTF annotation file
+      pattern: "*.gtf"
+  - fasta:
+      type: file
+      description: Genome FASTA file
+      pattern: "*.fasta"
+output:
+  - meta:
+      type: map
+      description: Groovy Map containing sample information
+  - psite_offset:
+      type: file
+      description: P-site offset table in TSV format
+      pattern: "*_psite_offset.tsv"
+  - plots:
+      type: directory
+      description: Directory containing QC plots (PDF)
+      pattern: "*_ribowaltz_plots"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+authors:
+  - "@renzhe"
+maintainers:
+  - "@renzhe"

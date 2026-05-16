@@ -1,0 +1,13 @@
+name: ribowaltz
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - bioconda::bioconductor-genomicfeatures=1.54.0
+  - bioconda::bioconductor-rsamtools=2.18.0
+  - bioconda::bioconductor-genomicalignments=1.38.0
+  - bioconda::bioconductor-rtracklayer=1.62.0
+  - conda-forge::r-data.table=1.14.8
+  - conda-forge::r-ggplot2=3.4.4
+  - conda-forge::r-dplyr=1.1.4

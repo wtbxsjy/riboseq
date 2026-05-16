@@ -234,6 +234,81 @@ def fetch_text(url: str, timeout: int) -> str:
         return response.read().decode("utf-8", "replace")
 
 
+GEO_ACCESSION_RE = re.compile(r"^(GSE|GDS)\d+$", re.IGNORECASE)
+
+
+def is_geo_accession(accession: str) -> bool:
+    """Return True if *accession* looks like a GEO Series or DataSet identifier."""
+    return bool(GEO_ACCESSION_RE.match(accession))
+
+
+def resolve_geo_to_sra(accession: str, timeout: int) -> List[str]:
+    """Resolve a GEO accession (GSE/GDS) to SRA study accessions via NCBI E-utilities.
+
+    Uses three-step resolution: esearch → elink → esummary, extracting
+    ``studyacc`` (SRP/ERP/DRP) entries so the caller can re-query ENA for
+    comprehensive run-level metadata including FTP URLs.
+    """
+    # Step 1 – esearch: GEO term → GEO UID list
+    search_url = (
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+        f"?db=gds&term={accession}&retmode=json"
+    )
+    try:
+        search_result = fetch_json(search_url, timeout)
+    except Exception:
+        return []
+    geo_ids = search_result.get("esearchresult", {}).get("idlist", [])
+    if not geo_ids:
+        return []
+
+    # Step 2 – elink: GEO UID → linked SRA UIDs
+    link_url = (
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
+        f"?dbfrom=gds&db=sra&id={','.join(geo_ids)}&retmode=json"
+    )
+    try:
+        link_result = fetch_json(link_url, timeout)
+    except Exception:
+        return []
+    sra_ids: List[str] = []
+    for linkset in link_result.get("linksets", []):
+        for linksetdb in linkset.get("linksetdbs", []):
+            if linksetdb.get("linkname") == "gds_sra":
+                sra_ids.extend(linksetdb.get("links", []))
+
+    if not sra_ids:
+        return []
+
+    # Step 3 – esummary (db=sra): extract study accessions
+    summary_url = (
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+        f"?db=sra&id={','.join(sra_ids)}&retmode=json"
+    )
+    try:
+        summary_result = fetch_json(summary_url, timeout)
+    except Exception:
+        return []
+
+    study_accessions: List[str] = []
+    seen_studies: set = set()
+    for uid, summary in summary_result.get("result", {}).items():
+        if uid == "uids":
+            continue
+        expxml = summary.get("expxml", "")
+        if not expxml:
+            continue
+        # expxml is an XML fragment; extract Study/@acc via regex
+        match = re.search(r'<Study\s+acc="([^"]+)"', expxml)
+        if match:
+            study_acc = match.group(1)
+            if study_acc not in seen_studies:
+                seen_studies.add(study_acc)
+                study_accessions.append(study_acc)
+
+    return study_accessions
+
+
 def accession_query_field(accession: str) -> Optional[Tuple[str, str]]:
     if re.match(r"^(SRR|ERR|DRR)\d+$", accession):
         return "run_accession", accession
@@ -622,11 +697,32 @@ def main() -> int:
     if not requested_formats.issubset({"tsv", "json"}):
         raise SystemExit("Unsupported --format value. Supported values: tsv,json")
 
+    # Expand GEO accessions (GSE/GDS) to SRA study accessions
+    expanded_accessions: List[str] = []
+    warnings: List[str] = []
+    for accession in accessions:
+        if is_geo_accession(accession):
+            sra_studies = resolve_geo_to_sra(accession, args.timeout)
+            if sra_studies:
+                for study in sra_studies:
+                    if study not in expanded_accessions:
+                        expanded_accessions.append(study)
+            else:
+                warnings.append(f"{accession}\tgeo\tCould not resolve GEO accession to SRA study")
+        else:
+            if accession not in expanded_accessions:
+                expanded_accessions.append(accession)
+
+    if not expanded_accessions:
+        if warnings:
+            for w in warnings:
+                print(w, file=sys.stderr)
+        raise SystemExit("No accessions to query after GEO expansion.")
+
     raw_rows: List[dict] = []
     curated_rows: List[dict] = []
-    warnings: List[str] = []
 
-    for accession in accessions:
+    for accession in expanded_accessions:
         source_rows: List[dict] = []
         for source in source_order:
             try:

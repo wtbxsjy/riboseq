@@ -1,0 +1,42 @@
+name: "quantify_orfs"
+description: "Quantify ORF expression from BAM files using featureCounts for TE analysis"
+keywords:
+  - quantification
+  - featureCounts
+  - orf
+  - translational efficiency
+tools:
+  - "featureCounts":
+      description: "Read quantification program for counting reads to genomic features"
+      homepage: "https://subread.sourceforge.net/"
+      doi: "10.1093/bioinformatics/btt656"
+      licence: "GPL-3.0"
+input:
+  - meta:
+      type: map
+      description: Groovy Map containing sample information [ id, sample_type ]
+  - bam:
+      type: file
+      description: BAM file
+      pattern: "*.bam"
+  - bai:
+      type: file
+      description: BAM index file
+      pattern: "*.bai"
+  - annotation_bed:
+      type: file
+      description: ORF annotation in BED12 format
+      pattern: "*.bed"
+output:
+  - counts:
+      type: file
+      description: featureCounts count matrix
+      pattern: "*_counts.tsv"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+authors:
+  - "@renzhe"
+maintainers:
+  - "@renzhe"
