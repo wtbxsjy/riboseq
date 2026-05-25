@@ -18,7 +18,7 @@ process ORFQUANT_RUN {
 
     output:
     tuple val(meta), path("*_final_ORFquant_results")  , emit: results
-    tuple val(meta), path("*_Detected_ORFs.gtf")       , emit: gtf, optional: true
+    tuple val(meta), path("*_Detected_ORFs.gtf.gz")   , emit: gtf, optional: true
     tuple val(meta), path("*_Protein_sequences.fasta") , emit: proteins, optional: true
     tuple val(meta), path("*_tmp_ORFquant_results")    , emit: tmp_results, optional: true
     tuple val(meta), path("*_ORFquant_plots_RData")    , emit: plots_data, optional: true
@@ -195,6 +195,11 @@ RSCRIPTEOF
 
     # Run using Rscript
     Rscript run_orfquant.R
+
+    # Compress text outputs to save disk space
+    for f in *_Detected_ORFs.gtf; do
+        [ -f "\$f" ] && gzip -f "\$f" || true
+    done
     """
 
     stub:
@@ -202,6 +207,7 @@ RSCRIPTEOF
     """
     touch ${prefix}_final_ORFquant_results
     touch ${prefix}_Detected_ORFs.gtf
+    gzip -f ${prefix}_Detected_ORFs.gtf
     touch ${prefix}_Protein_sequences.fasta
     touch ${prefix}_tmp_ORFquant_results
     mkdir -p ${prefix}_plots

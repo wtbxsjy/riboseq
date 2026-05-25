@@ -18,8 +18,8 @@ process RIBOCODE_DETECT {
     output:
     tuple val(meta), path("${meta.id}.txt")          , emit: txt
     tuple val(meta), path("${meta.id}_collapsed.txt"), emit: collapsed
-    tuple val(meta), path("${meta.id}.gtf")          , emit: gtf
-    tuple val(meta), path("${meta.id}.bed")          , emit: bed
+    tuple val(meta), path("${meta.id}.gtf.gz")       , emit: gtf
+    tuple val(meta), path("${meta.id}.bed.gz")       , emit: bed
     tuple val(meta), path("${meta.id}*")             , emit: results
     path "versions.yml"                              , emit: versions
 
@@ -99,6 +99,7 @@ PY
         echo -e "ORF_ID\\tORF_type\\ttranscript_id\\tgene_id\\tchrom\\tstrand\\tORF_length\\tORF_gstart\\tORF_gstop\\tpval_combined\\tadjusted_pval" > ${meta.id}.txt
         cp ${meta.id}.txt ${meta.id}_collapsed.txt
         touch ${meta.id}.gtf ${meta.id}_collapsed.gtf ${meta.id}.bed ${meta.id}_collapsed.bed
+        gzip -f ${meta.id}.gtf ${meta.id}_collapsed.gtf ${meta.id}.bed ${meta.id}_collapsed.bed
     }
 
     # Older RiboCode failures can leave only partial output; normalize to an empty
@@ -110,6 +111,11 @@ PY
         cp ${meta.id}.txt ${meta.id}_collapsed.txt
     fi
     touch ${meta.id}.gtf ${meta.id}_collapsed.gtf ${meta.id}.bed ${meta.id}_collapsed.bed
+
+    # Compress text outputs to save disk space
+    for f in ${meta.id}.gtf ${meta.id}_collapsed.gtf ${meta.id}.bed ${meta.id}_collapsed.bed; do
+        [ -f "\$f" ] && gzip -f "\$f" || true
+    done
 
     ribocode_ver="\$(RiboCode_onestep --version 2>&1 | sed 's/^.* //')"
     printf '"%s":\\n    ribocode: "%s"\\n' "${task.process}" "\$ribocode_ver" > versions.yml

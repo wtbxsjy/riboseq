@@ -744,9 +744,9 @@ workflow RIBOSEQ {
                         // Flat list of files - split by tool-specific suffix
                         ribotish_files = combined.findAll { it.getName().endsWith('_pred.txt') }
                         ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
-                        ribocode_files = combined.findAll { it.getName().endsWith('.gtf') && !it.getName().endsWith('_Detected_ORFs.gtf') }
-                        orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') && !it.getName().contains('PRICE') }
-                        price_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') && it.getName().contains('PRICE') || it.getName().endsWith('.orfs.tsv') }
+                        ribocode_files = combined.findAll { it.getName().endsWith('.gtf.gz') && !it.getName().endsWith('_Detected_ORFs.gtf.gz') }
+                        orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf.gz') && !it.getName().contains('PRICE') }
+                        price_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf.gz') && it.getName().contains('PRICE') || it.getName().endsWith('.orfs.tsv') }
                     } else {
                         ribotish_files = combined
                     }
@@ -834,8 +834,8 @@ workflow RIBOSEQ {
                         } else if (combined instanceof List) {
                             ribotish_files  = combined.findAll { it.getName().endsWith('_pred.txt') }
                             ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
-                            ribocode_files  = combined.findAll { it.getName().endsWith('.gtf') && !it.getName().endsWith('_Detected_ORFs.gtf') }
-                            orfquant_files  = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') }
+                            ribocode_files  = combined.findAll { it.getName().endsWith('.gtf.gz') && !it.getName().endsWith('_Detected_ORFs.gtf.gz') }
+                            orfquant_files  = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf.gz') }
                         } else { ribotish_files = combined }
                         def rt  = ribotish_files  instanceof List ? ribotish_files  : (ribotish_files  ? [ribotish_files]  : [])
                         def rtr = ribotricer_files instanceof List ? ribotricer_files : (ribotricer_files ? [ribotricer_files] : [])

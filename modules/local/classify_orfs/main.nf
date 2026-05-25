@@ -28,22 +28,28 @@ process CLASSIFY_ORFS_GENCODE {
     def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     def extra_args = params.extra_orf_classify_args ?: ''
     def orfquant_script = "${class_orf_dir}/run_orfquant_classify.R"
+    def local_bed = "${unified_bed}".replaceAll(/\.gz$/, '')
     """
     set -uo pipefail
 
+    # Decompress any .gz inputs so downstream tools can read them
+    for f in *.gtf.gz *.bed.gz; do
+        [ -f "\$f" ] && gunzip -f "\$f" || true
+    done
+
     # Check if input is a placeholder file
     is_placeholder=false
-    if [ -f "${unified_bed}" ]; then
-        line_count=\$(wc -l < "${unified_bed}" 2>/dev/null || echo "0")
-        if grep -qi "placeholder" "${unified_bed}" 2>/dev/null || \\
-           grep -qi "insufficient" "${unified_bed}" 2>/dev/null || \\
+    if [ -f "\${local_bed}" ]; then
+        line_count=\$(wc -l < "\${local_bed}" 2>/dev/null || echo "0")
+        if grep -qi "placeholder" "\${local_bed}" 2>/dev/null || \\
+           grep -qi "insufficient" "\${local_bed}" 2>/dev/null || \\
            [ "\${line_count}" -le 2 ]; then
             is_placeholder=true
-            echo "INFO: Input file ${unified_bed} detected as placeholder (\${line_count} lines)"
+            echo "INFO: Input file \${local_bed} detected as placeholder (\${line_count} lines)"
         fi
     else
         is_placeholder=true
-        echo "WARNING: Input file ${unified_bed} not found - treating as placeholder"
+        echo "WARNING: Input file \${local_bed} not found - treating as placeholder"
     fi
 
     if [ "\${is_placeholder}" = "true" ]; then
@@ -76,6 +82,11 @@ process CLASSIFY_ORFS_GENCODE {
         fi
     fi
 
+    # Compress text outputs to save disk space
+    for f in gencode_results.orfs.gtf gencode_results.orfs.out; do
+        [ -f "\$f" ] && gzip -f "\$f" || true
+    done
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python3 --version | sed 's/Python //')
@@ -85,7 +96,9 @@ process CLASSIFY_ORFS_GENCODE {
     stub:
     """
     touch gencode_results.orfs.gtf
+    gzip -f gencode_results.orfs.gtf
     touch gencode_results.orfs.out
+    gzip -f gencode_results.orfs.out
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -128,22 +141,28 @@ process CLASSIFY_ORFS_ORFQUANT {
     def output_dir = classify_output_dir ?: (params.orf_classify_output_dir ?: 'orf_classification').tokenize('/').last()
     def extra_args = params.extra_orf_classify_args ?: ''
     def orfquant_script = "${class_orf_dir}/run_orfquant_classify.R"
+    def local_gtf = "${unified_gtf}".replaceAll(/\.gz$/, '')
     """
     set -uo pipefail
 
+    # Decompress any .gz inputs so downstream tools can read them
+    for f in *.gtf.gz *.bed.gz; do
+        [ -f "\$f" ] && gunzip -f "\$f" || true
+    done
+
     # Check if input is a placeholder file
     is_placeholder=false
-    if [ -f "${unified_gtf}" ]; then
-        line_count=\$(wc -l < "${unified_gtf}" 2>/dev/null || echo "0")
-        if grep -qi "placeholder" "${unified_gtf}" 2>/dev/null || \\
-           grep -qi "insufficient" "${unified_gtf}" 2>/dev/null || \\
+    if [ -f "\${local_gtf}" ]; then
+        line_count=\$(wc -l < "\${local_gtf}" 2>/dev/null || echo "0")
+        if grep -qi "placeholder" "\${local_gtf}" 2>/dev/null || \\
+           grep -qi "insufficient" "\${local_gtf}" 2>/dev/null || \\
            [ "\${line_count}" -le 2 ]; then
             is_placeholder=true
-            echo "INFO: Input file ${unified_gtf} detected as placeholder (\${line_count} lines)"
+            echo "INFO: Input file \${local_gtf} detected as placeholder (\${line_count} lines)"
         fi
     else
         is_placeholder=true
-        echo "WARNING: Input file ${unified_gtf} not found - treating as placeholder"
+        echo "WARNING: Input file \${local_gtf} not found - treating as placeholder"
     fi
 
     if [ "\${is_placeholder}" = "true" ]; then
@@ -186,6 +205,11 @@ process CLASSIFY_ORFS_ORFQUANT {
         fi
     fi
 
+    # Compress text outputs to save disk space
+    for f in orfquant_results.orfs.bed orfquant_results.orfs.gtf orfquant_results.orfs.out; do
+        [ -f "\$f" ] && gzip -f "\$f" || true
+    done
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         r-base: \$(Rscript --version 2>&1 | sed -n '1p' | awk '{print \$3}')
@@ -197,6 +221,7 @@ process CLASSIFY_ORFS_ORFQUANT {
     touch orfquant_classification.tsv
     touch orfquant_results.logs orfquant_results.orfs.bed orfquant_results.orfs.gtf
     touch orfquant_results.orfs.fa orfquant_results.orfs.pep.fa orfquant_results.orfs.out
+    gzip -f orfquant_results.orfs.bed orfquant_results.orfs.gtf orfquant_results.orfs.out
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -289,6 +314,11 @@ process CLASSIFY_ORFS_ORF_TYPE {
         fi
     fi
 
+    # Compress text outputs to save disk space
+    for f in orftype_results.orfs.bed orftype_results.orfs.gtf orftype_results.orfs.out; do
+        [ -f "\$f" ] && gzip -f "\$f" || true
+    done
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python3 --version | sed 's/Python //')
@@ -300,6 +330,7 @@ process CLASSIFY_ORFS_ORF_TYPE {
     touch orftype_classification.tsv
     touch orftype_results.logs orftype_results.orfs.bed orftype_results.orfs.gtf
     touch orftype_results.orfs.fa orftype_results.orfs.pep.fa orftype_results.orfs.out
+    gzip -f orftype_results.orfs.bed orftype_results.orfs.gtf orftype_results.orfs.out
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
