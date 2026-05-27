@@ -84,6 +84,7 @@ ENSEMBL_SPECIES_MAP = {
     'maize': 'zea_mays',
     'wheat': 'triticum_aestivum',
     'soybean': 'glycine_max',
+    'arabidopsis': 'arabidopsis_thaliana',
 }
 
 ENSEMBL_DIVISION_MAP = {
@@ -93,6 +94,7 @@ ENSEMBL_DIVISION_MAP = {
     'maize': 'plants',
     'wheat': 'plants',
     'soybean': 'plants',
+    'arabidopsis': 'plants',
 }
 
 DEFAULT_ENSEMBL_RELEASE = {
@@ -107,6 +109,7 @@ DEFAULT_ENSEMBL_ASSEMBLY = {
     'maize':   'Zm-B73-REFERENCE-NAM-5.0',
     'wheat':   'IWGSC',
     'soybean': 'Soybean_JD17',
+    'arabidopsis': 'TAIR10',
 }
 
 
@@ -165,7 +168,7 @@ Examples:
     parser.add_argument('--genome', default='GRCh38',
                         help='Genome name (default: GRCh38). Example: GRCh38/GRCm39/IRGSP-1.0')
     parser.add_argument('--species', default='human',
-                        choices=['human', 'mouse', 'rice', 'maize', 'wheat', 'soybean'],
+                        choices=['human', 'mouse', 'rice', 'maize', 'wheat', 'soybean', 'arabidopsis'],
                         help='Species name (default: human). Choices: human, mouse, rice, maize, wheat, soybean')
 
     # ORF classification Ensembl annotation

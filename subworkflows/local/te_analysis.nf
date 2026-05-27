@@ -61,7 +61,7 @@ workflow TE_ANALYSIS {
     // 3. Merge all count files into matrix
     MERGE_COUNTS(
         ch_sample_sheet.map { ssheet, count_paths -> count_paths }.flatMap(),
-        ch_sample_sheet.map { ssheet, _ -> ssheet }
+        ch_sample_sheet.map { ssheet, _ignored -> ssheet }
     )
     ch_versions = ch_versions.mix(MERGE_COUNTS.out.versions)
 

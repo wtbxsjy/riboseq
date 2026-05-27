@@ -1,7 +1,5 @@
 process UNIFY_ORF_PREDICTIONS {
-    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-
-    tag "${prefix}"
+    tag "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}"
     label 'process_medium'
 
     publishDir "${params.outdir}/orf_unification", mode: params.publish_dir_mode
@@ -33,6 +31,7 @@ process UNIFY_ORF_PREDICTIONS {
     task.ext.when == null || task.ext.when
 
     script:
+    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     def min_len = params.unify_orf_min_len ?: 6
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
     // Advanced merging parameters
@@ -40,21 +39,21 @@ process UNIFY_ORF_PREDICTIONS {
     def no_frame_merge = params.unify_orf_no_frame_merge ? "--no-frame-merge" : ''
     def seq_cluster = params.unify_orf_seq_cluster ? "--seq-cluster" : ''
     // Files are already staged via all_inputs, just need filenames properly quoted
-    def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ? 
+    def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ?
         "--ribotish ${ribotish_files.collect{ "\"${it}\"" }.join(' ')}" : ''
-    def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ? 
+    def ribotricer_arg = (ribotricer_files && ribotricer_files instanceof List && ribotricer_files.size() > 0) ?
         "--ribotricer ${ribotricer_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def ribocode_arg = (ribocode_files && ribocode_files instanceof List && ribocode_files.size() > 0) ?
         "--ribocode ${ribocode_files.collect{ "\"${it}\"" }.join(' ')}" : ''
-    def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ? 
+    def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ?
         "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     // Bedgraph arguments for P-site statistics from RiboseQC
     // psites_bedgraph can be a list or path, check if it has files
-    def has_bedgraph = (psites_bedgraph instanceof List && psites_bedgraph.size() > 0) || 
+    def has_bedgraph = (psites_bedgraph instanceof List && psites_bedgraph.size() > 0) ||
                        (psites_bedgraph && !(psites_bedgraph instanceof List) && psites_bedgraph.name != 'NO_FILE')
     def bedgraph_arg = has_bedgraph ? "--bedgraph-dir bedgraph" : ''
     def sample_arg = (sample_list && sample_list instanceof List && sample_list.size() > 0) ? "--sample-list ${sample_list.join(',')}" : ''
-    
+
     // Generate list of input files for bash to iterate over
     def input_files_list = (all_inputs instanceof List) ? all_inputs.collect{ it.name }.join(' ') : (all_inputs ? all_inputs.name : '')
     """
@@ -230,9 +229,7 @@ process UNIFY_ORF_PREDICTIONS {
 // Outputs per-tool files for each tool that ran, plus a combined exact-dedup set.
 // Use this when skip_unify_orf_predictions = true to enable per-tool classification.
 process UNIFY_ORF_PREDICTIONS_PER_TOOL {
-    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-
-    tag "${prefix}"
+    tag "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}"
     label 'process_medium'
 
     publishDir "${params.outdir}/orf_unification/per_tool", mode: params.publish_dir_mode
@@ -275,6 +272,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     task.ext.when == null || task.ext.when
 
     script:
+    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     def min_len = params.unify_orf_min_len ?: 6
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
     def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ?

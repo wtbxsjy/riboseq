@@ -43,7 +43,8 @@ process STAR_ALIGN {
     prefix = task.ext.prefix ?: "${meta.id}"
     def star_tmp_base = params.star_out_tmpdir ?: ''
     def out_tmpdir_enabled = star_tmp_base && !args.contains('--outTmpDir')
-    def reads1 = [], reads2 = []
+    def reads1 = []
+    def reads2 = []
     meta.single_end ? [reads].flatten().each{reads1 << it} : reads.eachWithIndex{ v, ix -> ( ix & 1 ? reads2 : reads1) << v }
     def ignore_gtf      = star_ignore_sjdbgtf ? '' : "--sjdbGTFfile $gtf"
     def seq_platform    = seq_platform ? "'PL:$seq_platform'" : ""
