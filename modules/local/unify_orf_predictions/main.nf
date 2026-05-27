@@ -1,5 +1,6 @@
 process UNIFY_ORF_PREDICTIONS {
-    tag "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}"
+    prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+    tag "${prefix}"
     label 'process_medium'
 
     publishDir "${params.outdir}/orf_unification", mode: params.publish_dir_mode
@@ -31,7 +32,6 @@ process UNIFY_ORF_PREDICTIONS {
     task.ext.when == null || task.ext.when
 
     script:
-    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     def min_len = params.unify_orf_min_len ?: 6
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
     // Advanced merging parameters
@@ -229,7 +229,8 @@ process UNIFY_ORF_PREDICTIONS {
 // Outputs per-tool files for each tool that ran, plus a combined exact-dedup set.
 // Use this when skip_unify_orf_predictions = true to enable per-tool classification.
 process UNIFY_ORF_PREDICTIONS_PER_TOOL {
-    tag "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}"
+    prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+    tag "${prefix}"
     label 'process_medium'
 
     publishDir "${params.outdir}/orf_unification/per_tool", mode: params.publish_dir_mode
@@ -272,7 +273,6 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     task.ext.when == null || task.ext.when
 
     script:
-    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     def min_len = params.unify_orf_min_len ?: 6
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
     def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ?
