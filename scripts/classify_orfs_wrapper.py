@@ -5,33 +5,43 @@ import os
 import subprocess
 from pathlib import Path
 
+try:
+    from orfont.core.utils import chrom_aliases, CODON_TABLE, translate_nt as _translate_nt
+    def translate_nt(nt_seq): return _translate_nt(nt_seq)
+except ImportError:
+    # Fallback definitions when orfont package is not installed
+    def chrom_aliases(chrom):
+        if not chrom: return []
+        aliases = [chrom]
+        if chrom.startswith("chr"):
+            base = chrom[3:]; aliases.append(base)
+            if base == "M": aliases.append("MT")
+            elif base == "MT": aliases.append("M")
+        else:
+            aliases.append(f"chr{chrom}")
+            if chrom == "MT": aliases.extend(["chrM", "M"])
+            elif chrom == "M": aliases.extend(["chrM", "MT"])
+        out = []; seen = set()
+        for a in aliases:
+            if a and a not in seen: seen.add(a); out.append(a)
+        return out
 
-def chrom_aliases(chrom):
-    if not chrom:
-        return []
-
-    aliases = [chrom]
-    if chrom.startswith("chr"):
-        base = chrom[3:]
-        aliases.append(base)
-        if base == "M":
-            aliases.append("MT")
-        elif base == "MT":
-            aliases.append("M")
-    else:
-        aliases.append(f"chr{chrom}")
-        if chrom == "MT":
-            aliases.extend(["chrM", "M"])
-        elif chrom == "M":
-            aliases.extend(["chrM", "MT"])
-
-    out = []
-    seen = set()
-    for alias in aliases:
-        if alias and alias not in seen:
-            seen.add(alias)
-            out.append(alias)
-    return out
+    CODON_TABLE = {
+        'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L',
+        'ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V',
+        'TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P',
+        'ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A',
+        'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',
+        'AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E',
+        'TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R',
+        'AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G',
+    }
+    def translate_nt(nt_seq):
+        nt_seq = nt_seq.upper().replace('U', 'T')
+        aa = []
+        for i in range(0, len(nt_seq) - 2, 3):
+            codon = nt_seq[i:i+3]; aa.append(CODON_TABLE.get(codon, 'X'))
+        return ''.join(aa)
 
 
 def build_reference_chrom_map(gtf_path):
@@ -78,7 +88,7 @@ def get_script_path(script_name):
     print(f"Error: Could not find script {script_name}", file=sys.stderr)
     sys.exit(1)
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Unified ORF Classifier Wrapper")
     parser.add_argument("--mode", required=True, choices=['gencode', 'orfquant', 'orf_type'], help="Classification mode")
     parser.add_argument("--input", required=True, help="Input file prefix (from unify_orf_predictions.py output) or full path")
@@ -88,8 +98,8 @@ def main():
     parser.add_argument("--ensembl_dir", help="Ensembl directory (Required for gencode mode)")
     parser.add_argument("--gencode_impl", choices=["original", "fast", "indexed_fast"], default="original", help="Implementation to use for gencode mode")
     parser.add_argument("--cpus", type=str, default="1", help="Number of CPUs")
-    
-    args = parser.parse_args()
+
+    args = parser.parse_args(argv)
 
     os.makedirs(args.output_dir, exist_ok=True)
     
@@ -184,34 +194,7 @@ def main():
         # The mapper looks up sequences as orfs_fa["{orf_id}--{study_id}"] and
         # compares them against translated transcript sequences, so the FASTA
         # must contain amino-acid (protein) sequences.
-        # Nucleotide sequences are in the metadata `sequence` column; we
-        # translate in-frame (frame 0) and represent the stop codon as '*'.
-        CODON_TABLE = {
-            'TTT':'F','TTC':'F','TTA':'L','TTG':'L',
-            'CTT':'L','CTC':'L','CTA':'L','CTG':'L',
-            'ATT':'I','ATC':'I','ATA':'I','ATG':'M',
-            'GTT':'V','GTC':'V','GTA':'V','GTG':'V',
-            'TCT':'S','TCC':'S','TCA':'S','TCG':'S',
-            'CCT':'P','CCC':'P','CCA':'P','CCG':'P',
-            'ACT':'T','ACC':'T','ACA':'T','ACG':'T',
-            'GCT':'A','GCC':'A','GCA':'A','GCG':'A',
-            'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*',
-            'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',
-            'AAT':'N','AAC':'N','AAA':'K','AAG':'K',
-            'GAT':'D','GAC':'D','GAA':'E','GAG':'E',
-            'TGT':'C','TGC':'C','TGA':'*','TGG':'W',
-            'CGT':'R','CGC':'R','CGA':'R','CGG':'R',
-            'AGT':'S','AGC':'S','AGA':'R','AGG':'R',
-            'GGT':'G','GGC':'G','GGA':'G','GGG':'G',
-        }
-
-        def translate_nt(nt_seq):
-            nt_seq = nt_seq.upper().replace('U', 'T')
-            aa = []
-            for i in range(0, len(nt_seq) - 2, 3):
-                codon = nt_seq[i:i+3]
-                aa.append(CODON_TABLE.get(codon, 'X'))
-            return ''.join(aa)
+        # Uses canonical translate_nt from orfont.core.utils (or built-in fallback).
 
         if os.path.exists(fasta_file):
             print(f"Using existing protein FASTA (skipping generation): {fasta_file}", file=sys.stderr)
@@ -287,4 +270,4 @@ def main():
         run_command(cmd, "ORFtype Classifier")
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

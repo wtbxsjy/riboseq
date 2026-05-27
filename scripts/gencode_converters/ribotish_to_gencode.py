@@ -367,7 +367,7 @@ def write_gencode_format(orfs, study_id, output_prefix):
 
     return len(orfs)
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description='Convert Ribo-TISH output to gencode-riboseqORFs format'
     )
@@ -379,7 +379,7 @@ def main():
     parser.add_argument('--output_prefix', required=True, help='Output file prefix')
     parser.add_argument('--min_length', type=int, default=16, help='Minimum ORF length in amino acids')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Parse Ribo-TISH predict file
     print(f"Parsing Ribo-TISH predict file: {args.predict}")
@@ -406,4 +406,4 @@ def main():
     print(f"           {args.output_prefix}.gencode.bed")
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])

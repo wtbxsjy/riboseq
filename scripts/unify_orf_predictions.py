@@ -2122,7 +2122,7 @@ def _write_per_tool_outputs(candidates: list, per_tool_prefix: str) -> None:
             print(f"  {canonical}: 0 ORFs (no output files written)", file=sys.stderr)
 
 
-def main():
+def main(argv=None):
     global _shared_gtf_index, _shared_fasta_path
 
     if _BIOPYTHON_IMPORT_ERROR is not None:
@@ -2178,7 +2178,7 @@ def main():
                              "Skips Stage 2b (cross-tool frame-aware merge) and Stage 3 (seq clustering). "
                              "Use this for per-tool classification without cross-tool merging.")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     
     # Build exclude_tistypes set
     exclude_tistypes = set()
@@ -2472,4 +2472,4 @@ def main():
     print(f"Done. Outputs written to {args.output}.*", file=sys.stderr)
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

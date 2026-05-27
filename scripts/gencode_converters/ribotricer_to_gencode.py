@@ -227,7 +227,7 @@ def write_gencode_format(orfs, study_id, output_prefix):
 
     return len(orfs)
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description='Convert Ribotricer output to gencode-riboseqORFs format',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -257,7 +257,7 @@ Examples:
     parser.add_argument('--min_phase_score', type=float, default=0.5,
                        help='Minimum phase score for quality filtering (default: 0.5)')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Parse Ribotricer TSV file
     print(f"Parsing Ribotricer TSV file: {args.tsv}")
@@ -284,4 +284,4 @@ Examples:
     print(f"           {args.output_prefix}.gencode.bed")
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])

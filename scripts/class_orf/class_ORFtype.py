@@ -210,32 +210,34 @@ def process_chunk(chunk_orfs: List[Dict], cds_data: Dict[str, Dict],
 
 # --- 3. Main ---
 
-CODON_TABLE = {
-    'TTT':'F','TTC':'F','TTA':'L','TTG':'L',
-    'CTT':'L','CTC':'L','CTA':'L','CTG':'L',
-    'ATT':'I','ATC':'I','ATA':'I','ATG':'M',
-    'GTT':'V','GTC':'V','GTA':'V','GTG':'V',
-    'TCT':'S','TCC':'S','TCA':'S','TCG':'S',
-    'CCT':'P','CCC':'P','CCA':'P','CCG':'P',
-    'ACT':'T','ACC':'T','ACA':'T','ACG':'T',
-    'GCT':'A','GCC':'A','GCA':'A','GCG':'A',
-    'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*',
-    'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',
-    'AAT':'N','AAC':'N','AAA':'K','AAG':'K',
-    'GAT':'D','GAC':'D','GAA':'E','GAG':'E',
-    'TGT':'C','TGC':'C','TGA':'*','TGG':'W',
-    'CGT':'R','CGC':'R','CGA':'R','CGG':'R',
-    'AGT':'S','AGC':'S','AGA':'R','AGG':'R',
-    'GGT':'G','GGC':'G','GGA':'G','GGG':'G',
-}
-
-def translate_nt(nt_seq: str) -> str:
-    nt_seq = nt_seq.upper().replace('U', 'T')
-    aa = []
-    for i in range(0, len(nt_seq) - 2, 3):
-        codon = nt_seq[i:i+3]
-        aa.append(CODON_TABLE.get(codon, 'X'))
-    return ''.join(aa)
+try:
+    from orfont.core.utils import CODON_TABLE, translate_sequence as translate_nt
+except ImportError:
+    # Fallback when orfont package is not installed
+    CODON_TABLE = {
+        'TTT':'F','TTC':'F','TTA':'L','TTG':'L',
+        'CTT':'L','CTC':'L','CTA':'L','CTG':'L',
+        'ATT':'I','ATC':'I','ATA':'I','ATG':'M',
+        'GTT':'V','GTC':'V','GTA':'V','GTG':'V',
+        'TCT':'S','TCC':'S','TCA':'S','TCG':'S',
+        'CCT':'P','CCC':'P','CCA':'P','CCG':'P',
+        'ACT':'T','ACC':'T','ACA':'T','ACG':'T',
+        'GCT':'A','GCC':'A','GCA':'A','GCG':'A',
+        'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*',
+        'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',
+        'AAT':'N','AAC':'N','AAA':'K','AAG':'K',
+        'GAT':'D','GAC':'D','GAA':'E','GAG':'E',
+        'TGT':'C','TGC':'C','TGA':'*','TGG':'W',
+        'CGT':'R','CGC':'R','CGA':'R','CGG':'R',
+        'AGT':'S','AGC':'S','AGA':'R','AGG':'R',
+        'GGT':'G','GGC':'G','GGA':'G','GGG':'G',
+    }
+    def translate_nt(nt_seq: str) -> str:
+        nt_seq = nt_seq.upper().replace('U', 'T')
+        aa = []
+        for i in range(0, len(nt_seq) - 2, 3):
+            codon = nt_seq[i:i+3]; aa.append(CODON_TABLE.get(codon, 'X'))
+        return ''.join(aa)
 
 
 def write_extra_outputs(orfs: List[Dict], classification_map: Dict[str, str], prefix: str, args) -> None:
@@ -345,7 +347,7 @@ def write_extra_outputs(orfs: List[Dict], classification_map: Dict[str, str], pr
     print(f"Extra outputs written with prefix: {prefix}", file=sys.stderr)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Classify ORFs based on Gene-level CDS overlap (ORFtype)")
     parser.add_argument("--input", required=True, help="Unified Metadata TSV file")
     parser.add_argument("--gtf", required=True, help="Reference GTF file (to build gene CDS)")
@@ -353,8 +355,8 @@ def main():
     parser.add_argument("--output_prefix", default="orftype_results",
                         help="Prefix for extra output files (BED/GTF/FA/logs/out). Default: orftype_results")
     parser.add_argument("--cpus", type=int, default=1, help="Number of CPUs")
-    
-    args = parser.parse_args()
+
+    args = parser.parse_args(argv)
     
     # 1. Load CDS Data and gene biotypes
     cds_data, gene_biotypes = load_gene_level_cds_from_gtf(args.gtf)
@@ -416,4 +418,4 @@ def main():
     print("Done.", file=sys.stderr)
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
