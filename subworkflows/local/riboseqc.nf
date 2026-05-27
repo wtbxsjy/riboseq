@@ -47,27 +47,35 @@ workflow RIBOSEQC {
     // When RiboseQC P_sites_calcs is empty/invalid, falls back to riboWaltz-derived offsets
     //
     if (params.orfquant_psite_correction) {
-        //
-        // Join riboWaltz psite offset with RiboseQC P_sites_calcs by sample ID
-        // Main workflow ensures ch_ribowaltz_psite is never empty (has fallback dummy)
-        //
-        def ch_rw_for_join = ch_ribowaltz_psite
-            .map { meta, f -> tuple(meta.id, meta, f) }
+        // Placeholder file used when riboWaltz offsets are unavailable.
+        // Must exist (Nextflow validates input files) but is never read because use_rw=false.
+        def placeholder = file("${projectDir}/assets/samplesheet.csv")
 
-        def ch_psites_keyed = RIBOSEQC_ANALYSIS.out.psites_calcs
-            .map { meta, f -> tuple(meta.id, meta, f) }
-
-        // Join RiboseQC + riboWaltz by sample ID, with outer join
-        // Unmatched samples get null right side → use hardcoded defaults in extract step
-        ch_rl_inputs = ch_psites_keyed
-            .join(ch_rw_for_join, remainder: true, by: 0)
-            .map { id, meta_qc, psites, meta_rw, rw_file ->
-                def has_rw = (meta_rw != null && meta_rw.id != '_NO_RW_' && rw_file != null)
-                if (!has_rw) {
-                    return tuple(meta_qc, psites, [ id: '_NO_RW_' ], file('NO_FILE'), false)
+        if (params.skip_ribowaltz) {
+            // No riboWaltz: attach dummy fallback to every sample (no join needed)
+            ch_rl_inputs = RIBOSEQC_ANALYSIS.out.psites_calcs
+                .map { meta, psites ->
+                    tuple(meta, psites, [id: '_NO_RW_'], placeholder, false)
                 }
-                return tuple(meta_qc, psites, meta_rw, rw_file, true)
-            }
+        } else {
+            // riboWaltz available: join by sample ID for per-sample offset correction.
+            // Unmatched samples (no riboWaltz data) get placeholder fallback via remainder.
+            def ch_rw_keyed = ch_ribowaltz_psite
+                .map { meta, f -> tuple(meta.id, meta, f) }
+
+            def ch_psites_keyed = RIBOSEQC_ANALYSIS.out.psites_calcs
+                .map { meta, f -> tuple(meta.id, meta, f) }
+
+            ch_rl_inputs = ch_psites_keyed
+                .join(ch_rw_keyed, remainder: true, by: 0)
+                .map { id, meta_qc, psites, meta_rw, rw_file ->
+                    def has_rw = (meta_rw != null && meta_rw.id != '_NO_RW_' && rw_file != null)
+                    if (!has_rw) {
+                        return tuple(meta_qc, psites, [id: '_NO_RW_'], placeholder, false)
+                    }
+                    return tuple(meta_qc, psites, meta_rw, rw_file, true)
+                }
+        }
 
         //
         // Extract read length to P-site offset (cutoff) mapping from RiboseQC results

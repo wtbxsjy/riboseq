@@ -1,0 +1,6 @@
+name: split_bam_by_contig
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconda::samtools=1.21

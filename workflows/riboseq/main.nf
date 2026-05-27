@@ -726,14 +726,6 @@ workflow RIBOSEQ {
         )
     }
 
-    // Sentinel channel: ensures downstream join works even when riboWaltz is skipped.
-    // The dummy file must exist (Nextflow validates inputs) but will never be read
-    // because use_rw=false prevents the R script from accessing it.
-    ch_ribowaltz_fallback = Channel.of(
-        tuple([ id: '_NO_RW_' ], file("${projectDir}/assets/samplesheet.csv"))
-    )
-    ch_ribowaltz_psite = ch_ribowaltz_psite.mix(ch_ribowaltz_fallback)
-
     //
     // RiboseQC: Comprehensive quality control for Ribo-seq data
     //
