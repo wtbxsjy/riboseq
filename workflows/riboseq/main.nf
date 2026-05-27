@@ -900,6 +900,7 @@ workflow RIBOSEQ {
                 ch_gtf,
                 ch_fasta,
                 file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true),
+                file("${workflow.projectDir}/scripts/run_orf.py"),
                 ch_psites_bedgraph,
                 ch_sample_list
             )
@@ -974,6 +975,7 @@ workflow RIBOSEQ {
                     ch_gtf,
                     ch_fasta,
                     file("${workflow.projectDir}/scripts/unify_orf_predictions.py", checkIfExists: true),
+                    file("${workflow.projectDir}/scripts/run_orf.py"),
                     ch_psites_bedgraph_pt,
                     ch_sample_list_pt
                 )

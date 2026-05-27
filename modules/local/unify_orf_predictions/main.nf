@@ -17,6 +17,7 @@ process UNIFY_ORF_PREDICTIONS {
     path gtf
     path fasta
     path unify_script
+    path run_orf_script
     path psites_bedgraph, stageAs: 'bedgraph/*'  // RiboseQC P-site bedgraph files (optional)
     val sample_list       // List of sample names for bedgraph files
 
@@ -81,6 +82,16 @@ process UNIFY_ORF_PREDICTIONS {
     echo "Verifying dependencies..."
     python3 -c "import Bio; import pyfaidx; print('Dependencies OK: Bio=' + Bio.__version__ + ', pyfaidx=' + pyfaidx.__version__)"
 
+    # Optionally install orfont extras (pandas + duckdb) for optimized path
+    if [ -f "${run_orf_script}" ]; then
+        if ! python3 -c "import pandas; import duckdb" 2>/dev/null; then
+            echo "Installing orfont extras (pandas + duckdb)..."
+            pip install --user --no-cache-dir --no-warn-script-location pandas duckdb 2>&1 || \
+                python3 -m pip install --user --no-cache-dir pandas duckdb 2>&1 || \
+                echo "WARNING: Could not install pandas/duckdb - falling back to original path"
+        fi
+    fi
+
     # Decompress any .gz input files so validation tools can read them
     for f in *.gtf.gz *.bed.gz; do
         [ -f "\$f" ] && gunzip -f "\$f" || true
@@ -144,49 +155,72 @@ process UNIFY_ORF_PREDICTIONS {
         echo "WARNING: UNIFY_ORF_PREDICTIONS created placeholder outputs due to insufficient input data"
     else
         set +e
-        python3 ${unify_script} \\
-            --gtf ${gtf} \\
-            --fasta ${fasta} \\
-            --output ${prefix} \\
-            --min_len ${min_len} \\
-            --threads ${task.cpus} \\
-            --frame-merge-min-overlap ${frame_merge_min_overlap} \\
-            ${no_frame_merge} \\
-            ${seq_cluster} \\
-            ${ribotish_arg} \\
-            ${ribotricer_arg} \\
-            ${ribocode_arg} \\
-            ${orfquant_arg} \\
-            ${bedgraph_arg} \\
-            ${sample_arg} \\
-            ${extra_args} 2>&1 | tee unify_orf.log
+
+        # Choose optimized (orfont) or original path
+        if [ -f "${run_orf_script}" ] && python3 -c "import pandas; import duckdb" 2>/dev/null; then
+            echo "Using optimized orfont path (run_orf.py)"
+            python3 ${run_orf_script} unify \\
+                --gtf ${gtf} \\
+                --fasta ${fasta} \\
+                --output ${prefix} \\
+                --min_len ${min_len} \\
+                --threads ${task.cpus} \\
+                --frame-merge-min-overlap ${frame_merge_min_overlap} \\
+                ${no_frame_merge} \\
+                ${seq_cluster} \\
+                ${ribotish_arg} \\
+                ${ribotricer_arg} \\
+                ${ribocode_arg} \\
+                ${orfquant_arg} \\
+                ${bedgraph_arg} \\
+                ${sample_arg} \\
+                ${extra_args} 2>&1 | tee unify_orf.log
+        else
+            echo "Using original unify path"
+            python3 ${unify_script} \\
+                --gtf ${gtf} \\
+                --fasta ${fasta} \\
+                --output ${prefix} \\
+                --min_len ${min_len} \\
+                --threads ${task.cpus} \\
+                --frame-merge-min-overlap ${frame_merge_min_overlap} \\
+                ${no_frame_merge} \\
+                ${seq_cluster} \\
+                ${ribotish_arg} \\
+                ${ribotricer_arg} \\
+                ${ribocode_arg} \\
+                ${orfquant_arg} \\
+                ${bedgraph_arg} \\
+                ${sample_arg} \\
+                ${extra_args} 2>&1 | tee unify_orf.log
+        fi
         EXIT_CODE=\${PIPESTATUS[0]}
         set -e
-        
+
         # Extract statistics from the log and save to stats file
         {
             echo "=== ORF Unification Statistics ==="
             grep -E "^===|^By Tool:|^By Sample:|^Final|^After|^Total|^Note:|^  (ribotish|ribotricer|ribocode|orfquant|RiboCode|[A-Za-z0-9_])" unify_orf.log || true
         } > ${prefix}.stats.txt
-        
+
         if [ \${EXIT_CODE} -ne 0 ]; then
             # Check for recoverable errors (no valid ORFs found, empty results, etc.)
             if grep -qiE "(no valid|no ORFs|zero ORFs|empty|no predictions|0 ORFs)" unify_orf.log || \\
                grep -qiE "(ValueError|KeyError|IndexError).*empty" unify_orf.log || \\
                grep -qiE "(cannot|failed to).*merge|parse" unify_orf.log; then
                 echo "WARNING: UNIFY_ORF_PREDICTIONS failed due to insufficient/invalid ORF data - creating placeholder files"
-                
+
                 # Create placeholder metadata
                 echo "# Placeholder unified ORF metadata - unification failed: insufficient valid ORF predictions" > ${prefix}.metadata.tsv
                 echo -e "orf_id\\torf_name\\torf_type\\tchrom\\tstrand\\tstart\\tend\\tsource\\tgene_id\\ttranscript_id\\torf_length\\tscore\\tsource_count" >> ${prefix}.metadata.tsv
-                
+
                 # Create placeholder BED file
                 echo "# Placeholder unified ORF BED - unification failed: insufficient valid ORF predictions" > ${prefix}.bed
                 echo -e "#chrom\\tchromStart\\tchromEnd\\tname\\tscore\\tstrand\\tthickStart\\tthickEnd\\titemRgb\\tblockCount\\tblockSizes\\tblockStarts" >> ${prefix}.bed
-                
-                # Create placeholder GTF file  
+
+                # Create placeholder GTF file
                 echo "# Placeholder unified ORF GTF - unification failed: insufficient valid ORF predictions" > ${prefix}.gtf
-                
+
                 # Add error note to stats
                 echo "ERROR: ORF unification failed due to insufficient valid ORF data" >> ${prefix}.stats.txt
             else
@@ -205,6 +239,8 @@ process UNIFY_ORF_PREDICTIONS {
         python: \$(python3 --version | sed 's/Python //')
         biopython: \$(python3 -c "import Bio; print(Bio.__version__)" 2>/dev/null || echo "unknown")
         pyfaidx: \$(python3 -c "import pyfaidx; print(pyfaidx.__version__)" 2>/dev/null || echo "unknown")
+        pandas: \$(python3 -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "N/A")
+        duckdb: \$(python3 -c "import duckdb; print(duckdb.__version__)" 2>/dev/null || echo "N/A")
     END_VERSIONS
     """
 
@@ -222,6 +258,8 @@ process UNIFY_ORF_PREDICTIONS {
         python: "3.9.0"
         biopython: "1.81"
         pyfaidx: "0.7"
+        pandas: "N/A"
+        duckdb: "N/A"
     END_VERSIONS
     """
 }
@@ -247,6 +285,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     path gtf
     path fasta
     path unify_script
+    path run_orf_script
     path psites_bedgraph, stageAs: 'bedgraph/*'
     val sample_list
 
@@ -305,6 +344,16 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     fi
     python3 -c "import Bio; import pyfaidx; print('Dependencies OK')"
 
+    # Optionally install orfont extras (pandas + duckdb) for optimized path
+    if [ -f "${run_orf_script}" ]; then
+        if ! python3 -c "import pandas; import duckdb" 2>/dev/null; then
+            echo "Installing orfont extras (pandas + duckdb)..."
+            pip install --user --no-cache-dir --no-warn-script-location pandas duckdb 2>&1 || \
+                python3 -m pip install --user --no-cache-dir pandas duckdb 2>&1 || \
+                echo "WARNING: Could not install pandas/duckdb - falling back to original path"
+        fi
+    fi
+
     # Decompress any .gz input files for validation
     for f in *.gtf.gz *.bed.gz; do
         [ -f "\$f" ] && gunzip -f "\$f" || true
@@ -339,21 +388,43 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
         echo "WARNING: No valid ORF input data" > ${prefix}.stats.txt
     else
         set +e
-        python3 ${unify_script} \\
-            --gtf ${gtf} \\
-            --fasta ${fasta} \\
-            --output ${prefix} \\
-            --per-tool-output ${prefix} \\
-            --min_len ${min_len} \\
-            --threads ${task.cpus} \\
-            --no-frame-merge \\
-            ${ribotish_arg} \\
-            ${ribotricer_arg} \\
-            ${ribocode_arg} \\
-            ${orfquant_arg} \\
-            ${bedgraph_arg} \\
-            ${sample_arg} \\
-            ${extra_args} 2>&1 | tee unify_orf.log
+
+        # Choose optimized (orfont) or original path
+        if [ -f "${run_orf_script}" ] && python3 -c "import pandas; import duckdb" 2>/dev/null; then
+            echo "Using optimized orfont path (run_orf.py)"
+            python3 ${run_orf_script} unify \\
+                --gtf ${gtf} \\
+                --fasta ${fasta} \\
+                --output ${prefix} \\
+                --per-tool-output ${prefix} \\
+                --min_len ${min_len} \\
+                --threads ${task.cpus} \\
+                --no-frame-merge \\
+                ${ribotish_arg} \\
+                ${ribotricer_arg} \\
+                ${ribocode_arg} \\
+                ${orfquant_arg} \\
+                ${bedgraph_arg} \\
+                ${sample_arg} \\
+                ${extra_args} 2>&1 | tee unify_orf.log
+        else
+            echo "Using original unify path"
+            python3 ${unify_script} \\
+                --gtf ${gtf} \\
+                --fasta ${fasta} \\
+                --output ${prefix} \\
+                --per-tool-output ${prefix} \\
+                --min_len ${min_len} \\
+                --threads ${task.cpus} \\
+                --no-frame-merge \\
+                ${ribotish_arg} \\
+                ${ribotricer_arg} \\
+                ${ribocode_arg} \\
+                ${orfquant_arg} \\
+                ${bedgraph_arg} \\
+                ${sample_arg} \\
+                ${extra_args} 2>&1 | tee unify_orf.log
+        fi
         EXIT_CODE=\${PIPESTATUS[0]}
         set -e
 
@@ -396,6 +467,8 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
         python: \$(python3 --version | sed 's/Python //')
         biopython: \$(python3 -c "import Bio; print(Bio.__version__)" 2>/dev/null || echo "unknown")
         pyfaidx: \$(python3 -c "import pyfaidx; print(pyfaidx.__version__)" 2>/dev/null || echo "unknown")
+        pandas: \$(python3 -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "N/A")
+        duckdb: \$(python3 -c "import duckdb; print(duckdb.__version__)" 2>/dev/null || echo "N/A")
     END_VERSIONS
     """
 

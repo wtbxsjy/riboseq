@@ -20,19 +20,22 @@ From: python:3.9-slim
 
     # Install Python packages for:
     # - unify_orf_predictions.py: biopython, pyfaidx
+    # - orfont (optimized path): duckdb, pandas
     # - class_ORFtype.py: standard library only (csv, multiprocessing)
     # - classify_orfs_wrapper.py: standard library only
     pip install --no-cache-dir \
         biopython>=1.79 \
         pyfaidx>=0.7.0 \
         pandas>=1.3.0 \
-        numpy>=1.20.0
+        numpy>=1.20.0 \
+        duckdb>=1.0.0
 
     # Verify installations
     python3 -c "import Bio; print('Biopython:', Bio.__version__)"
     python3 -c "import pyfaidx; print('pyfaidx:', pyfaidx.__version__)"
     python3 -c "import pandas; print('pandas:', pandas.__version__)"
     python3 -c "import numpy; print('numpy:', numpy.__version__)"
+    python3 -c "import duckdb; print('duckdb:', duckdb.__version__)"
 
 %environment
     export LC_ALL=C.UTF-8
@@ -43,5 +46,5 @@ From: python:3.9-slim
     exec python3 "$@"
 
 %test
-    python3 -c "import Bio; import pyfaidx; import pandas; import numpy; print('All dependencies OK')"
+    python3 -c "import Bio; import pyfaidx; import pandas; import numpy; import duckdb; print('All dependencies OK')"
     python3 --version
