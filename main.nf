@@ -66,6 +66,16 @@ workflow NFCORE_RIBOSEQ {
         error "Contaminant filtering is enabled but no contaminant FASTA file provided. Please specify --contaminant_fasta or --skip_contaminant_filter."
     }
 
+    // Validate pathogen dual-genome analysis parameters
+    if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
+        if (!params.pathogen_fasta) {
+            error "--pathogen_contig_pattern requires --pathogen_fasta to be set."
+        }
+        if (!params.pathogen_gtf) {
+            error "--pathogen_contig_pattern requires --pathogen_gtf to be set."
+        }
+    }
+
     //
     // SUBWORKFLOW: Prepare reference genome files
     //
