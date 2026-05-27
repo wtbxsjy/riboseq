@@ -1,13 +1,12 @@
 process UNIFY_ORF_PREDICTIONS {
-    prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-    tag "${prefix}"
+    tag "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}"
     label 'process_medium'
 
     publishDir "${params.outdir}/orf_unification", mode: params.publish_dir_mode
 
     conda "${moduleDir}/environment.yml"
     // Use custom container if provided, otherwise use biopython container
-    container "${ params.unify_orf_container ? 
+    container "${ params.unify_orf_container ?
         params.unify_orf_container :
         (workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
             'https://depot.galaxyproject.org/singularity/biopython:1.79' :
@@ -22,16 +21,17 @@ process UNIFY_ORF_PREDICTIONS {
     val sample_list       // List of sample names for bedgraph files
 
     output:
-    path "${prefix}.metadata.tsv", emit: metadata
-    path "${prefix}.bed.gz"      , emit: bed
-    path "${prefix}.gtf.gz"      , emit: gtf
-    path "${prefix}.stats.txt"   , emit: stats
+    path "*.metadata.tsv", emit: metadata
+    path "*.bed.gz"      , emit: bed
+    path "*.gtf.gz"      , emit: gtf
+    path "*.stats.txt"   , emit: stats
     path "versions.yml"          , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     def min_len = params.unify_orf_min_len ?: 6
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
     // Advanced merging parameters
@@ -229,8 +229,7 @@ process UNIFY_ORF_PREDICTIONS {
 // Outputs per-tool files for each tool that ran, plus a combined exact-dedup set.
 // Use this when skip_unify_orf_predictions = true to enable per-tool classification.
 process UNIFY_ORF_PREDICTIONS_PER_TOOL {
-    prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-    tag "${prefix}"
+    tag "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}"
     label 'process_medium'
 
     publishDir "${params.outdir}/orf_unification/per_tool", mode: params.publish_dir_mode
@@ -251,28 +250,29 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     val sample_list
 
     output:
-    path "${prefix}_ribotish.metadata.tsv"  , emit: ribotish_metadata  , optional: true
-    path "${prefix}_ribotish.bed.gz"        , emit: ribotish_bed       , optional: true
-    path "${prefix}_ribotish.gtf.gz"        , emit: ribotish_gtf       , optional: true
-    path "${prefix}_ribotricer.metadata.tsv", emit: ribotricer_metadata, optional: true
-    path "${prefix}_ribotricer.bed.gz"      , emit: ribotricer_bed     , optional: true
-    path "${prefix}_ribotricer.gtf.gz"      , emit: ribotricer_gtf     , optional: true
-    path "${prefix}_ribocode.metadata.tsv"  , emit: ribocode_metadata  , optional: true
-    path "${prefix}_ribocode.bed.gz"        , emit: ribocode_bed       , optional: true
-    path "${prefix}_ribocode.gtf.gz"        , emit: ribocode_gtf       , optional: true
-    path "${prefix}_orfquant.metadata.tsv"  , emit: orfquant_metadata  , optional: true
-    path "${prefix}_orfquant.bed.gz"        , emit: orfquant_bed       , optional: true
-    path "${prefix}_orfquant.gtf.gz"        , emit: orfquant_gtf       , optional: true
-    path "${prefix}.metadata.tsv"           , emit: combined_metadata
-    path "${prefix}.bed.gz"                 , emit: combined_bed
-    path "${prefix}.gtf.gz"                 , emit: combined_gtf
-    path "${prefix}.stats.txt"              , emit: stats
-    path "versions.yml"                     , emit: versions
+    path "*_ribotish.metadata.tsv"  , emit: ribotish_metadata  , optional: true
+    path "*_ribotish.bed.gz"        , emit: ribotish_bed       , optional: true
+    path "*_ribotish.gtf.gz"        , emit: ribotish_gtf       , optional: true
+    path "*_ribotricer.metadata.tsv", emit: ribotricer_metadata, optional: true
+    path "*_ribotricer.bed.gz"      , emit: ribotricer_bed     , optional: true
+    path "*_ribotricer.gtf.gz"      , emit: ribotricer_gtf     , optional: true
+    path "*_ribocode.metadata.tsv"  , emit: ribocode_metadata  , optional: true
+    path "*_ribocode.bed.gz"        , emit: ribocode_bed       , optional: true
+    path "*_ribocode.gtf.gz"        , emit: ribocode_gtf       , optional: true
+    path "*_orfquant.metadata.tsv"  , emit: orfquant_metadata  , optional: true
+    path "*_orfquant.bed.gz"        , emit: orfquant_bed       , optional: true
+    path "*_orfquant.gtf.gz"        , emit: orfquant_gtf       , optional: true
+    path "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}.metadata.tsv", emit: combined_metadata
+    path "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}.bed.gz"      , emit: combined_bed
+    path "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}.gtf.gz"      , emit: combined_gtf
+    path "${(params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()}.stats.txt"   , emit: stats
+    path "versions.yml"                         , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     def min_len = params.unify_orf_min_len ?: 6
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
     def ribotish_arg = (ribotish_files && ribotish_files instanceof List && ribotish_files.size() > 0) ?
