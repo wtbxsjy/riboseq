@@ -209,6 +209,7 @@ process UNIFY_ORF_PREDICTIONS {
     """
 
     stub:
+    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     """
     touch ${prefix}.metadata.tsv
     touch ${prefix}.bed
@@ -399,6 +400,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     """
 
     stub:
+    def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     """
     touch ${prefix}_ribotish.metadata.tsv ${prefix}_ribotish.bed ${prefix}_ribotish.gtf
     touch ${prefix}_ribotricer.metadata.tsv ${prefix}_ribotricer.bed ${prefix}_ribotricer.gtf
