@@ -4,8 +4,8 @@ process RIBOWALTZ {
 
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'oras://community.wave.seqera.io/library/ribowaltz_bioconductor-genomicfeatures_r-data.table:latest' :
-        'community.wave.seqera.io/library/ribowaltz_bioconductor-genomicfeatures_r-data.table:latest' }"
+        (params.ribowaltz_container ?: 'oras://community.wave.seqera.io/library/ribowaltz_bioconductor-genomicfeatures_r-data.table:latest') :
+        (params.ribowaltz_container ?: 'community.wave.seqera.io/library/ribowaltz_bioconductor-genomicfeatures_r-data.table:latest') }"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -34,21 +34,28 @@ process RIBOWALTZ {
     #!/bin/bash
     set -euo pipefail
 
-    # Install riboWaltz if not already available
+    # Install dependencies if not available
     cat <<'INSTALL_SCRIPT' > install_ribowaltz.R
+    # Install riboWaltz
     if (!requireNamespace("riboWaltz", quietly = TRUE)) {
         cat("Installing riboWaltz...\\n")
-        # riboWaltz is available on GitHub or as local source
         if (file.exists("${workflow.projectDir}/patched_packages/riboWaltz")) {
             install.packages("${workflow.projectDir}/patched_packages/riboWaltz",
                 repos = NULL, type = "source")
         } else {
-            # Try installing from Bioconductor/CRAN alternative
             if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
             remotes::install_github("LabTranslationalArchitectomics/riboWaltz", upgrade = "never")
         }
     }
     cat("riboWaltz version:", as.character(packageVersion("riboWaltz")), "\\n")
+
+    # Install txdbmaker for Bioc 3.20+ compatibility
+    if (!requireNamespace("txdbmaker", quietly = TRUE)) {
+        cat("Installing txdbmaker for Bioc 3.20+ compatibility...\\n")
+        if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+        BiocManager::install("txdbmaker", update = FALSE, ask = FALSE)
+        cat("txdbmaker version:", as.character(packageVersion("txdbmaker")), "\\n")
+    }
 INSTALL_SCRIPT
 
     # Run installation

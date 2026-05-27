@@ -2,6 +2,7 @@
 import argparse
 import sys
 import os
+import gzip
 import subprocess
 from pathlib import Path
 
@@ -44,9 +45,15 @@ except ImportError:
         return ''.join(aa)
 
 
+def _open(path, mode='r'):
+    if path.endswith('.gz'):
+        return gzip.open(path, mode + 't')
+    return open(path, mode)
+
+
 def build_reference_chrom_map(gtf_path):
     ref_chroms = set()
-    with open(gtf_path) as handle:
+    with _open(gtf_path) as handle:
         for line in handle:
             if not line or line.startswith("#"):
                 continue
@@ -59,6 +66,13 @@ def build_reference_chrom_map(gtf_path):
         for alias in chrom_aliases(chrom):
             chrom_map.setdefault(alias, chrom)
     return chrom_map
+
+def _resolve(prefix, suffix):
+    """Return the file path, trying .gz extension first."""
+    gz = f"{prefix}{suffix}.gz"
+    if os.path.exists(gz):
+        return gz
+    return f"{prefix}{suffix}"
 
 def run_command(cmd, desc):
     print(f"Running {desc}...", file=sys.stderr)
@@ -105,7 +119,7 @@ def main(argv=None):
     
     # Determine input files based on prefix or full path
     input_base = args.input
-    if input_base.endswith('.gtf') or input_base.endswith('.bed') or input_base.endswith('.metadata.tsv'):
+    if input_base.endswith('.gtf') or input_base.endswith('.gtf.gz') or input_base.endswith('.bed') or input_base.endswith('.bed.gz') or input_base.endswith('.metadata.tsv'):
         # User provided full path, strip extension for base if needed, but keep path
         pass
     
@@ -143,7 +157,7 @@ def main(argv=None):
 
         metadata_file = f"{input_base}.metadata.tsv"
         fasta_file    = f"{input_base}.orfs.fa"   # protein (AA) FASTA for the mapper
-        bed12_file    = f"{input_base}.bed"        # our BED12 output
+        bed12_file    = _resolve(input_base, '.bed')        # our BED12 output (may be .bed.gz)
         bed6_file     = f"{input_base}.orfs.bed6"  # BED6 required by the mapper
         chrom_map = build_reference_chrom_map(os.path.join(args.ensembl_dir, "SORTED_TRANSCRIPTOME_GTF"))
 
@@ -153,7 +167,7 @@ def main(argv=None):
         # from the first sample in the metadata `samples` column.
         orf_to_study = {}
         if os.path.exists(metadata_file):
-            with open(metadata_file) as mf:
+            with _open(metadata_file) as mf:
                 hdr = mf.readline().strip().split('\t')
                 id_idx  = hdr.index('orf_id')
                 try:
@@ -176,7 +190,7 @@ def main(argv=None):
         # Our BED12 has col[5]=strand but col[4]="0" (score); we replace it.
         print(f"Generating BED6 for GENCODE mapper from {bed12_file}...", file=sys.stderr)
         remapped_chroms = 0
-        with open(bed12_file) as bf, open(bed6_file, 'w') as b6:
+        with _open(bed12_file) as bf, open(bed6_file, 'w') as b6:
             for line in bf:
                 parts = line.rstrip('\n').split('\t')
                 if len(parts) < 6:
@@ -200,7 +214,7 @@ def main(argv=None):
             print(f"Using existing protein FASTA (skipping generation): {fasta_file}", file=sys.stderr)
         elif os.path.exists(metadata_file):
             print(f"Generating protein FASTA for GENCODE mapper from {metadata_file}...", file=sys.stderr)
-            with open(metadata_file) as mf, open(fasta_file, 'w') as ff:
+            with _open(metadata_file) as mf, open(fasta_file, 'w') as ff:
                 hdr = mf.readline().strip().split('\t')
                 id_idx = hdr.index('orf_id')
                 try:
@@ -235,8 +249,8 @@ def main(argv=None):
             
         script = get_script_path("run_orfquant_classify.R")
         
-        # Input should be the unified GTF
-        input_gtf = f"{input_base}.gtf" if not input_base.endswith('.gtf') else input_base
+        # Input should be the unified GTF (may be .gtf.gz)
+        input_gtf = _resolve(input_base, '.gtf') if not (input_base.endswith('.gtf') or input_base.endswith('.gtf.gz')) else input_base
         
         output_file = os.path.join(args.output_dir, "orfquant_classification.tsv")
         

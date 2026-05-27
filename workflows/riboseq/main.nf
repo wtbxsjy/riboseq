@@ -20,14 +20,19 @@ include { ORFQUANT           } from '../../subworkflows/local/orfquant'
 
 // Local module: sORF BAM filtering (unique mapping + contig exclusion + read length)
 include { SORF_BAM_FILTER } from '../../modules/local/sorf_bam_filter'
+include { SORF_BAM_FILTER as SORF_BAM_FILTER_PATHOGEN } from '../../modules/local/sorf_bam_filter'
+// Local module: split combined BAM by pathogen contig names for dual-genome analysis
+include { SPLIT_BAM_BY_CONTIG } from '../../modules/local/split_bam_by_contig/main'
 // Local module: merge replicate BAMs (same-group samples) before ORF prediction
 include { SAMTOOLS_MERGE_REPLICATES } from '../../modules/local/samtools_merge/main'
 // Local module: riboWaltz P-site analysis and QC
 include { RIBOWALTZ                                         } from '../../modules/local/ribowaltz/main'
 // Local subworkflow: TE analysis (RNA-seq + Ribo-seq integration)
 include { TE_ANALYSIS                                       } from '../../subworkflows/local/te_analysis'
+include { TE_ANALYSIS as TE_ANALYSIS_PATHOGEN              } from '../../subworkflows/local/te_analysis'
 // Local module: PRICE ORF detection (GEDI platform)
 include { PRICE                                             } from '../../modules/local/price/main'
+include { GTF2BED as GTF2BED_PATHOGEN                        } from '../../modules/local/gtf2bed'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -39,6 +44,9 @@ include { PRICE                                             } from '../../module
 // MODULE: Installed directly from nf-core/modules
 //
 include { SAMTOOLS_INDEX                                       } from '../../modules/nf-core/samtools/index'
+include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_HOST                 } from '../../modules/nf-core/samtools/index'
+include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_PATHOGEN              } from '../../modules/nf-core/samtools/index'
+include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_PATHOGEN_FILTERED     } from '../../modules/nf-core/samtools/index'
 include { MULTIQC                                              } from '../../modules/nf-core/multiqc/main'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ         } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_PREFILTER       } from '../../modules/nf-core/ribotish/predict'
@@ -105,8 +113,9 @@ workflow RIBOSEQ {
     def is_bam_input = params.is_bam_input ?: false
     def can_run_ribocode = !params.skip_ribocode && !is_bam_input && ['star', 'hisat2'].contains(params.aligner)
 
-    ch_multiqc_files = Channel.empty()
-    ch_splicesites   = Channel.empty()
+    ch_multiqc_files     = Channel.empty()
+    ch_splicesites       = Channel.empty()
+    ch_ribowaltz_psite   = Channel.empty()
 
     // Initialize BAM channels
     ch_genome_bam        = Channel.empty()
@@ -114,6 +123,10 @@ workflow RIBOSEQ {
     ch_transcriptome_bam = Channel.empty()
     ch_transcriptome_bai = Channel.empty()
     ch_fastq             = Channel.empty()
+
+    // Initialize pathogen-specific channels
+    ch_pathogen_bam       = Channel.empty()
+    ch_pathogen_bam_index = Channel.empty()
 
     // Initialize QC stats channels (populated later, used by COLLECT_QC_STATS)
     ch_qc_star_logs      = Channel.empty()
@@ -296,10 +309,39 @@ workflow RIBOSEQ {
     }  // End of FASTQ input mode
 
     //
+    // BAM SPLITTING: If pathogen_contig_pattern is set, split combined BAM into host and pathogen
+    //
+    if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
+        SPLIT_BAM_BY_CONTIG(
+            ch_genome_bam.join(ch_genome_bam_index),
+            ch_fai,
+            params.pathogen_contig_pattern
+        )
+        ch_versions = ch_versions.mix(SPLIT_BAM_BY_CONTIG.out.versions)
+
+        ch_host_bam       = SPLIT_BAM_BY_CONTIG.out.host_bam
+        ch_pathogen_bam   = SPLIT_BAM_BY_CONTIG.out.pathogen_bam
+
+        // Index host BAMs
+        SAMTOOLS_INDEX_HOST( ch_host_bam )
+        ch_host_bam_index = params.bam_csi_index ? SAMTOOLS_INDEX_HOST.out.csi : SAMTOOLS_INDEX_HOST.out.bai
+        ch_versions = ch_versions.mix(SAMTOOLS_INDEX_HOST.out.versions)
+
+        // Index pathogen BAMs
+        SAMTOOLS_INDEX_PATHOGEN( ch_pathogen_bam )
+        ch_pathogen_bam_index = params.bam_csi_index ? SAMTOOLS_INDEX_PATHOGEN.out.csi : SAMTOOLS_INDEX_PATHOGEN.out.bai
+        ch_versions = ch_versions.mix(SAMTOOLS_INDEX_PATHOGEN.out.versions)
+    } else {
+        // No pathogen splitting: entire BAM is treated as host
+        ch_host_bam       = ch_genome_bam
+        ch_host_bam_index = ch_genome_bam_index
+    }
+
+    //
     // Take the riboseq samples and route to ribotish
     //
 
-    ch_genome_bam
+    ch_host_bam
         .branch { meta, bam ->
             riboseq: meta.sample_type == 'riboseq'
                 return [ meta, bam ]
@@ -312,17 +354,45 @@ workflow RIBOSEQ {
             ch_genome_bam_by_type
         }
 
-    ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_genome_bam_index)
+    ch_bams_for_analysis = ch_genome_bam_by_type.riboseq.join(ch_host_bam_index)
 
     // Prepare channels for TE analysis (RNA-seq + Ribo-seq BAMs)
-    ch_rnaseq_bam_bai = ch_genome_bam_by_type.rnaseq.join(ch_genome_bam_index)
+    ch_rnaseq_bam_bai = ch_genome_bam_by_type.rnaseq.join(ch_host_bam_index)
     ch_te_bams = Channel.empty()
+
+    //
+    // Pathogen BAM routing (dual-genome mode)
+    //
+    if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
+        ch_pathogen_bam
+            .branch { meta, bam ->
+                riboseq: meta.sample_type == 'riboseq'
+                    return [ meta, bam ]
+                tiseq: meta.sample_type == 'tiseq'
+                    return [ meta, bam ]
+                rnaseq: meta.sample_type == 'rnaseq'
+                    return [ meta, bam ]
+            }
+            .set{ ch_pathogen_bam_by_type }
+
+        ch_pathogen_bams_for_analysis = ch_pathogen_bam_by_type.riboseq.join(ch_pathogen_bam_index)
+        ch_pathogen_rnaseq_bam_bai = ch_pathogen_bam_by_type.rnaseq.join(ch_pathogen_bam_index)
+
+        // Build pathogen FASTA+GTF channel for ORF prediction tools
+        ch_pathogen_fasta_file = file(params.pathogen_fasta, checkIfExists: true)
+        ch_pathogen_gtf_file   = file(params.pathogen_gtf, checkIfExists: true)
+        ch_pathogen_fasta_gtf  = Channel.value([
+            [id: 'pathogen'],
+            ch_pathogen_fasta_file,
+            ch_pathogen_gtf_file
+        ])
+    }
 
     // Create fasta+gtf tuple with a meaningful meta id for tools that need it (e.g., ribotricer)
     // Use .first() to convert to a value channel so it broadcasts to all per-sample invocations
-    ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf -> 
+    ch_fasta_gtf = ch_fasta.combine(ch_gtf).map{ fasta, gtf ->
         def genome_name = fasta.simpleName.replaceAll(/\.(genome|transcripts|dna|cdna).*/, '')
-        [ [id: genome_name], fasta, gtf ] 
+        [ [id: genome_name], fasta, gtf ]
     }.first()
 
     // Pre-filter: using unfiltered BAMs (with MT reads) - suffix 'prefilter' for output organization
@@ -363,6 +433,34 @@ workflow RIBOSEQ {
         // If sorf_filter is disabled, use original BAMs for all downstream analysis
         ch_bams_for_sorf_prediction = ch_bams_for_analysis
         ch_bams_for_postfilter = ch_bams_for_analysis.map { meta, bam, bai -> [ meta + [ filter_status: 'postfilter' ], bam, bai ] }
+    }
+
+    //
+    // Pathogen sORF BAM filter (dual-genome mode)
+    //
+    if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
+        if (params.sorf_filter) {
+            SORF_BAM_FILTER_PATHOGEN(
+                ch_pathogen_bams_for_analysis,
+                ch_fai,
+                params.sorf_unique_mode,
+                params.sorf_unique_mapq,
+                params.sorf_read_len_min,
+                params.sorf_read_len_max,
+                ''   // No contig exclusion — pathogen BAM is already pathogen-only
+            )
+            ch_versions = ch_versions.mix(SORF_BAM_FILTER_PATHOGEN.out.versions)
+
+            SAMTOOLS_INDEX_PATHOGEN_FILTERED(
+                SORF_BAM_FILTER_PATHOGEN.out.bam
+            )
+            ch_versions = ch_versions.mix(SAMTOOLS_INDEX_PATHOGEN_FILTERED.out.versions)
+
+            ch_pathogen_bams_for_prediction = SORF_BAM_FILTER_PATHOGEN.out.bam
+                .join(params.bam_csi_index ? SAMTOOLS_INDEX_PATHOGEN_FILTERED.out.csi : SAMTOOLS_INDEX_PATHOGEN_FILTERED.out.bai)
+        } else {
+            ch_pathogen_bams_for_prediction = ch_pathogen_bams_for_analysis
+        }
     }
 
     //
@@ -426,6 +524,20 @@ workflow RIBOSEQ {
                 [ te_meta, bam, bai ]
             }
         ch_te_bams = ch_rnaseq_bam_bai.mix(ch_riboseq_te_bams)
+
+        // Pathogen TE BAMs: assemble from pathogen BAM channels (dual-genome mode)
+        if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
+            ch_pathogen_riboseq_te_bams = ch_pathogen_bams_for_prediction
+                .map { meta, bam, bai ->
+                    def te_meta = meta.clone()
+                    te_meta.sample_type = 'riboseq'
+                    [ te_meta, bam, bai ]
+                }
+            ch_pathogen_te_bams = ch_pathogen_rnaseq_bam_bai.mix(ch_pathogen_riboseq_te_bams)
+
+            // Generate CDS BED from pathogen GTF for featureCounts annotation
+            GTF2BED_PATHOGEN( ch_pathogen_gtf_file )
+        }
     }
 
     if (!params.skip_ribotish){
@@ -548,15 +660,21 @@ workflow RIBOSEQ {
         ch_versions = ch_versions.mix(RPBP.out.versions)
     }
 
+    // Create shared transcriptome BAM channel for riboseq samples
+    // Used by RiboCode and riboWaltz
+    if (!is_bam_input) {
+         ch_transcriptome_bam
+            .join(ch_transcriptome_bai)
+            .filter { meta, bam, bai -> meta.sample_type == 'riboseq' }
+            .set { ch_riboseq_transcriptome_bam }
+    } else {
+        ch_riboseq_transcriptome_bam = Channel.empty()
+    }
+
     if (!params.skip_ribocode && !is_bam_input) {
         if (!can_run_ribocode) {
             log.warn "RiboCode requires STAR or HISAT2 alignment to generate transcriptome BAMs. Skipping RiboCode."
         } else {
-             ch_transcriptome_bam
-                .join(ch_transcriptome_bai)
-                .filter { meta, bam, bai -> meta.sample_type == 'riboseq' }
-                .set { ch_riboseq_transcriptome_bam }
-
              RIBOCODE(
                  ch_riboseq_transcriptome_bam,
                  ch_gtf,
@@ -585,6 +703,38 @@ workflow RIBOSEQ {
     }
 
     //
+    // riboWaltz: P-site offset calculation and QC analysis (runs before RiboseQC
+    // so its offsets can serve as fallback when RiboseQC P_sites_calcs is empty)
+    //
+    if (!params.skip_ribowaltz) {
+        // Use transcriptome BAM in alignment mode, genome BAM in BAM-input mode
+        def ch_ribowaltz_bam = is_bam_input ? ch_bams_for_postfilter : ch_riboseq_transcriptome_bam
+
+        RIBOWALTZ(
+            ch_ribowaltz_bam,
+            ch_gtf,
+            ch_fasta
+        )
+        ch_versions = ch_versions.mix(RIBOWALTZ.out.versions)
+        ch_ribowaltz_psite = RIBOWALTZ.out.psite_offset
+        // Feed QC outputs to MultiQC-compatible collection
+        ch_multiqc_files = ch_multiqc_files.mix(
+            RIBOWALTZ.out.psite_offset.map { meta, f -> f },
+            RIBOWALTZ.out.cds_coverage.map { meta, f -> f }.ifEmpty(Channel.empty()),
+            RIBOWALTZ.out.codon_usage.map { meta, f -> f }.ifEmpty(Channel.empty()),
+            RIBOWALTZ.out.frame_distribution.map { meta, f -> f }.ifEmpty(Channel.empty())
+        )
+    }
+
+    // Sentinel channel: ensures downstream join works even when riboWaltz is skipped.
+    // The dummy file must exist (Nextflow validates inputs) but will never be read
+    // because use_rw=false prevents the R script from accessing it.
+    ch_ribowaltz_fallback = Channel.of(
+        tuple([ id: '_NO_RW_' ], file("${projectDir}/assets/samplesheet.csv"))
+    )
+    ch_ribowaltz_psite = ch_ribowaltz_psite.mix(ch_ribowaltz_fallback)
+
+    //
     // RiboseQC: Comprehensive quality control for Ribo-seq data
     //
     ch_riboseqc_annotation = Channel.empty()
@@ -596,7 +746,8 @@ workflow RIBOSEQ {
             RIBOSEQC_PREFILTER(
                 ch_bams_for_prefilter,
                 ch_gtf,
-                ch_fasta
+                ch_fasta,
+                Channel.empty()
             )
             ch_versions = ch_versions.mix(RIBOSEQC_PREFILTER.out.versions)
         }
@@ -606,7 +757,8 @@ workflow RIBOSEQ {
         RIBOSEQC_POSTFILTER(
             ch_bams_for_postfilter,
             ch_gtf,
-            ch_fasta
+            ch_fasta,
+            ch_ribowaltz_psite
         )
         ch_versions = ch_versions.mix(RIBOSEQC_POSTFILTER.out.versions)
 
@@ -614,26 +766,6 @@ workflow RIBOSEQ {
         ch_riboseqc_annotation = RIBOSEQC_POSTFILTER.out.annotation
         ch_riboseqc_orfquant   = RIBOSEQC_POSTFILTER.out.orfquant
         ch_qc_psites_calcs     = RIBOSEQC_POSTFILTER.out.psites_calcs.map { meta, f -> f }
-    }
-
-    //
-    // riboWaltz: P-site offset calculation and QC analysis
-    // Complementary to RiboseQC; provides metagene profiles, codon usage, CDS coverage
-    //
-    if (!params.skip_ribowaltz) {
-        RIBOWALTZ(
-            ch_bams_for_postfilter,
-            ch_gtf,
-            ch_fasta
-        )
-        ch_versions = ch_versions.mix(RIBOWALTZ.out.versions)
-        // Feed QC outputs to MultiQC-compatible collection
-        ch_multiqc_files = ch_multiqc_files.mix(
-            RIBOWALTZ.out.psite_offset.map { meta, f -> f },
-            RIBOWALTZ.out.cds_coverage.map { meta, f -> f }.ifEmpty(Channel.empty()),
-            RIBOWALTZ.out.codon_usage.map { meta, f -> f }.ifEmpty(Channel.empty()),
-            RIBOWALTZ.out.frame_distribution.map { meta, f -> f }.ifEmpty(Channel.empty())
-        )
     }
 
     //
@@ -744,9 +876,9 @@ workflow RIBOSEQ {
                         // Flat list of files - split by tool-specific suffix
                         ribotish_files = combined.findAll { it.getName().endsWith('_pred.txt') }
                         ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
-                        ribocode_files = combined.findAll { it.getName().endsWith('.gtf') && !it.getName().endsWith('_Detected_ORFs.gtf') }
-                        orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') && !it.getName().contains('PRICE') }
-                        price_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') && it.getName().contains('PRICE') || it.getName().endsWith('.orfs.tsv') }
+                        ribocode_files = combined.findAll { it.getName().endsWith('.gtf.gz') && !it.getName().endsWith('_Detected_ORFs.gtf.gz') }
+                        orfquant_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf.gz') && !it.getName().contains('PRICE') }
+                        price_files = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf.gz') && it.getName().contains('PRICE') || it.getName().endsWith('.orfs.tsv') }
                     } else {
                         ribotish_files = combined
                     }
@@ -834,8 +966,8 @@ workflow RIBOSEQ {
                         } else if (combined instanceof List) {
                             ribotish_files  = combined.findAll { it.getName().endsWith('_pred.txt') }
                             ribotricer_files = combined.findAll { it.getName().endsWith('_translating_ORFs.tsv') }
-                            ribocode_files  = combined.findAll { it.getName().endsWith('.gtf') && !it.getName().endsWith('_Detected_ORFs.gtf') }
-                            orfquant_files  = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf') }
+                            ribocode_files  = combined.findAll { it.getName().endsWith('.gtf.gz') && !it.getName().endsWith('_Detected_ORFs.gtf.gz') }
+                            orfquant_files  = combined.findAll { it.getName().endsWith('_Detected_ORFs.gtf.gz') }
                         } else { ribotish_files = combined }
                         def rt  = ribotish_files  instanceof List ? ribotish_files  : (ribotish_files  ? [ribotish_files]  : [])
                         def rtr = ribotricer_files instanceof List ? ribotricer_files : (ribotricer_files ? [ribotricer_files] : [])
@@ -1083,6 +1215,20 @@ workflow RIBOSEQ {
             )
         } else {
             log.warn "TE analysis requires unified ORF BED annotation. Run with --skip_unify_orf_predictions=false."
+        }
+
+        // Pathogen TE analysis (dual-genome mode)
+        if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
+            def ch_pathogen_cds_bed = GTF2BED_PATHOGEN.out.bed
+            if (ch_pathogen_cds_bed) {
+                TE_ANALYSIS_PATHOGEN(
+                    ch_pathogen_te_bams,
+                    ch_pathogen_cds_bed,
+                    ch_contrasts,
+                    ch_pathogen_gtf_file
+                )
+                ch_versions = ch_versions.mix(TE_ANALYSIS_PATHOGEN.out.versions)
+            }
         }
     }
 

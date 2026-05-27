@@ -4,6 +4,7 @@ channels:
   - bioconda
   - defaults
 dependencies:
+  - bioconda::bioconductor-txdbmaker=1.2.0
   - bioconda::bioconductor-genomicfeatures=1.54.0
   - bioconda::bioconductor-rsamtools=2.18.0
   - bioconda::bioconductor-genomicalignments=1.38.0

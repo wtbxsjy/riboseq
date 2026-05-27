@@ -117,6 +117,19 @@ BAM Filtering (sORF) → QC (RiboseQC, Ribo-TISH) → ORF Prediction → MultiQC
 - Uses custom patched container to avoid BiocGenerics::Position/combine namespace conflicts
 - Patch details: Modified NAMESPACE to use selective ggplot2/gridExtra imports
 
+**riboWaltz** (`modules/local/ribowaltz/`):
+- P-site offset calculation, metagene/codon/CDS analysis (complementary to RiboseQC)
+- Runs **before** RiboseQC — its per-length P-site offsets serve as fallback when RiboseQC `P_sites_calcs` is empty
+- **Uses transcriptome BAM** in alignment mode (STAR/HISAT2), genome BAM in BAM-input mode
+- **Bioc 3.20**: Replaces `GenomicFeatures::makeTxDbFromGFF()` with `txdbmaker::makeTxDbFromGFF()`; custom annotation builder strips transcript ID version suffixes (e.g. `.11`) so BAM reads match GTF transcripts
+- Container: build from `containers/Singularity.ribowaltz.def`; the runtime install script adds `txdbmaker` if missing from the base image
+- Parameters: `--skip_ribowaltz`, `--ribowaltz_read_lengths [28,29,30]`, `--extra_ribowaltz_args`, `--ribowaltz_container`
+
+**P-site offset fallback chain** (`EXTRACT_RL_CUTOFF` → `PREPARE_FOR_ORFQUANT_CORRECTED` → ORFquant):
+1. RiboseQC `P_sites_calcs` valid → use RiboseQC offset (unchanged)
+2. RiboseQC data empty + riboWaltz available → use riboWaltz `corrected_offset_from_5` per read length (improved accuracy)
+3. Neither available → hardcoded defaults `28-32 → 12` (behaviour unchanged from original)
+
 ### Sample Type Handling
 
 The pipeline distinguishes between sample types via the `type` column in samplesheets:
@@ -260,6 +273,9 @@ The default `--sorf_exclude_contigs_regex` targets common mitochondrial/chloropl
 8. **GENCODE classifier requires its own container** (`--gencode_orf_mapper_container`): needs bedtools and BioPython; the `unify_orf` container does NOT include bedtools.
 9. **GENCODE Ensembl directory** (`--orf_classify_ensembl_dir`): must contain five standardised symlinks — `TRANSCRIPTOME_FASTA`, `SORTED_TRANSCRIPTOME_GTF`, `PROTEOME_FASTA`, `TRANSCRIPT_SUPPORT`, `PSITES_BED` — created by the reference-preparation scripts.
 10. **ORF tool name capitalisation**: `ORFCandidate.sources` and the unified metadata `tools` column use `'Ribo-TISH'`, `'Ribotricer'`, `'ORFquant'` (not lowercase). Use these exact strings when filtering or counting by tool.
+11. **riboWaltz needs transcriptome BAM** for accurate per-transcript P-site analysis. In alignment mode it receives transcriptome BAMs; in BAM-input mode it falls back to genome BAMs.
+12. **riboWaltz Bioc 3.20 compatibility**: `create_annotation()` calls `GenomicFeatures::makeTxDbFromGFF()` which is defunct in Bioc 3.20. The patched R script uses `txdbmaker::makeTxDbFromGFF()` instead. If the container lacks `txdbmaker`, it is installed at runtime (~2-3 min overhead). Rebuild the container (`containers/Singularity.ribowaltz.def`) to eliminate this.
+13. **Transcript ID version mismatch**: GTF IDs (e.g. `ENST00001008.11`) have different version suffixes than BAM IDs (e.g. `ENST00001008.6`). The patched R script strips version numbers from both sides for 100% match rate.
 
 ## File Locations Reference
 

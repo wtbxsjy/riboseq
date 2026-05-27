@@ -1,0 +1,137 @@
+Bootstrap: docker
+From: continuumio/miniconda3:24.11.1-0
+
+%labels
+    Author nf-core/riboseq
+    Version 1.0.0
+    Description riboWaltz container with txdbmaker for Bioc 3.20+ compatibility.
+
+%post
+    # System dependencies for R and Bioconductor packages
+    apt-get update && apt-get install -y --no-install-recommends \
+        r-base \
+        r-base-dev \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        libxml2-dev \
+        libfontconfig1-dev \
+        libharfbuzz-dev \
+        libfribidi-dev \
+        libfreetype6-dev \
+        libpng-dev \
+        libtiff5-dev \
+        libjpeg-dev \
+        libgit2-dev \
+        procps \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install core R packages via apt to speed up
+    apt-get update && apt-get install -y --no-install-recommends \
+        r-cran-devtools \
+        r-cran-remotes \
+        r-cran-data.table \
+        r-cran-ggplot2 \
+        r-cran-dplyr \
+        r-cran-stringr \
+        r-cran-rcurl \
+        r-cran-xml2 \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install Bioconductor packages directly via R
+    # Avoid conda's Bioconductor version conflicts by using BiocManager
+    R --vanilla -q -e '
+        options(repos = c(CRAN = "https://cloud.r-project.org"))
+        # Install BiocManager
+        if (!requireNamespace("BiocManager", quietly = TRUE)) {
+            install.packages("BiocManager", repos = "https://cloud.r-project.org")
+        }
+        BiocManager::install(version = "3.20", update = FALSE, ask = FALSE)
+
+        # Core Bioconductor packages
+        bioc_pkgs <- c(
+            "GenomicFeatures",
+            "GenomicAlignments",
+            "Rsamtools",
+            "rtracklayer",
+            "GenomeInfoDb",
+            "Biostrings",
+            "IRanges",
+            "S4Vectors",
+            "GenomicRanges",
+            "BiocGenerics",
+            "txdbmaker"
+        )
+        BiocManager::install(bioc_pkgs, update = FALSE, ask = FALSE)
+
+        # Verify installations
+        for (p in bioc_pkgs) {
+            if (requireNamespace(p, quietly = TRUE)) {
+                cat(sprintf("  %s: %s\n", p, as.character(packageVersion(p))))
+            } else {
+                stop("MISSING: ", p)
+            }
+        }
+    '
+
+    # Install riboWaltz from GitHub
+    R --vanilla -q -e '
+        options(repos = c(CRAN = "https://cloud.r-project.org"))
+        if (!requireNamespace("remotes", quietly = TRUE)) {
+            install.packages("remotes", repos = "https://cloud.r-project.org")
+        }
+        if (!requireNamespace("riboWaltz", quietly = TRUE)) {
+            remotes::install_github("LabTranslationalArchitectomics/riboWaltz",
+                                    upgrade = "never")
+        }
+        cat("riboWaltz version:", as.character(packageVersion("riboWaltz")), "\n")
+    '
+
+    # Final verification
+    R --vanilla -q -e '
+        options(repos = c(CRAN = "https://cloud.r-project.org"))
+        pkgs <- c("riboWaltz", "txdbmaker", "GenomicFeatures",
+                  "GenomicAlignments", "Rsamtools", "rtracklayer",
+                  "data.table", "ggplot2", "dplyr", "GenomeInfoDb")
+        all_ok <- TRUE
+        for (p in pkgs) {
+            if (requireNamespace(p, quietly = TRUE)) {
+                cat(sprintf("  %s: %s\n", p, as.character(packageVersion(p))))
+            } else {
+                cat(sprintf("  %s: MISSING!\n", p))
+                all_ok <- FALSE
+            }
+        }
+        if (!all_ok) stop("Some packages are missing")
+        cat("All dependencies OK\n")
+    '
+
+    # Clean up
+    rm -rf /tmp/* /var/tmp/*
+    rm -rf /root/.cache/R/*
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export R_LIBS_USER=/usr/local/lib/R/site-library
+
+%runscript
+    exec Rscript "$@"
+
+%test
+    R --vanilla -q -e '
+        stopifnot(requireNamespace("riboWaltz", quietly = TRUE))
+        stopifnot(requireNamespace("txdbmaker", quietly = TRUE))
+        stopifnot(requireNamespace("GenomicFeatures", quietly = TRUE))
+        stopifnot(requireNamespace("data.table", quietly = TRUE))
+        cat("All tests passed\n")
+    '
+
+%help
+    riboWaltz container with Bioc 3.20 compatibility (txdbmaker).
+
+    Build:
+        apptainer build --fakeroot -F ribowaltz.sif containers/Singularity.ribowaltz.def
+
+    Use in nf-core/riboseq:
+        nextflow run . -profile test_local_singularity \
+          --ribowaltz_container /abs/path/ribowaltz.sif

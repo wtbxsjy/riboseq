@@ -501,6 +501,34 @@
                     "description": "Merge BAMs from biological/technical replicates sharing the same 'group' field before ORF calling.",
                     "help_text": "When enabled, samples sharing the same 'group' value in the samplesheet are merged (samtools merge) after SORF_BAM_FILTER. The merged BAM (id: '{group}_merged') runs through ALL ORF prediction tools (Ribo-TISH, Ribotricer, RiboCode, RiboseQC, ORFquant) in addition to the individual replicates. This improves reproducibility and helps filter random ORF calls. The 'group' column must be added to the samplesheet CSV."
                 },
+                "pathogen_fasta": {
+                    "type": "string",
+                    "default": null,
+                    "fa_icon": "fas fa-virus",
+                    "description": "Pathogen genome FASTA file, used as annotation for pathogen-specific ORF prediction.",
+                    "help_text": "Provide the pathogen (e.g., virus) FASTA genome to enable pathogen-specific ORF prediction. Must be used together with --pathogen_gtf and --pathogen_contig_pattern."
+                },
+                "pathogen_gtf": {
+                    "type": "string",
+                    "default": null,
+                    "fa_icon": "fas fa-file-alt",
+                    "description": "Pathogen annotation GTF file for ORF quantification and prediction.",
+                    "help_text": "Provide the pathogen GTF annotation file. Required when --pathogen_contig_pattern is set."
+                },
+                "pathogen_contig_pattern": {
+                    "type": "string",
+                    "default": null,
+                    "fa_icon": "fas fa-filter",
+                    "description": "Regex pattern to identify pathogen contigs in the combined BAM (e.g. '^NC_045512').",
+                    "help_text": "Setting this parameter activates dual-genome analysis. After alignment to the combined host+pathogen reference, reads on contigs matching this pattern are split into pathogen-specific BAMs for separate downstream analysis. The pathogen genome should be included in the reference via --additional_fasta."
+                },
+                "skip_pathogen_analysis": {
+                    "type": "boolean",
+                    "default": false,
+                    "fa_icon": "fas fa-forward",
+                    "description": "Skip all pathogen-specific downstream analysis (ORF prediction, TE analysis).",
+                    "help_text": "When set, the BAM splitting step is still performed, but pathogen BAMs are not processed further. Useful when only splitting is needed."
+                },
                 "extra_ribotish_quality_args": {
                     "type": "string",
                     "description": "Extra arguments to pass to the ribotish quality command in addition to defaults defined by the pipeline."
@@ -791,9 +819,10 @@
                     "fa_icon": "fas fa-fast-forward"
                 },
                 "ribowaltz_read_lengths": {
-                    "type": "string",
-                    "default": "28,29,30",
-                    "description": "Comma-separated list of read lengths to analyze with riboWaltz.",
+                    "type": "array",
+                    "default": [28, 29, 30],
+                    "items": {"type": "integer"},
+                    "description": "List of read lengths to analyze with riboWaltz.",
                     "fa_icon": "fas fa-ruler"
                 },
                 "skip_price": {

@@ -10,9 +10,10 @@ include { PREPARE_FOR_ORFQUANT_CORRECTED } from '../../modules/local/prepare_for
 
 workflow RIBOSEQC {
     take:
-    ch_bam       // channel: [ val(meta), path(bam), path(bai) ] (Genome BAM)
-    ch_gtf       // channel: path(gtf)
-    ch_fasta     // channel: path(fasta)
+    ch_bam               // channel: [ val(meta), path(bam), path(bai) ] (Genome BAM)
+    ch_gtf               // channel: path(gtf)
+    ch_fasta             // channel: path(fasta)
+    ch_ribowaltz_psite   // channel: [ val(meta), path(psite_offset.tsv) ] - optional fallback for offset correction
 
     main:
     ch_versions = Channel.empty()
@@ -43,13 +44,42 @@ workflow RIBOSEQC {
     //
     // P-site offset correction for ORFquant (enabled by default via params.orfquant_psite_correction)
     // Extracts rows where max_coverage is TRUE from P_sites_calcs and regenerates for_ORFquant file
+    // When RiboseQC P_sites_calcs is empty/invalid, falls back to riboWaltz-derived offsets
     //
     if (params.orfquant_psite_correction) {
         //
+        // Join riboWaltz psite offset with RiboseQC P_sites_calcs by sample ID
+        // Main workflow ensures ch_ribowaltz_psite is never empty (has fallback dummy)
+        //
+        def ch_rw_for_join = ch_ribowaltz_psite
+            .map { meta, f -> tuple(meta.id, meta, f) }
+
+        def ch_psites_keyed = RIBOSEQC_ANALYSIS.out.psites_calcs
+            .map { meta, f -> tuple(meta.id, meta, f) }
+
+        // Join RiboseQC + riboWaltz by sample ID, with outer join
+        // Unmatched samples get null right side → use hardcoded defaults in extract step
+        ch_rl_inputs = ch_psites_keyed
+            .join(ch_rw_for_join, remainder: true, by: 0)
+            .map { id, meta_qc, psites, meta_rw, rw_file ->
+                def has_rw = (meta_rw != null && meta_rw.id != '_NO_RW_' && rw_file != null)
+                if (!has_rw) {
+                    return tuple(meta_qc, psites, [ id: '_NO_RW_' ], file('NO_FILE'), false)
+                }
+                return tuple(meta_qc, psites, meta_rw, rw_file, true)
+            }
+
+        //
         // Extract read length to P-site offset (cutoff) mapping from RiboseQC results
+        // Uses riboWaltz offsets as fallback when RiboseQC data is invalid
         //
         EXTRACT_RL_CUTOFF (
-            RIBOSEQC_ANALYSIS.out.psites_calcs
+            ch_rl_inputs.map { meta, psites, meta_rw, rw_file, use_rw ->
+                [ meta, psites ]
+            },
+            ch_rl_inputs.map { meta, psites, meta_rw, rw_file, use_rw ->
+                [ meta_rw, rw_file, use_rw ]
+            }
         )
         ch_versions = ch_versions.mix(EXTRACT_RL_CUTOFF.out.versions)
         ch_rl_cutoff = EXTRACT_RL_CUTOFF.out.rl_cutoff

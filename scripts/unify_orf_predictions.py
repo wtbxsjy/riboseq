@@ -5,11 +5,18 @@ import os
 import csv
 import re
 import gc
+import gzip
 from typing import List, Dict, Tuple, Set, Optional
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import multiprocessing
 import threading
+
+
+def _open(path, mode='r'):
+    if path.endswith('.gz'):
+        return gzip.open(path, mode + 't')
+    return open(path, mode)
 
 # ---------------------------------------------------------------------------
 # Module-level globals shared with parallel worker processes via fork (Linux).
@@ -100,7 +107,7 @@ class GTFIndex:
         print(f"Loading GTF: {gtf_file}...", file=sys.stderr)
         cds_temp = defaultdict(list)
         gene_temp = defaultdict(list)
-        with open(gtf_file, 'r') as f:
+        with _open(gtf_file, 'r') as f:
             for line in f:
                 if line.startswith('#'): continue
                 parts = line.strip().split('\t')
@@ -842,7 +849,7 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0,
     
     # Check for placeholder file
     try:
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             first_line = f.readline().strip()
             if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
                 print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
@@ -854,7 +861,7 @@ def parse_ribotish(file_path, gtf_index, sample_id, min_len=0,
     filtered_atg = 0
     
     try:
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             header = f.readline().strip().split('\t')
             col_map = {name: i for i, name in enumerate(header)}
             
@@ -958,7 +965,7 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0,
     
     # Check for placeholder file
     try:
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             first_line = f.readline().strip()
             if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
                 print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
@@ -970,7 +977,7 @@ def parse_ribotricer(file_path, gtf_index, sample_id, min_len=0,
     filtered_atg = 0
     
     try:
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             header_line = f.readline()
             while header_line.startswith('#'): header_line = f.readline()
             header = header_line.strip().split('\t')
@@ -1052,7 +1059,7 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0,
     
     # Check for placeholder file
     try:
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             first_line = f.readline().strip()
             if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
                 print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
@@ -1065,7 +1072,7 @@ def parse_orfquant(file_path, gtf_index, sample_id, min_len=0,
         current_blocks = []
         current_attrs = {}
         
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             for line in f:
                 if line.startswith('#'): continue
                 parts = line.strip().split('\t')
@@ -1168,7 +1175,7 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
     print(f"Parsing RiboCode: {file_path}", file=sys.stderr)
 
     try:
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             first_line = f.readline().strip()
             if first_line.startswith('#') and ('placeholder' in first_line.lower() or 'no orfs' in first_line.lower() or 'insufficient' in first_line.lower()):
                 print(f"  -> Placeholder file detected, skipping", file=sys.stderr)
@@ -1207,7 +1214,7 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
         if not path or not os.path.exists(path):
             return metrics
         try:
-            with open(path, 'r') as f:
+            with _open(path, 'r') as f:
                 header = f.readline().strip().split('\t')
                 col_map = {name: i for i, name in enumerate(header)}
                 if 'ORF_ID' not in col_map:
@@ -1246,7 +1253,7 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
     if file_path.endswith('.gtf'):
         grouped = {}
         try:
-            with open(file_path, 'r') as f:
+            with _open(file_path, 'r') as f:
                 for line in f:
                     if line.startswith('#') or not line.strip():
                         continue
@@ -1300,7 +1307,7 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
         return candidates
 
     try:
-        with open(file_path, 'r') as f:
+        with _open(file_path, 'r') as f:
             header = f.readline().strip().split('\t')
             col_map = {name: i for i, name in enumerate(header)}
             required = {'ORF_ID', 'chrom', 'strand', 'ORF_gstart', 'ORF_gstop'}
@@ -1411,7 +1418,7 @@ class BedgraphIndex:
             return
         
         try:
-            with open(bedgraph_file, 'r') as f:
+            with _open(bedgraph_file, 'r') as f:
                 for line in f:
                     if line.startswith('track') or line.startswith('#'):
                         continue
@@ -1515,7 +1522,7 @@ def count_psites_in_region(bedgraph_file, chrom, start, end):
     
     total_count = 0
     try:
-        with open(bedgraph_file, 'r') as f:
+        with _open(bedgraph_file, 'r') as f:
             for line in f:
                 if line.startswith('track') or line.startswith('#'):
                     continue
@@ -1779,7 +1786,7 @@ def _stream_bedgraph_file_counts(task):
         return counts
 
     try:
-        with open(bedgraph_file, 'r') as handle:
+        with _open(bedgraph_file, 'r') as handle:
             for line in handle:
                 if line.startswith('track') or line.startswith('#'):
                     continue

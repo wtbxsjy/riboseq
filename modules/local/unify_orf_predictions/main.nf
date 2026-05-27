@@ -24,8 +24,8 @@ process UNIFY_ORF_PREDICTIONS {
 
     output:
     path "${prefix}.metadata.tsv", emit: metadata
-    path "${prefix}.bed"         , emit: bed
-    path "${prefix}.gtf"         , emit: gtf
+    path "${prefix}.bed.gz"      , emit: bed
+    path "${prefix}.gtf.gz"      , emit: gtf
     path "${prefix}.stats.txt"   , emit: stats
     path "versions.yml"          , emit: versions
 
@@ -82,29 +82,37 @@ process UNIFY_ORF_PREDICTIONS {
     echo "Verifying dependencies..."
     python3 -c "import Bio; import pyfaidx; print('Dependencies OK: Bio=' + Bio.__version__ + ', pyfaidx=' + pyfaidx.__version__)"
 
+    # Decompress any .gz input files so validation tools can read them
+    for f in *.gtf.gz *.bed.gz; do
+        [ -f "\$f" ] && gunzip -f "\$f" || true
+    done
+
     # Check if all input files are empty/placeholder files
     # Input files list generated from Nextflow: ${input_files_list}
     has_valid_input=false
     input_files_to_check="${input_files_list}"
-    
+
     if [ -n "\${input_files_to_check}" ]; then
         for input_file in \${input_files_to_check}; do
-            if [ -f "\${input_file}" ]; then
+            check_file="\${input_file}"
+            # After decompression, the .gz file may be gone; check uncompressed name
+            [ -f "\${check_file}" ] || check_file="\${input_file%.gz}"
+            if [ -f "\${check_file}" ]; then
                 # Check if file has actual content (not just header or placeholder)
-                line_count=\$(wc -l < "\${input_file}" 2>/dev/null || echo "0")
+                line_count=\$(wc -l < "\${check_file}" 2>/dev/null || echo "0")
                 if [ "\${line_count}" -gt 2 ]; then
                     # Check it's not a placeholder file
-                    if ! grep -qi "placeholder" "\${input_file}" 2>/dev/null && \\
-                       ! grep -qi "# Empty" "\${input_file}" 2>/dev/null && \\
-                       ! grep -qi "insufficient" "\${input_file}" 2>/dev/null; then
+                    if ! grep -qi "placeholder" "\${check_file}" 2>/dev/null && \\
+                       ! grep -qi "# Empty" "\${check_file}" 2>/dev/null && \\
+                       ! grep -qi "insufficient" "\${check_file}" 2>/dev/null; then
                         has_valid_input=true
-                        echo "Found valid input file: \${input_file} (\${line_count} lines)"
+                        echo "Found valid input file: \${check_file} (\${line_count} lines)"
                         break
                     else
-                        echo "Skipping placeholder file: \${input_file}"
+                        echo "Skipping placeholder file: \${check_file}"
                     fi
                 else
-                    echo "Skipping empty/small file: \${input_file} (\${line_count} lines)"
+                    echo "Skipping empty/small file: \${check_file} (\${line_count} lines)"
                 fi
             fi
         done
@@ -190,6 +198,9 @@ process UNIFY_ORF_PREDICTIONS {
         fi
     fi
 
+    # Compress text outputs to save disk space
+    gzip -f ${prefix}.bed ${prefix}.gtf
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python3 --version | sed 's/Python //')
@@ -202,7 +213,9 @@ process UNIFY_ORF_PREDICTIONS {
     """
     touch ${prefix}.metadata.tsv
     touch ${prefix}.bed
+    gzip -f ${prefix}.bed
     touch ${prefix}.gtf
+    gzip -f ${prefix}.gtf
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -241,20 +254,20 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
 
     output:
     path "${prefix}_ribotish.metadata.tsv"  , emit: ribotish_metadata  , optional: true
-    path "${prefix}_ribotish.bed"           , emit: ribotish_bed       , optional: true
-    path "${prefix}_ribotish.gtf"           , emit: ribotish_gtf       , optional: true
+    path "${prefix}_ribotish.bed.gz"        , emit: ribotish_bed       , optional: true
+    path "${prefix}_ribotish.gtf.gz"        , emit: ribotish_gtf       , optional: true
     path "${prefix}_ribotricer.metadata.tsv", emit: ribotricer_metadata, optional: true
-    path "${prefix}_ribotricer.bed"         , emit: ribotricer_bed     , optional: true
-    path "${prefix}_ribotricer.gtf"         , emit: ribotricer_gtf     , optional: true
+    path "${prefix}_ribotricer.bed.gz"      , emit: ribotricer_bed     , optional: true
+    path "${prefix}_ribotricer.gtf.gz"      , emit: ribotricer_gtf     , optional: true
     path "${prefix}_ribocode.metadata.tsv"  , emit: ribocode_metadata  , optional: true
-    path "${prefix}_ribocode.bed"           , emit: ribocode_bed       , optional: true
-    path "${prefix}_ribocode.gtf"           , emit: ribocode_gtf       , optional: true
+    path "${prefix}_ribocode.bed.gz"        , emit: ribocode_bed       , optional: true
+    path "${prefix}_ribocode.gtf.gz"        , emit: ribocode_gtf       , optional: true
     path "${prefix}_orfquant.metadata.tsv"  , emit: orfquant_metadata  , optional: true
-    path "${prefix}_orfquant.bed"           , emit: orfquant_bed       , optional: true
-    path "${prefix}_orfquant.gtf"           , emit: orfquant_gtf       , optional: true
+    path "${prefix}_orfquant.bed.gz"        , emit: orfquant_bed       , optional: true
+    path "${prefix}_orfquant.gtf.gz"        , emit: orfquant_gtf       , optional: true
     path "${prefix}.metadata.tsv"           , emit: combined_metadata
-    path "${prefix}.bed"                    , emit: combined_bed
-    path "${prefix}.gtf"                    , emit: combined_gtf
+    path "${prefix}.bed.gz"                 , emit: combined_bed
+    path "${prefix}.gtf.gz"                 , emit: combined_gtf
     path "${prefix}.stats.txt"              , emit: stats
     path "versions.yml"                     , emit: versions
 
@@ -293,14 +306,21 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     fi
     python3 -c "import Bio; import pyfaidx; print('Dependencies OK')"
 
+    # Decompress any .gz input files for validation
+    for f in *.gtf.gz *.bed.gz; do
+        [ -f "\$f" ] && gunzip -f "\$f" || true
+    done
+
     has_valid_input=false
     for input_file in ${input_files_list}; do
-        if [ -f "\${input_file}" ]; then
-            line_count=\$(wc -l < "\${input_file}" 2>/dev/null || echo "0")
+        check_file="\${input_file}"
+        [ -f "\${check_file}" ] || check_file="\${input_file%.gz}"
+        if [ -f "\${check_file}" ]; then
+            line_count=\$(wc -l < "\${check_file}" 2>/dev/null || echo "0")
             if [ "\${line_count}" -gt 2 ] && \
-               ! grep -qi "placeholder" "\${input_file}" 2>/dev/null && \
-               ! grep -qi "# Empty" "\${input_file}" 2>/dev/null && \
-               ! grep -qi "insufficient" "\${input_file}" 2>/dev/null; then
+               ! grep -qi "placeholder" "\${check_file}" 2>/dev/null && \
+               ! grep -qi "# Empty" "\${check_file}" 2>/dev/null && \
+               ! grep -qi "insufficient" "\${check_file}" 2>/dev/null; then
                 has_valid_input=true
                 break
             fi
@@ -363,6 +383,15 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
         fi
     fi
 
+    # Compress text outputs to save disk space
+    for f in ${prefix}_ribotish.bed ${prefix}_ribotish.gtf \
+             ${prefix}_ribotricer.bed ${prefix}_ribotricer.gtf \
+             ${prefix}_ribocode.bed ${prefix}_ribocode.gtf \
+             ${prefix}_orfquant.bed ${prefix}_orfquant.gtf \
+             ${prefix}.bed ${prefix}.gtf; do
+        [ -f "\$f" ] && gzip -f "\$f" || true
+    done
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python3 --version | sed 's/Python //')
@@ -378,6 +407,11 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     touch ${prefix}_ribocode.metadata.tsv ${prefix}_ribocode.bed ${prefix}_ribocode.gtf
     touch ${prefix}_orfquant.metadata.tsv ${prefix}_orfquant.bed ${prefix}_orfquant.gtf
     touch ${prefix}.metadata.tsv ${prefix}.bed ${prefix}.gtf ${prefix}.stats.txt
+    gzip -f ${prefix}_ribotish.bed ${prefix}_ribotish.gtf \
+            ${prefix}_ribotricer.bed ${prefix}_ribotricer.gtf \
+            ${prefix}_ribocode.bed ${prefix}_ribocode.gtf \
+            ${prefix}_orfquant.bed ${prefix}_orfquant.gtf \
+            ${prefix}.bed ${prefix}.gtf
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
