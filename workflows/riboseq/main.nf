@@ -109,12 +109,6 @@ workflow RIBOSEQ {
 
     main:
 
-    // Type coercion for CLI-passed params (Nextflow 26.x strict schema validation)
-    if (params.save_reference instanceof CharSequence)           { params.save_reference = params.save_reference == 'true' }
-    if (params.orfquant_psite_correction instanceof CharSequence) { params.orfquant_psite_correction = params.orfquant_psite_correction == 'true' }
-    if (params.unify_orf_min_len instanceof CharSequence)        { params.unify_orf_min_len = params.unify_orf_min_len as Integer }
-    if (params.unify_orf_frame_merge_min_overlap instanceof CharSequence) { params.unify_orf_frame_merge_min_overlap = params.unify_orf_frame_merge_min_overlap as Double }
-
     // Get BAM input mode from global params (set by PIPELINE_INITIALISATION)
     def is_bam_input = params.is_bam_input ?: false
     def can_run_ribocode = !params.skip_ribocode && !is_bam_input && ['star', 'hisat2'].contains(params.aligner)

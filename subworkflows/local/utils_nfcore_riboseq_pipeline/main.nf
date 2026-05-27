@@ -48,6 +48,15 @@ workflow PIPELINE_INITIALISATION {
     )
 
     //
+    // Type coercion for CLI-passed params (Nextflow 26.x strict schema validation)
+    // Workflow-level Groovy code runs before subworkflow invocations
+    //
+    if (params.save_reference instanceof CharSequence)           { params.save_reference = params.save_reference == 'true' }
+    if (params.orfquant_psite_correction instanceof CharSequence) { params.orfquant_psite_correction = params.orfquant_psite_correction == 'true' }
+    if (params.unify_orf_min_len instanceof CharSequence)        { params.unify_orf_min_len = params.unify_orf_min_len as Integer }
+    if (params.unify_orf_frame_merge_min_overlap instanceof CharSequence) { params.unify_orf_frame_merge_min_overlap = params.unify_orf_frame_merge_min_overlap as Double }
+
+    //
     // Validate parameters and generate parameter summary to stdout
     //
     UTILS_NFSCHEMA_PLUGIN (
