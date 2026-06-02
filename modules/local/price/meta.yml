@@ -1,21 +1,22 @@
 name: "price"
-description: "PRICE (ProRibo-sEq) ORF detection pipeline from the GEDI platform (Erhard Lab)"
+description: "PRICE (Probabilistic Inference of Codon Activities by EM) ORF detection from the GEDI platform (Erhard Lab). Uses EM-based statistical model for identifying actively translated ORFs from Ribo-seq data."
 keywords:
   - riboseq
   - orf prediction
   - price
   - gedi
   - translation
+  - em algorithm
 tools:
   - "gedi":
       description: "Genomic Data Integration platform for Ribo-seq analysis"
       homepage: "https://github.com/erhard-lab/gedi"
-      doi: "10.1038/s41592-019-0401-2"
+      doi: "10.1038/nmeth.4631"
       licence: "GPL-3.0"
   - "price":
       description: "PRICE pipeline for detecting actively translated ORFs from Ribo-seq data"
       homepage: "https://github.com/erhard-lab/gedi"
-      doi: "10.1038/s41592-019-0401-2"
+      doi: "10.1038/nmeth.4631"
       licence: "GPL-3.0"
 input:
   - meta:
@@ -23,7 +24,7 @@ input:
       description: Groovy Map containing sample information [ id, sample_type ]
   - bam:
       type: file
-      description: BAM file from ribosome profiling alignment
+      description: BAM file from ribosome profiling alignment (must be end-to-end aligned with MD and NH tags)
       pattern: "*.bam"
   - bai:
       type: file
@@ -40,11 +41,11 @@ input:
 output:
   - gtf:
       type: file
-      description: PRICE-detected ORFs in GTF format for unification pipeline
+      description: PRICE-detected ORFs in GTF format for downstream unification pipeline
       pattern: "*_Detected_ORFs.gtf"
   - orfs_tsv:
       type: file
-      description: Raw PRICE ORF table
+      description: Raw PRICE ORF table (.orfs.tsv)
       pattern: "*.orfs.tsv"
   - versions:
       type: file

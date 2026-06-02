@@ -1,7 +1,11 @@
 name: price
 channels:
   - conda-forge
+  - bioconda
   - defaults
 dependencies:
   - openjdk=8
-  - r-base=4.0
+  - r-base>=4.0
+  - r-ggplot2
+  - r-reshape2
+  - r-data.table

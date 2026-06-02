@@ -30,6 +30,12 @@ process RIBOWALTZ {
     def read_lengths = params.ribowaltz_read_lengths ?: [28, 29, 30]
     // Convert Groovy list to R vector string: [28, 29, 30] -> "c(28, 29, 30)"
     def read_lengths_r = "c(${read_lengths.join(', ')})"
+    def r_script = file("${moduleDir}/templates/run_ribowaltz.R").text
+        .replace('${prefix}', prefix)
+        .replace('${bam}', bam instanceof Path ? bam.name : bam.toString())
+        .replace('${gtf}', gtf instanceof Path ? gtf.name : gtf.toString())
+        .replace('${read_lengths_r}', read_lengths_r)
+        .replace('${task.process}', task.process.toString())
     """
     #!/bin/bash
     set -euo pipefail
@@ -65,13 +71,7 @@ INSTALL_SCRIPT
     # Note: template variables are expanded manually because template()
     # in Nextflow 26.x returns a file path instead of content.
     cat <<'RSCRIPT' > script.R
-    ${file("${moduleDir}/templates/run_ribowaltz.R")
-        .text
-        .replace('${prefix}', prefix)
-        .replace('${bam}', bam instanceof Path ? bam.name : bam.toString())
-        .replace('${gtf}', gtf instanceof Path ? gtf.name : gtf.toString())
-        .replace('${read_lengths_r}', read_lengths_r)
-        .replace('${task.process}', task.process)}
+${r_script}
 RSCRIPT
 
     Rscript script.R

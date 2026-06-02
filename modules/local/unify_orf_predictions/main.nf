@@ -13,7 +13,7 @@ process UNIFY_ORF_PREDICTIONS {
             'quay.io/biocontainers/biopython:1.79') }"
 
     input:
-    tuple val(ribotish_files), val(ribotricer_files), val(ribocode_files), val(orfquant_files), path(all_inputs)
+    tuple val(ribotish_files), val(ribotricer_files), val(ribocode_files), val(orfquant_files), val(price_files), path(all_inputs)
     path gtf
     path fasta
     path unify_script
@@ -48,6 +48,8 @@ process UNIFY_ORF_PREDICTIONS {
         "--ribocode ${ribocode_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ?
         "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def price_arg = (price_files && price_files instanceof List && price_files.size() > 0) ?
+        "--price ${price_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     // Bedgraph arguments for P-site statistics from RiboseQC
     // psites_bedgraph can be a list or path, check if it has files
     def has_bedgraph = (psites_bedgraph instanceof List && psites_bedgraph.size() > 0) ||
@@ -172,6 +174,7 @@ process UNIFY_ORF_PREDICTIONS {
                 ${ribotricer_arg} \\
                 ${ribocode_arg} \\
                 ${orfquant_arg} \\
+                ${price_arg} \\
                 ${bedgraph_arg} \\
                 ${sample_arg} \\
                 ${extra_args} 2>&1 | tee unify_orf.log
@@ -190,6 +193,7 @@ process UNIFY_ORF_PREDICTIONS {
                 ${ribotricer_arg} \\
                 ${ribocode_arg} \\
                 ${orfquant_arg} \\
+                ${price_arg} \\
                 ${bedgraph_arg} \\
                 ${sample_arg} \\
                 ${extra_args} 2>&1 | tee unify_orf.log
@@ -404,6 +408,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
                 ${ribotricer_arg} \\
                 ${ribocode_arg} \\
                 ${orfquant_arg} \\
+                ${price_arg} \\
                 ${bedgraph_arg} \\
                 ${sample_arg} \\
                 ${extra_args} 2>&1 | tee unify_orf.log
@@ -421,6 +426,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
                 ${ribotricer_arg} \\
                 ${ribocode_arg} \\
                 ${orfquant_arg} \\
+                ${price_arg} \\
                 ${bedgraph_arg} \\
                 ${sample_arg} \\
                 ${extra_args} 2>&1 | tee unify_orf.log

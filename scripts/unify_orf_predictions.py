@@ -33,6 +33,7 @@ _TOOL_STATS_KEY = {
     'Ribotricer': 'ribotricer',
     'RiboCode':   'ribocode',
     'ORFquant':   'orfquant',
+    'PRICE':      'price',
 }
 
 # Try to import biopython and pyfaidx
@@ -1906,6 +1907,114 @@ def calculate_statistics_streaming(final_list, bedgraph_dir, sample_list, num_wo
     print(f"  Streamed {len(tasks)}/{len(tasks)} bedgraph files.", file=sys.stderr)
 
 
+def parse_price(file_path, gtf_index, sample_id, min_len=0,
+                exclude_tistypes=None, atg_only=False):
+    """Parse PRICE (GEDI) ORF TSV output.
+
+    PRICE TSV format:
+      Gene  Id  Location  Candidate Location  Codon  Type  Start  Range  p_value  [conditions...]  Total
+
+    Location column: aa_start-aa_stop:chr:genomic_start-genomic_end:strand
+    Candidate Location: chr:start-end|start-end:strand (multi-exon if splice junctions)
+    """
+    candidates = []
+    if exclude_tistypes is None:
+        exclude_tistypes = set()
+    elif isinstance(exclude_tistypes, str):
+        exclude_tistypes = {t.strip() for t in exclude_tistypes.split(',')}
+
+    # Route GTF files through the orfquant parser
+    fname = str(file_path)
+    if fname.endswith('.gtf') or fname.endswith('.gtf.gz'):
+        return parse_orfquant(file_path, gtf_index, sample_id,
+                              min_len=min_len, exclude_tistypes=exclude_tistypes,
+                              atg_only=atg_only)
+
+    try:
+        with open(file_path, 'r') as fh:
+            header = None
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if header is None:
+                    header = parts
+                    continue
+                if len(parts) < 9:
+                    continue
+
+                gene_id = parts[0] if parts[0] else 'unknown'
+                orf_id = parts[1]
+                loc_str = parts[2]
+                cand_loc_str = parts[3] if len(parts) > 3 else ''
+                start_codon = parts[4] if len(parts) > 4 else 'ATG'
+                orf_type = parts[5] if len(parts) > 5 else 'unknown'
+                range_score_str = parts[7] if len(parts) > 7 else '0'
+                pvalue_str = parts[8] if len(parts) > 8 else '1'
+
+                if exclude_tistypes and orf_type in exclude_tistypes:
+                    continue
+                if atg_only and start_codon.upper() != 'ATG':
+                    continue
+
+                if min_len > 1:
+                    try:
+                        aa_part = loc_str.split(':')[0]
+                        aa_start, aa_stop = aa_part.split('-')
+                        if int(aa_stop) - int(aa_start) + 1 < min_len:
+                            continue
+                    except (ValueError, IndexError):
+                        pass
+
+                chrom, strand, blocks = None, '+', []
+                try:
+                    colon_parts = loc_str.split(':')
+                    if len(colon_parts) >= 3:
+                        chrom = colon_parts[1]
+                        coords = colon_parts[2]
+                        strand = colon_parts[3] if len(colon_parts) > 3 else '+'
+                        blocks = [(int(coords.split('-')[0]), int(coords.split('-')[1]))]
+                except (ValueError, IndexError):
+                    continue
+
+                if chrom is None:
+                    continue
+
+                if cand_loc_str and '|' in cand_loc_str:
+                    try:
+                        cp = cand_loc_str.split(':')
+                        if len(cp) >= 2:
+                            exons = cp[1].split('|')
+                            parsed = []
+                            for e in exons:
+                                se = e.split('-')
+                                parsed.append((int(se[0]), int(se[1])))
+                            if parsed:
+                                blocks = sorted(parsed)
+                    except (ValueError, IndexError):
+                        pass
+
+                try:
+                    pvalue = float(pvalue_str)
+                except ValueError:
+                    pvalue = 1.0
+                try:
+                    score = float(range_score_str)
+                except ValueError:
+                    score = None
+
+                tid = f"PRICE_{gene_id}_{orf_id}"
+                cand = ORFCandidate(chrom, strand, blocks, tid, gene_id,
+                                  'PRICE', sample_id, score=score)
+                candidates.append(cand)
+
+    except Exception as e:
+        print(f"Error parsing PRICE file {file_path}: {e}", file=sys.stderr)
+
+    return candidates
+
+
 # ---------------------------------------------------------------------------
 # Top-level functions for parallel workers (must be at module level so that
 # multiprocessing can pickle/reference them).
@@ -1929,6 +2038,7 @@ def _parse_file_task(task):
         'Ribotricer': parse_ribotricer,
         'RiboCode':   parse_ribocode,
         'ORFquant':   parse_orfquant,
+        'PRICE':      parse_price,
     }[tool]
     orfs = _parse_fn(file_path, _shared_gtf_index, sid, min_len,
                      exclude_tistypes=exclude_tistypes, atg_only=atg_only)
@@ -2114,6 +2224,7 @@ _TOOL_NAMES = [
     ("Ribotricer", "ribotricer"),
     ("RiboCode", "ribocode"),
     ("ORFquant", "orfquant"),
+    ("PRICE", "price"),
 ]
 
 
@@ -2144,6 +2255,7 @@ def main(argv=None):
     parser.add_argument("--ribotricer", nargs='+', help="Ribotricer output files")
     parser.add_argument("--ribocode", nargs='+', help="RiboCode GTF/TXT output files")
     parser.add_argument("--orfquant", nargs='+', help="ORFquant GTF output files")
+    parser.add_argument("--price", nargs='+', help="PRICE ORF TSV output files (GEDI platform)")
     parser.add_argument("--gtf", required=True, help="Reference GTF file for coordinate mapping")
     parser.add_argument("--fasta", required=True, help="Genome FASTA file for validation")
     parser.add_argument("--output", required=True, help="Output prefix")
@@ -2237,12 +2349,16 @@ def main(argv=None):
     if args.orfquant:
         for f in args.orfquant:
             print(f"  - {f}", file=sys.stderr)
+    print(f"PRICE files: {len(args.price) if args.price else 0}", file=sys.stderr)
+    if args.price:
+        for f in args.price:
+            print(f"  - {f}", file=sys.stderr)
 
     all_candidates = []
 
     # Track statistics by tool
     tool_stats   = defaultdict(lambda: {'count': 0, 'samples': set()})
-    sample_stats = defaultdict(lambda: {'ribotish': 0, 'ribotricer': 0, 'ribocode': 0, 'orfquant': 0})
+    sample_stats = defaultdict(lambda: {'ribotish': 0, 'ribotricer': 0, 'ribocode': 0, 'orfquant': 0, 'price': 0})
 
     # Build task list: (tool_name, file_path, sample_id, min_len, excl, atg_only)
     parse_tasks = []
@@ -2263,6 +2379,10 @@ def main(argv=None):
         for f in args.orfquant:
             sid = infer_sample_id_from_prediction_path(f, '_Detected_ORFs.gtf')
             parse_tasks.append(('ORFquant', f, sid, args.min_len, exclude_tistypes, args.atg_only))
+    if args.price:
+        for f in args.price:
+            sid = infer_sample_id_from_prediction_path(f, '.orfs.tsv')
+            parse_tasks.append(('PRICE', f, sid, args.min_len, exclude_tistypes, args.atg_only))
 
     # --- Parallel or sequential file parsing ---
     if use_parallel and len(parse_tasks) > 1:

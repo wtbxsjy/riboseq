@@ -699,7 +699,9 @@ workflow RIBOSEQ {
             ch_gtf
         )
         ch_versions = ch_versions.mix(PRICE.out.versions)
-        ch_price_gtf = PRICE.out.gtf
+        ch_price_gtf = PRICE.out.orfs_tsv
+        // Fall back to GTF if TSV is empty (stub mode)
+        ch_price_gtf = ch_price_gtf.ifEmpty( PRICE.out.gtf )
     }
 
     //

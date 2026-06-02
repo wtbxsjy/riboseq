@@ -4,8 +4,8 @@ process PRICE {
 
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'oras://community.wave.seqera.io/library/gedi_price:latest' :
-        'community.wave.seqera.io/library/gedi_price:latest' }"
+        (params.price_container ?: 'oras://community.wave.seqera.io/library/gedi_price:latest') :
+        (params.price_container ?: 'community.wave.seqera.io/library/gedi_price:latest') }"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -22,117 +22,144 @@ process PRICE {
 
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
-    def memory = task.memory ? task.memory.toGiga() + 'g' : '16g'
+    def genome_name = "price_genome_${meta.id}"
+    def read_lengths = params.sorf_filter_read_lengths ?: [28, 29, 30]
+    // PRICE expects filter as "min:max" e.g. "28:30"
+    def length_min = read_lengths instanceof List ? read_lengths.min() : read_lengths
+    def length_max = read_lengths instanceof List ? read_lengths.max() : read_lengths
+    def price_filter = "${length_min}:${length_max}"
     """
     #!/bin/bash
     set -euo pipefail
 
-    OUTDIR="."
-    PREFIX="${prefix}"
-
-    # Step 1: Convert BAM to GEDI CIT format
-    echo "[PRICE] Converting BAM to CIT format..."
-    gedi -e Bam2CIT \
-        -bam ${bam} \
-        -o "\${OUTDIR}/\${PREFIX}.cit" \
-        -genome ${fasta} \
-        -gtf ${gtf} \
+    echo "[PRICE] Preparing genome: ${genome_name}"
+    gedi IndexGenome \
+        -s ${fasta} \
+        -a ${gtf} \
+        -n ${genome_name} \
+        -o ${genome_name}.oml \
+        -p \
+        -nobowtie \
+        -nostar \
+        -nokallisto \
         || {
-            echo "WARNING: Bam2CIT conversion failed."
-            echo "BAM file may be empty or incompatible. Creating placeholder outputs."
-            echo -e "# PRICE placeholder\\norf_id\\tchr\\tstart\\tend\\tstrand\\ttype\\tscore" > "\${OUTDIR}/\${PREFIX}.orfs.tsv"
-            echo "# PRICE placeholder - BAM conversion failed" > "\${OUTDIR}/\${PREFIX}_Detected_ORFs.gtf"
-            cat <<-END_VERSIONS > "\${OUTDIR}/versions.yml"
-            "${task.process}":
-                gedi: "1.0.6d"
-                price: "pipeline"
-            END_VERSIONS
-            exit 0
+            echo "ERROR: IndexGenome failed"
+            exit 1
         }
 
-    CIT_FILE="\${OUTDIR}/\${PREFIX}.cit"
+    echo "[PRICE] Genome prepared, listing generated files:"
+    ls -lh ${genome_name}*
 
-    # Step 2: Run PRICE pipeline
-    echo "[PRICE] Running PRICE ORF detection..."
-    export GEDI_MEMORY="${memory}"
-
-    gedi -e Price \
-        -r "\${CIT_FILE}" \
-        -g ${gtf} \
-        -f ${fasta} \
-        -o "\${OUTDIR}/\${PREFIX}" \
-        -t ${task.cpus} \
+    echo "[PRICE] Running PRICE ORF detection on ${meta.id}"
+    gedi Price \
+        -reads ${bam} \
+        -genomic ${genome_name}.oml \
+        -prefix ${prefix} \
+        -filter ${price_filter} \
+        -nthreads ${task.cpus} \
+        -progress \
         || {
             echo "WARNING: PRICE main pipeline returned non-zero exit code."
             echo "Some stages may have completed. Checking for partial output..."
         }
 
-    # Step 3: Collect ORF output
-    if [ -f "\${OUTDIR}/\${PREFIX}.orfs.tsv" ] && [ -s "\${OUTDIR}/\${PREFIX}.orfs.tsv" ]; then
-        echo "[PRICE] ORF detection successful."
+    # Collect ORF output
+    if [ -f "${prefix}.orfs.tsv" ] && [ -s "${prefix}.orfs.tsv" ]; then
+        echo "[PRICE] ORF detection successful. \$(wc -l < ${prefix}.orfs.tsv) ORFs detected."
 
-        # Run post-PRICE analysis if output exists
-        gedi -e PriceAnalyze \
-            -o "\${OUTDIR}/\${PREFIX}" \
-            -g ${gtf} \
+        # Run post-PRICE analysis
+        gedi PriceAnalyze \
+            -prefix ${prefix} \
+            -genomic ${genome_name}.oml \
             || echo "WARNING: PriceAnalyze post-processing failed."
     else
         echo "[PRICE] No ORFs detected. Creating placeholder outputs."
-        echo -e "orf_id\\tchr\\tstart\\tend\\tstrand\\ttype\\tscore" > "\${OUTDIR}/\${PREFIX}.orfs.tsv"
+        echo -e "orf_id\\tchr\\tstart\\tend\\tstrand\\ttype\\tscore" > "${prefix}.orfs.tsv"
     fi
 
-    # Step 4: Convert PRICE ORF TSV to GTF for unification pipeline
+    # Convert PRICE ORF TSV to GTF for unification pipeline
+    # PRICE TSV columns: Gene, Id, Location, Candidate Location, Codon, Type, Start, Range, p value, [conditions...], Total
+    # Location format: chr+strand:start-end[|alt_start-alt_end], e.g. "1+:53348031-53348121"
     echo "[PRICE] Converting ORFs to GTF..."
-    cat <<'RCONVERT' > convert_orfs.R
-    # Convert PRICE ORF TSV to GTF
-    prefix <- "${prefix}"
-    orf_file <- paste0(prefix, ".orfs.tsv")
-    gtf_out  <- paste0(prefix, "_Detected_ORFs.gtf")
+    Rscript - "${prefix}" << 'RCODE'
+args <- commandArgs(trailingOnly = TRUE)
+prefix <- args[1]
 
-    if (file.exists(orf_file)) {
-        orfs <- tryCatch(
-            read.delim(orf_file, stringsAsFactors = FALSE, check.names = FALSE),
-            error = function(e) NULL
-        )
+orf_file <- paste0(prefix, ".orfs.tsv")
+gtf_out  <- paste0(prefix, "_Detected_ORFs.gtf")
 
-        if (!is.null(orfs) && nrow(orfs) > 0 && "orf_id" %in% colnames(orfs)) {
-            cat(paste0("# PRICE ORFs: ", nrow(orfs), " entries\\n"), file = gtf_out)
-
-            for (i in seq_len(nrow(orfs))) {
-                row <- orfs[i, ]
-                chr    <- if ("chr"   %in% names(row)) row\$chr   else "unknown"
-                start  <- if ("start" %in% names(row)) row\$start else 1
-                end    <- if ("end"   %in% names(row)) row\$end   else 1
-                strand <- if ("strand" %in% names(row)) row\$strand else "."
-                orf_id <- row\$orf_id
-
-                cat(sprintf('%s\\tPRICE\\tCDS\\t%s\\t%s\\t.\\t%s\\t.\\tgene_id "%s"; transcript_id "%s";\\n',
-                    chr, start, end, strand, orf_id, orf_id),
-                    file = gtf_out, append = TRUE)
-            }
-            cat(sprintf("Wrote %d PRICE ORFs to GTF\\n", nrow(orfs)))
-        } else {
-            cat("# PRICE: no valid ORFs found\\n", file = gtf_out)
-            cat("PRICE: no valid ORF entries to convert\\n")
-        }
+parse_location <- function(loc_str) {
+    # Actual PRICE format: chr+strand:start-end[|block2_start-block2_end]
+    # e.g. "1+:53348031-53348121", "1+:58443479-58443513|58444193-58444225"
+    parts <- strsplit(loc_str, ":")[[1]]
+    if (length(parts) < 2) return(NULL)
+    chr_strand <- parts[1]  # e.g. "1+" or "MT-"
+    # Extract strand (last character) if + or -
+    last_char <- substr(chr_strand, nchar(chr_strand), nchar(chr_strand))
+    if (last_char == "+" || last_char == "-") {
+        chr <- substr(chr_strand, 1, nchar(chr_strand) - 1)
+        strand <- last_char
     } else {
-        cat("# PRICE: output file not found\\n", file = gtf_out)
-        cat("PRICE: ORF TSV file not found\\n")
+        chr <- chr_strand
+        strand <- "+"
     }
-RCONVERT
+    # Coordinates: take the first block (before | for multi-exon ORFs)
+    coord_block <- strsplit(parts[2], "|", fixed = TRUE)[[1]][1]
+    coords <- as.integer(strsplit(coord_block, "-")[[1]])
+    data.frame(chr = chr, start = coords[1], end = coords[2], strand = strand,
+               stringsAsFactors = FALSE)
+}
 
-    Rscript convert_orfs.R
+if (file.exists(orf_file) && file.info(orf_file)\$size > 50) {
+    orfs <- tryCatch(
+        read.delim(orf_file, stringsAsFactors = FALSE, check.names = FALSE, header = TRUE),
+        error = function(e) NULL
+    )
+
+    if (!is.null(orfs) && nrow(orfs) > 0) {
+        nc <- ncol(orfs)
+        cat(paste0("# PRICE ORFs: ", nrow(orfs), " entries\\n"), file = gtf_out)
+        n_written <- 0
+
+        for (i in seq_len(nrow(orfs))) {
+            # Column 1 = Gene, 2 = Id, 3 = Location
+            loc_info <- parse_location(as.character(orfs[i, 3]))
+            if (is.null(loc_info)) next
+
+            gene_id <- if (nc >= 1) gsub("[;= ]", "_", as.character(orfs[i, 1])) else "unknown"
+            orf_uid <- if (nc >= 2) gsub("[;= ]", "_", as.character(orfs[i, 2])) else paste0("orf_", i)
+            orf_type <- if (nc >= 6) as.character(orfs[i, 6]) else "CDS"
+            orf_score <- if (nc >= 8) as.character(orfs[i, 8]) else "."
+            orf_pval <- if (nc >= 9) as.character(orfs[i, 9]) else "."
+
+            cat(sprintf(
+                "%s\\tPRICE\\tCDS\\t%d\\t%d\\t.\\t%s\\t.\\tgene_id \\"%s\\"; transcript_id \\"%s\\"; orf_type \\"%s\\"; score \\"%s\\"; pvalue \\"%s\\"; source \\"PRICE\\";\\n",
+                loc_info\$chr, loc_info\$start, loc_info\$end,
+                loc_info\$strand,
+                gene_id, orf_uid,
+                orf_type, orf_score, orf_pval),
+                file = gtf_out, append = TRUE)
+            n_written <- n_written + 1
+        }
+        cat(sprintf("Wrote %d PRICE ORFs to GTF\\n", n_written))
+    } else {
+        cat("# PRICE: no valid ORF entries\\n", file = gtf_out)
+        cat("PRICE: no valid ORF entries\\n")
+    }
+} else {
+    cat("# PRICE: no ORF output found\\n", file = gtf_out)
+    cat("PRICE: ORF TSV file not found or empty\\n")
+}
+RCODE
+
+    ls -lh ${prefix}*
 
     # Write versions
-    GEDI_VER=\$(gedi -e Version 2>/dev/null || echo "1.0.6d")
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        gedi: "\$GEDI_VER"
-        price: "pipeline"
-    END_VERSIONS
+    GEDI_VER=\$(gedi Version 2>/dev/null || echo "unknown")
+    printf '"%s":\\n    gedi: "%s"\\n    price: "1.0"\\n' \\
+        '${task.process}' "\$GEDI_VER" > versions.yml
 
-    echo "[PRICE] Pipeline complete."
-    ls -lh \${PREFIX}*
+    echo "[PRICE] Pipeline complete for ${meta.id}."
     """
 
     stub:
@@ -141,10 +168,7 @@ RCONVERT
     echo -e "orf_id\\tchr\\tstart\\tend\\tstrand\\ttype\\tscore" > ${prefix}.orfs.tsv
     echo "# PRICE stub" > ${prefix}_Detected_ORFs.gtf
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        gedi: "1.0.6d"
-        price: "pipeline"
-    END_VERSIONS
+    printf '"%s":\\n    gedi: "stub"\\n    price: "stub"\\n' \\
+        '${task.process}' > versions.yml
     """
 }

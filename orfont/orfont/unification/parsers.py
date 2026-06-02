@@ -544,3 +544,117 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
         print(f"Error parsing RiboCode file: {e}", file=sys.stderr)
 
     return candidates
+
+
+def parse_price(file_path, gtf_index, sample_id, min_len=6,
+                exclude_tistypes=None, atg_only=False):
+    """Parse PRICE (GEDI) ORF TSV output.
+
+    PRICE TSV format:
+      Gene  Id  Location  Candidate Location  Codon  Type  Start  Range  p value  [conditions...]  Total
+
+    Location column: aa_start-aa_stop:chr:genomic_start-genomic_end:strand
+    Candidate Location: chr:start-end|start-end:strand (multi-exon if splice junctions)
+    """
+    candidates = []
+    # Route GTF files through the orfquant parser
+    if str(file_path).endswith('.gtf') or str(file_path).endswith('.gtf.gz'):
+        from orfont.unification.parsers import parse_orfquant as _parse_orfquant
+        return _parse_orfquant(file_path, gtf_index, sample_id,
+                               min_len=min_len, exclude_tistypes=exclude_tistypes,
+                               atg_only=atg_only)
+
+    if exclude_tistypes is None:
+        exclude_tistypes = set()
+    elif isinstance(exclude_tistypes, str):
+        exclude_tistypes = {t.strip() for t in exclude_tistypes.split(',')}
+
+    try:
+        with open(file_path, 'r') as fh:
+            header = None
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if header is None:
+                    header = parts
+                    continue
+                if len(parts) < 9:
+                    continue
+
+                gene_id = parts[0] if parts[0] else 'unknown'
+                orf_id = parts[1]
+                loc_str = parts[2]
+                cand_loc_str = parts[3] if len(parts) > 3 else ''
+                start_codon = parts[4] if len(parts) > 4 else 'ATG'
+                orf_type = parts[5] if len(parts) > 5 else 'unknown'
+                range_score_str = parts[7] if len(parts) > 7 else '0'
+                pvalue_str = parts[8] if len(parts) > 8 else '1'
+
+                if exclude_tistypes and orf_type in exclude_tistypes:
+                    continue
+                if atg_only and start_codon.upper() != 'ATG':
+                    continue
+
+                # Check aa length
+                if min_len > 1:
+                    try:
+                        aa_part = loc_str.split(':')[0]
+                        aa_start, aa_stop = aa_part.split('-')
+                        if int(aa_stop) - int(aa_start) + 1 < min_len:
+                            continue
+                    except (ValueError, IndexError):
+                        pass
+
+                # Parse genomic coordinates
+                chrom, strand, blocks = None, '+', []
+                try:
+                    colon_parts = loc_str.split(':')
+                    if len(colon_parts) >= 3:
+                        chrom = colon_parts[1]
+                        coords = colon_parts[2]
+                        strand = colon_parts[3] if len(colon_parts) > 3 else '+'
+                        blocks = [(int(coords.split('-')[0]), int(coords.split('-')[1]))]
+                except (ValueError, IndexError):
+                    continue
+
+                if chrom is None:
+                    continue
+
+                # Multi-exon from Candidate Location
+                if cand_loc_str and '|' in cand_loc_str:
+                    try:
+                        cp = cand_loc_str.split(':')
+                        if len(cp) >= 2:
+                            exons = cp[1].split('|')
+                            parsed = []
+                            for e in exons:
+                                se = e.split('-')
+                                parsed.append((int(se[0]), int(se[1])))
+                            if parsed:
+                                blocks = sorted(parsed)
+                    except (ValueError, IndexError):
+                        pass
+
+                try:
+                    pvalue = float(pvalue_str)
+                except ValueError:
+                    pvalue = 1.0
+                try:
+                    score = float(range_score_str)
+                except ValueError:
+                    score = _score_from_pvalue(pvalue)
+
+                tid = f"PRICE_{gene_id}_{orf_id}"
+                cand = ORFCandidate(
+                    chrom, strand, blocks, tid, gene_id,
+                    'PRICE', sample_id,
+                    score=score, pvalue=pvalue,
+                )
+                candidates.append(cand)
+
+    except Exception as e:
+        print(f"Error parsing PRICE file {file_path}: {e}", file=sys.stderr)
+
+    return candidates

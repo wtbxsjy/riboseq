@@ -4,76 +4,109 @@ From: ubuntu:22.04
 %labels
     Author nf-core/riboseq
     Description GEDI platform with PRICE Ribo-seq ORF detection pipeline
+    Version 1.0.0
+
+%files
+    /home/25119231r/riboseq/riboseq/containers/gedi_source /opt/gedi_src
 
 %post
-    apt-get update && apt-get install -y --no-install-recommends \
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=Etc/UTC
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+
+    apt-get update && apt-get install -y --no-install-recommends --fix-missing \
         openjdk-8-jdk \
         maven \
-        git \
         r-base \
+        r-cran-ggplot2 \
+        r-cran-reshape2 \
+        r-cran-data.table \
         python3 \
         procps \
         && apt-get clean \
-        && rm -rf /var/lib/apt/lists/*
+        && rm -rf /var/lib/apt/lists/* \
+        || { echo "ERROR: apt-get failed"; exit 1; }
 
-    # Set Java 8 as default
-    update-alternatives --set java /usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java
+    which mvn  > /dev/null || { echo "ERROR: mvn not found"; exit 1; }
+    which java > /dev/null || { echo "ERROR: java not found"; exit 1; }
 
-    # Create installation directory
+    # Build GEDI from pre-copied source
+    echo "Building GEDI with Maven..."
+    cd /opt/gedi_src/Gedi
+    mvn package -DskipTests -Dproject.build.sourceEncoding=UTF-8 2>&1 || {
+        echo "ERROR: Maven build failed"
+        exit 1
+    }
+
+    # Setup GEDI home
     mkdir -p /opt/gedi
 
-%files
-    # Copy GEDI source from patched_packages
-    patched_packages/gedi /opt/gedi/source
+    # Deploy JAR
+    if [ -d target ]; then
+        cp target/*.jar /opt/gedi/gedi.jar 2>/dev/null || true
+    fi
+    # Maven user.dir output (pom.xml config)
+    if [ ! -f /opt/gedi/gedi.jar ]; then
+        cp Gedi-*.jar /opt/gedi/gedi.jar 2>/dev/null || true
+    fi
+    if [ ! -f /opt/gedi/gedi.jar ]; then
+        cp gedi.jar /opt/gedi/gedi.jar 2>/dev/null || true
+    fi
+    if [ ! -f /opt/gedi/gedi.jar ]; then
+        echo "ERROR: Could not find built JAR"
+        find /opt -name "*.jar" 2>/dev/null
+        exit 1
+    fi
 
-%post
-    # Build GEDI from source
-    cd /opt/gedi/source/Gedi
-    mvn package -DskipTests -q
+    # Copy dependencies
+    if [ -d lib ]; then
+        cp -r lib /opt/gedi/lib
+    fi
 
-    # Create symlinks
-    ln -sf /opt/gedi/source/Gedi/target/*.jar /opt/gedi/gedi.jar
-    ln -sf /opt/gedi/source/Gedi/lib /opt/gedi/lib
-
-    # Create gedi launcher script
+    # Create launcher
     cat > /usr/local/bin/gedi << 'GEDI_SCRIPT'
 #!/bin/bash
-# GEDI launcher script
 GEDI_HOME="/opt/gedi"
-JAVA_OPTS="-Xmx\${GEDI_MEMORY:-16g} -server -Djava.awt.headless=true"
+JAVA_OPTS="-Xmx${GEDI_MEMORY:-16g} -server -Djava.awt.headless=true ${GEDI_JAVA_OPTS:-}"
 
-CP="\$GEDI_HOME/gedi.jar"
-if [ -d "\$GEDI_HOME/lib" ]; then
-    for jar in "\$GEDI_HOME/lib"/*.jar; do
-        CP="\$CP:\$jar"
+CP="$GEDI_HOME/gedi.jar"
+if [ -d "$GEDI_HOME/lib" ]; then
+    for jar in "$GEDI_HOME/lib"/*.jar; do
+        CP="$CP:$jar"
     done
 fi
 
-exec java \$JAVA_OPTS -cp "\$CP" gedi.app.Gedi -e "\$@"
+TOOL="$1"
+shift
+exec java $JAVA_OPTS -cp "$CP" "executables.$TOOL" "$@"
 GEDI_SCRIPT
     chmod +x /usr/local/bin/gedi
 
+    # GEDI config
+    mkdir -p /opt/gedi/config
+    echo 'gedi.version=1.0.6' > /opt/gedi/config/config.oml
+    echo 'genomic = []' >> /opt/gedi/config/config.oml
+
+    # Verify
+    echo "Testing GEDI..."
+    gedi Version 2>&1 || echo "WARNING: Version check failed (non-fatal)"
+
 %environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
     export GEDI_HOME="/opt/gedi"
     export GEDI_MEMORY="16g"
-    export PATH="/opt/gedi:\$PATH"
+    export GEDI_CONFIG_HOME="/opt/gedi/config"
+    export HOME="/opt/gedi"
 
 %runscript
     exec /usr/local/bin/gedi "$@"
 
 %help
-    GEDI (Genomic Data Integration) platform by the Erhard Lab.
-
-    Key tools for Ribo-seq analysis:
-      - Price: PRICE ORF detection pipeline (16 stages)
-      - PriceAnalyze: Post-PRICE analysis (major isoform, codon profiles)
-      - EstimateRiboModel: EM-based ribosome cleavage model estimation
-      - InferOrfsNew: ORF inference with statistical testing
-      - RiboView: GUI viewer for Ribo-seq results
-      - Bam2CIT: BAM to CIT format conversion
-      - CIT2Bam: CIT to BAM format conversion
+    GEDI platform with PRICE ORF detection.
 
     Usage:
-      gedi -e Price [parameters]
-      gedi -e Bam2CIT [parameters]
-      gedi -e InferOrfsNew [parameters]
+      gedi Price -reads <file> -genomic <genome> -prefix <prefix> [options]
+      gedi IndexGenome -s <fasta> -a <gtf> -n <name> [options]
+      gedi Bam2CIT -bam <bam> -o <output> -genome <fasta> -gtf <gtf>

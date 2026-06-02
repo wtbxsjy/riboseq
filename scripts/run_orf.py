@@ -108,6 +108,7 @@ def _run_orfont_unify(args):
     ap.add_argument('--ribotricer', nargs='+', default=[])
     ap.add_argument('--ribocode', nargs='+', default=[])
     ap.add_argument('--orfquant', nargs='+', default=[])
+    ap.add_argument('--price', nargs='+', default=[])
     ap.add_argument('--gtf', required=True)
     ap.add_argument('--fasta', required=True)
     ap.add_argument('--output', required=True)
@@ -152,6 +153,7 @@ def _run_orfont_unify(args):
         ribotricer_files=parsed.ribotricer or None,
         ribocode_files=parsed.ribocode or None,
         orfquant_files=parsed.orfquant or None,
+        price_files=parsed.price or None,
         gtf_path=parsed.gtf,
         fasta_path=parsed.fasta,
         output_dir=output_dir,

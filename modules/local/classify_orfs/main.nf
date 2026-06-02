@@ -39,17 +39,17 @@ process CLASSIFY_ORFS_GENCODE {
 
     # Check if input is a placeholder file
     is_placeholder=false
-    if [ -f "\${local_bed}" ]; then
-        line_count=\$(wc -l < "\${local_bed}" 2>/dev/null || echo "0")
-        if grep -qi "placeholder" "\${local_bed}" 2>/dev/null || \\
-           grep -qi "insufficient" "\${local_bed}" 2>/dev/null || \\
+    if [ -f "${local_bed}" ]; then
+        line_count=\$(wc -l < "${local_bed}" 2>/dev/null || echo "0")
+        if grep -qi "placeholder" "${local_bed}" 2>/dev/null || \\
+           grep -qi "insufficient" "${local_bed}" 2>/dev/null || \\
            [ "\${line_count}" -le 2 ]; then
             is_placeholder=true
-            echo "INFO: Input file \${local_bed} detected as placeholder (\${line_count} lines)"
+            echo "INFO: Input file ${local_bed} detected as placeholder (\${line_count} lines)"
         fi
     else
         is_placeholder=true
-        echo "WARNING: Input file \${local_bed} not found - treating as placeholder"
+        echo "WARNING: Input file ${local_bed} not found - treating as placeholder"
     fi
 
     if [ "\${is_placeholder}" = "true" ]; then
@@ -152,17 +152,17 @@ process CLASSIFY_ORFS_ORFQUANT {
 
     # Check if input is a placeholder file
     is_placeholder=false
-    if [ -f "\${local_gtf}" ]; then
-        line_count=\$(wc -l < "\${local_gtf}" 2>/dev/null || echo "0")
-        if grep -qi "placeholder" "\${local_gtf}" 2>/dev/null || \\
-           grep -qi "insufficient" "\${local_gtf}" 2>/dev/null || \\
+    if [ -f "${local_gtf}" ]; then
+        line_count=\$(wc -l < "${local_gtf}" 2>/dev/null || echo "0")
+        if grep -qi "placeholder" "${local_gtf}" 2>/dev/null || \\
+           grep -qi "insufficient" "${local_gtf}" 2>/dev/null || \\
            [ "\${line_count}" -le 2 ]; then
             is_placeholder=true
-            echo "INFO: Input file \${local_gtf} detected as placeholder (\${line_count} lines)"
+            echo "INFO: Input file ${local_gtf} detected as placeholder (\${line_count} lines)"
         fi
     else
         is_placeholder=true
-        echo "WARNING: Input file \${local_gtf} not found - treating as placeholder"
+        echo "WARNING: Input file ${local_gtf} not found - treating as placeholder"
     fi
 
     if [ "\${is_placeholder}" = "true" ]; then

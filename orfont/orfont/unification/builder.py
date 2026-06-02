@@ -200,7 +200,7 @@ def _write_outputs(con, output_prefix):
 # ---------------------------------------------------------------------------
 
 def unify(ribotish_files=None, ribotricer_files=None, ribocode_files=None,
-          orfquant_files=None, gtf_path=None, fasta_path=None,
+          orfquant_files=None, price_files=None, gtf_path=None, fasta_path=None,
           output_dir='.', prefix='unified_orfs',
           frame_merge=True, frame_merge_min_overlap=0.9,
           seq_cluster=False, bedgraph_dir=None, sample_list=None,
@@ -240,7 +240,7 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
     from orfont.core.db import get_connection, init_schema, reset_connection
     from orfont.core.models import ORFCandidate, GTFIndex
     from orfont.unification.parsers import (
-        parse_ribotish, parse_ribotricer, parse_orfquant, parse_ribocode,
+        parse_ribotish, parse_ribotricer, parse_orfquant, parse_ribocode, parse_price,
         infer_sample_id_from_prediction_path,
     )
 
@@ -273,6 +273,7 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
         ("Ribotricer", ribotricer_files, parse_ribotricer, "_translating_ORFs.tsv"),
         ("RiboCode", ribocode_files, parse_ribocode, "_collapsed.gtf"),
         ("ORFquant", orfquant_files, parse_orfquant, "_Detected_ORFs.gtf"),
+        ("PRICE", price_files, parse_price, ".orfs.tsv"),
     ]
 
     total_parsed = 0

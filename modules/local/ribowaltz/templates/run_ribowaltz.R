@@ -9,6 +9,11 @@ suppressPackageStartupMessages({
     library(riboWaltz)
     library(data.table)
     library(ggplot2)
+    library(GenomicRanges)
+    library(GenomicFeatures)
+    library(GenomicAlignments)
+    library(Rsamtools)
+    library(GenomeInfoDb)
 })
 
 ################################################
@@ -20,11 +25,11 @@ bam_file      <- '${bam}'
 gtf_file      <- '${gtf}'
 read_lengths  <- ${read_lengths_r}
 
-cat("=== riboWaltz Analysis ===\\n")
-cat("Sample:", prefix, "\\n")
-cat("BAM:", bam_file, "\\n")
-cat("GTF:", gtf_file, "\\n")
-cat("Read lengths:", paste(read_lengths, collapse = ", "), "\\n")
+cat("=== riboWaltz Analysis ===\n")
+cat("Sample:", prefix, "\n")
+cat("BAM:", bam_file, "\n")
+cat("GTF:", gtf_file, "\n")
+cat("Read lengths:", paste(read_lengths, collapse = ", "), "\n")
 
 ################################################
 ## Create Output Directory                    ##
@@ -37,25 +42,25 @@ dir.create(plot_dir, showWarnings = FALSE, recursive = TRUE)
 ## Helper: strip version from transcript IDs  ##
 ################################################
 
-strip_version <- function(x) sub("\\\\.[0-9]+$", "", x)
+strip_version <- function(x) sub("\\.[0-9]+$", "", x)
 
 ################################################
 ## 1. Create Annotation from GTF              ##
 ##    Bioc 3.20 compatible via txdbmaker      ##
 ################################################
 
-cat("\\n[1/7] Creating annotation from GTF...\\n")
+cat("\n[1/7] Creating annotation from GTF...\n")
 
 annotation <- tryCatch({
     # Prefer txdbmaker for Bioc 3.20+, fall back to GenomicFeatures
     if (requireNamespace("txdbmaker", quietly = TRUE)) {
         txdb <- txdbmaker::makeTxDbFromGFF(gtf_file, format = "gtf",
                                             dataSource = "gencode", organism = NA)
-        cat("Using txdbmaker::makeTxDbFromGFF\\n")
+        cat("Using txdbmaker::makeTxDbFromGFF\n")
     } else {
         txdb <- GenomicFeatures::makeTxDbFromGFF(gtf_file, format = "gtf",
                                                   dataSource = "gencode", organism = NA)
-        cat("Using GenomicFeatures::makeTxDbFromGFF\\n")
+        cat("Using GenomicFeatures::makeTxDbFromGFF\n")
     }
 
     suppressWarnings({
@@ -103,21 +108,21 @@ annotation <- tryCatch({
 
     annotation
 }, error = function(e) {
-    cat("ERROR creating annotation:", conditionMessage(e), "\\n")
-    cat("Falling back to riboWaltz::create_annotation...\\n")
+    cat("ERROR creating annotation:", conditionMessage(e), "\n")
+    cat("Falling back to riboWaltz::create_annotation...\n")
     tryCatch({
         ann <- create_annotation(gtfpath = gtf_file, dataSource = "gencode", organism = NA)
         ann[, transcript := strip_version(transcript)]
         ann[!duplicated(transcript)]
     }, error = function(e2) {
-        cat("FATAL: Cannot create annotation:", conditionMessage(e2), "\\n")
+        cat("FATAL: Cannot create annotation:", conditionMessage(e2), "\n")
         quit(status = 1)
     })
 })
 
-cat("Annotation created:", nrow(annotation), "transcripts\\n")
+cat("Annotation created:", nrow(annotation), "transcripts\n")
 if (nrow(annotation) > 0) {
-    cat("Sample transcript IDs:", paste(head(annotation$transcript, 5), collapse = ", "), "\\n")
+    cat("Sample transcript IDs:", paste(head(annotation$transcript, 5), collapse = ", "), "\n")
 }
 
 ################################################
@@ -125,7 +130,7 @@ if (nrow(annotation) > 0) {
 ##    Custom loader with version stripping     ##
 ################################################
 
-cat("\\n[2/7] Loading BAM data with transcript version matching...\\n")
+cat("\n[2/7] Loading BAM data with transcript version matching...\n")
 
 load_bam_single <- function(bam_path, annotation) {
     # Read BAM alignments
@@ -151,7 +156,7 @@ load_bam_single <- function(bam_path, annotation) {
     ga <- ga[seqnames(ga) %in% annotation$transcript]
 
     if (length(ga) == 0) {
-        cat("WARNING: No reads mapped to annotated transcripts\\n")
+        cat("WARNING: No reads mapped to annotated transcripts\n")
         return(data.table(
             transcript = character(), end5 = integer(), end3 = integer(),
             length = integer(), str = character()
@@ -175,20 +180,21 @@ load_bam_single <- function(bam_path, annotation) {
 reads_list <- tryCatch({
     dt <- load_bam_single(bam_file, annotation)
     sample_name <- gsub("-", ".", prefix)
-    setnames(dt, "transcript", "transcript")
-    set(list(dt), names = sample_name)
+    reads_list <- setNames(list(dt), sample_name)
+    reads_list
 }, error = function(e) {
-    cat("ERROR loading BAM:", conditionMessage(e), "\\n")
-    cat("Falling back to riboWaltz::bamtolist...\\n")
+    cat("ERROR loading BAM:", conditionMessage(e), "\n")
+    cat("Falling back to riboWaltz::bamtolist...\n")
     tryCatch({
-        bam_dir <- dirname(bam_file)
+        bam_dir <- normalizePath(dirname(bam_file))
         tmp_dir <- file.path(tempdir(), "rw_bam")
         dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
         base_bam <- basename(bam_file)
-        file.symlink(bam_file, file.path(tmp_dir, base_bam))
+        file.symlink(file.path(bam_dir, base_bam), file.path(tmp_dir, base_bam))
         bai_file <- paste0(bam_file, ".bai")
         if (file.exists(bai_file)) {
-            file.symlink(bai_file, file.path(tmp_dir, paste0(base_bam, ".bai")))
+            file.symlink(file.path(bam_dir, paste0(base_bam, ".bai")),
+                         file.path(tmp_dir, paste0(base_bam, ".bai")))
         }
         rl <- bamtolist(bamfolder = tmp_dir, annotation = annotation)
         unlink(tmp_dir, recursive = TRUE)
@@ -199,17 +205,17 @@ reads_list <- tryCatch({
         }
         rl
     }, error = function(e2) {
-        cat("FATAL loading BAM:", conditionMessage(e2), "\\n")
+        cat("FATAL loading BAM:", conditionMessage(e2), "\n")
         quit(status = 1)
     })
 })
 
 total_reads <- sum(sapply(reads_list, nrow))
-cat("BAM loaded:", total_reads, "reads across", length(reads_list), "sample(s)\\n")
+cat("BAM loaded:", total_reads, "reads across", length(reads_list), "sample(s)\n")
 
 if (total_reads == 0) {
-    cat("ERROR: No reads loaded from BAM. Check that BAM contains transcriptome alignments.\\n")
-    cat("Annotation transcript IDs (first 5):", paste(head(annotation$transcript, 5), collapse = ", "), "\\n")
+    cat("ERROR: No reads loaded from BAM. Check that BAM contains transcriptome alignments.\n")
+    cat("Annotation transcript IDs (first 5):", paste(head(annotation$transcript, 5), collapse = ", "), "\n")
     quit(status = 1)
 }
 
@@ -217,7 +223,7 @@ if (total_reads == 0) {
 ## 3. Filter by Read Length                   ##
 ################################################
 
-cat("\\n[3/7] Filtering reads by length (", paste(read_lengths, collapse = ", "), ")...\\n")
+cat("\n[3/7] Filtering reads by length (", paste(read_lengths, collapse = ", "), ")...\n")
 
 filtered_data <- tryCatch({
     # riboWaltz >=2.0 uses 'length_range', older versions use 'length_filter_vector'
@@ -229,15 +235,15 @@ filtered_data <- tryCatch({
     }
     do.call(length_filter, lf_args)
 }, error = function(e) {
-    cat("ERROR during length filtering:", conditionMessage(e), "\\n")
+    cat("ERROR during length filtering:", conditionMessage(e), "\n")
     quit(status = 1)
 })
 
-cat("After filtering:", nrow(filtered_data[[1]]), "reads\\n")
+cat("After filtering:", nrow(filtered_data[[1]]), "reads\n")
 
 if (nrow(filtered_data[[1]]) == 0) {
-    cat("WARNING: No reads remain after length filtering. Skipping P-site analysis.\\n")
-    cat("Creating minimal output files...\\n")
+    cat("WARNING: No reads remain after length filtering. Skipping P-site analysis.\n")
+    cat("Creating minimal output files...\n")
     dt_empty <- data.table(
         length = integer(), total_percentage = numeric(),
         start_percentage = numeric(), around_start = numeric(),
@@ -245,8 +251,8 @@ if (nrow(filtered_data[[1]]) == 0) {
         corrected_offset_from_5 = numeric(), corrected_offset_from_3 = numeric(),
         sample = character()
     )
-    fwrite(dt_empty, paste0(prefix, "_psite_offset.txt"), sep = "\\t")
-    fwrite(dt_empty, paste0(prefix, "_psite_offset.tsv"), sep = "\\t")
+    fwrite(dt_empty, paste0(prefix, "_psite_offset.txt"), sep = "\t")
+    fwrite(dt_empty, paste0(prefix, "_psite_offset.tsv"), sep = "\t")
 
     # Write version info and exit
     writeLines(
@@ -258,7 +264,7 @@ if (nrow(filtered_data[[1]]) == 0) {
         ),
         "versions.yml"
     )
-    cat("\\n=== riboWaltz analysis complete (no reads after filtering) ===\\n")
+    cat("\n=== riboWaltz analysis complete (no reads after filtering) ===\n")
     quit(status = 0)
 }
 
@@ -266,7 +272,7 @@ if (nrow(filtered_data[[1]]) == 0) {
 ## 4. Calculate P-site Offsets                ##
 ################################################
 
-cat("\\n[4/7] Calculating P-site offsets...\\n")
+cat("\n[4/7] Calculating P-site offsets...\n")
 
 psite_offset <- tryCatch({
     psite(
@@ -280,7 +286,7 @@ psite_offset <- tryCatch({
         txt_file = paste0(prefix, "_psite_offset.txt")
     )
 }, error = function(e) {
-    cat("WARNING: P-site offset calculation failed:", conditionMessage(e), "\\n")
+    cat("WARNING: P-site offset calculation failed:", conditionMessage(e), "\n")
     # Create minimal placeholder
     dt_placeholder <- data.table(
         length = integer(), total_percentage = numeric(),
@@ -289,16 +295,16 @@ psite_offset <- tryCatch({
         corrected_offset_from_5 = numeric(), corrected_offset_from_3 = numeric(),
         sample = character()
     )
-    fwrite(dt_placeholder, paste0(prefix, "_psite_offset.txt"), sep = "\\t")
+    fwrite(dt_placeholder, paste0(prefix, "_psite_offset.txt"), sep = "\t")
     return(dt_placeholder)
 })
 
-cat("P-site offsets calculated\\n")
-fwrite(psite_offset, paste0(prefix, "_psite_offset.tsv"), sep = "\\t")
+cat("P-site offsets calculated\n")
+fwrite(psite_offset, paste0(prefix, "_psite_offset.tsv"), sep = "\t")
 
 # Show offset summary
 if (nrow(psite_offset) > 0) {
-    cat("Offset summary:\\n")
+    cat("Offset summary:\n")
     print_cols <- intersect(c("length", "corrected_offset_from_5", "corrected_offset_from_3"),
                             names(psite_offset))
     print(psite_offset[, ..print_cols])
@@ -308,12 +314,12 @@ if (nrow(psite_offset) > 0) {
 ## 5. Assign P-sites to Reads                 ##
 ################################################
 
-cat("\\n[5/7] Assigning P-site positions...\\n")
+cat("\n[5/7] Assigning P-site positions...\n")
 
 psite_data <- tryCatch({
     psite_info(filtered_data, psite_offset)
 }, error = function(e) {
-    cat("WARNING: P-site assignment failed:", conditionMessage(e), "\\n")
+    cat("WARNING: P-site assignment failed:", conditionMessage(e), "\n")
     return(filtered_data)
 })
 
@@ -321,49 +327,49 @@ psite_data <- tryCatch({
 ## 6. QC Analyses                             ##
 ################################################
 
-cat("\\n[6/7] Running QC analyses...\\n")
+cat("\n[6/7] Running QC analyses...\n")
 
 # 6a. CDS Coverage
-cat("  - CDS coverage...\\n")
+cat("  - CDS coverage...\n")
 tryCatch({
     cds_cov <- cds_coverage(psite_data, annotation)
-    fwrite(cds_cov, paste0(prefix, "_cds_coverage.tsv"), sep = "\\t")
+    fwrite(cds_cov, paste0(prefix, "_cds_coverage.tsv"), sep = "\t")
 }, error = function(e) {
-    cat("  WARNING: CDS coverage failed:", conditionMessage(e), "\\n")
+    cat("  WARNING: CDS coverage failed:", conditionMessage(e), "\n")
 })
 
 # 6b. Codon Usage
-cat("  - Codon usage...\\n")
+cat("  - Codon usage...\n")
 tryCatch({
     codon_usage <- codon_usage_psite(psite_data, annotation)
     if (nrow(codon_usage) > 0) {
-        fwrite(codon_usage, paste0(prefix, "_codon_usage.tsv"), sep = "\\t")
+        fwrite(codon_usage, paste0(prefix, "_codon_usage.tsv"), sep = "\t")
     }
 }, error = function(e) {
-    cat("  WARNING: Codon usage failed:", conditionMessage(e), "\\n")
+    cat("  WARNING: Codon usage failed:", conditionMessage(e), "\n")
 })
 
 # 6c. Frame Distribution
-cat("  - Frame distribution...\\n")
+cat("  - Frame distribution...\n")
 tryCatch({
     frame_dist <- frame_psite(psite_data, annotation)
-    fwrite(frame_dist, paste0(prefix, "_frame_distribution.tsv"), sep = "\\t")
+    fwrite(frame_dist, paste0(prefix, "_frame_distribution.tsv"), sep = "\t")
 }, error = function(e) {
-    cat("  WARNING: Frame distribution failed:", conditionMessage(e), "\\n")
+    cat("  WARNING: Frame distribution failed:", conditionMessage(e), "\n")
 })
 
 # 6d. Read Length Distribution
-cat("  - Read length distribution...\\n")
+cat("  - Read length distribution...\n")
 tryCatch({
     rl_plot <- read_length_plot(data = filtered_data, sample = names(filtered_data)[1])
     ggsave(file.path(plot_dir, paste0(prefix, "_read_length_distribution.pdf")),
            plot = rl_plot, width = 8, height = 6)
 }, error = function(e) {
-    cat("  WARNING: Read length plot failed:", conditionMessage(e), "\\n")
+    cat("  WARNING: Read length plot failed:", conditionMessage(e), "\n")
 })
 
 # 6e. Metagene Profiles
-cat("  - Metagene profiles...\\n")
+cat("  - Metagene profiles...\n")
 tryCatch({
     if (exists("metaplots")) {
         metaplots_output <- metaplots(psite_data, annotation, sample = names(psite_data)[1])
@@ -383,25 +389,25 @@ tryCatch({
         }
     }
 }, error = function(e) {
-    cat("  WARNING: Metagene profiles failed:", conditionMessage(e), "\\n")
+    cat("  WARNING: Metagene profiles failed:", conditionMessage(e), "\n")
 })
 
 # 6f. P-site Region Distribution
-cat("  - P-site region distribution...\\n")
+cat("  - P-site region distribution...\n")
 tryCatch({
     if (exists("percentage_regions")) {
         pct_regions <- percentage_regions(psite_data, annotation)
-        fwrite(pct_regions, paste0(prefix, "_region_distribution.tsv"), sep = "\\t")
+        fwrite(pct_regions, paste0(prefix, "_region_distribution.tsv"), sep = "\t")
     }
 }, error = function(e) {
-    cat("  WARNING: Region distribution failed:", conditionMessage(e), "\\n")
+    cat("  WARNING: Region distribution failed:", conditionMessage(e), "\n")
 })
 
 ################################################
 ## Write Versions                             ##
 ################################################
 
-cat("\\nWriting version info...\\n")
+cat("\nWriting version info...\n")
 writeLines(
     c(
         paste0('"', '${task.process}', '":'),
@@ -412,4 +418,4 @@ writeLines(
     "versions.yml"
 )
 
-cat("\\n=== riboWaltz analysis complete ===\\n")
+cat("\n=== riboWaltz analysis complete ===\n")
