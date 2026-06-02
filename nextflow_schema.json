@@ -495,7 +495,8 @@
                     "help_text": "Disabled by default for performance. This only affects sORF prediction steps (QC can remain per-sample)."
                 },
                 "merge_replicates": {
-                    "type": "boolean",
+                    "type": ["boolean", "string"],
+                    "enum": [true, false, "true", "false"],
                     "default": false,
                     "fa_icon": "fas fa-compress-arrows-alt",
                     "description": "Merge BAMs from biological/technical replicates sharing the same 'group' field before ORF calling.",

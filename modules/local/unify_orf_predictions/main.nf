@@ -327,6 +327,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
         "--ribocode ${ribocode_files.collect{ "\"${it}\"" }.join(' ')}" : ''
     def orfquant_arg = (orfquant_files && orfquant_files instanceof List && orfquant_files.size() > 0) ?
         "--orfquant ${orfquant_files.collect{ "\"${it}\"" }.join(' ')}" : ''
+    def price_arg = ""  // PRICE not yet wired through this unification sub-process
     def has_bedgraph = (psites_bedgraph instanceof List && psites_bedgraph.size() > 0) ||
                        (psites_bedgraph && !(psites_bedgraph instanceof List) && psites_bedgraph.name != 'NO_FILE')
     def bedgraph_arg = has_bedgraph ? "--bedgraph-dir bedgraph" : ''
