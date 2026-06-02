@@ -79,6 +79,10 @@ def main():
     orfquant_parser.add_argument("--metadata", required=True, help="Unified metadata TSV")
     orfquant_parser.add_argument("--annotation", required=True, help="Reference GTF")
     orfquant_parser.add_argument("--output", "-o", default=".")
+    orfquant_parser.add_argument("--cpus", type=int, default=1,
+                                  help="Number of CPU cores for mirai parallelization")
+    orfquant_parser.add_argument("--no-parallel", action="store_true",
+                                  help="Disable mirai parallelization (use serial)")
     orfquant_parser.add_argument("--verbose", "-v", action="store_true")
 
     # --- classify-orftype ---
@@ -135,7 +139,7 @@ def main():
             output_dir=args.output,
             unify_prefix=args.prefix,
             run_gencode=not args.no_gencode,
-            run_orfquant=not args.no_orftype if hasattr(args, 'no_orftype') else True,
+            run_orfquant=not args.no_orfquant,
             run_orftype=not args.no_orftype,
             frame_merge=not args.no_frame_merge,
             seq_cluster=args.seq_cluster,
@@ -176,6 +180,8 @@ def main():
             metadata_path=args.metadata,
             ref_gtf=args.annotation,
             output_dir=args.output,
+            cpus=args.cpus,
+            parallel=not args.no_parallel,
         )
 
     elif args.command == "classify-orftype":

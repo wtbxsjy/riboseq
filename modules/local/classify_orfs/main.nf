@@ -180,12 +180,20 @@ process CLASSIFY_ORFS_ORFQUANT {
             Rscript -e "install.packages('optparse', repos='https://cloud.r-project.org')" || \\
                 { echo "ERROR: Failed to install optparse"; exit 1; }
         fi
+        # Install mirai for parallel classification (falls back to serial if unavailable)
+        if ! Rscript -e "suppressPackageStartupMessages(library(mirai))" >/dev/null 2>&1; then
+            echo "INFO: Installing mirai for parallel classification"
+            Rscript -e "install.packages('mirai', repos='https://cloud.r-project.org')" 2>&1 || \\
+                echo "WARNING: mirai installation failed - will use serial classification"
+        fi
         Rscript ${orfquant_script} \\
             --input ${input_prefix}.gtf \\
             --annotation ${ref_gtf} \\
             --output orfquant_classification.tsv \\
             --metadata ${unified_metadata} \\
             --output_prefix orfquant_results \\
+            --parallel \\
+            --threads ${task.cpus} \\
             ${extra_args} 2>&1 | tee classify_orfquant.log
         EXIT_CODE=\${PIPESTATUS[0]}
         set -e

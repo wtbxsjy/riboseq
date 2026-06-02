@@ -78,8 +78,15 @@ def call_classify_gencode(argv):
     _call_main_with_argv('classify_orfs_wrapper', 'classify_orfs_wrapper', argv)
 
 
-def call_classify_orfquant(gtf_path, annotation_path, output_path, metadata_path=None, output_prefix=None):
-    """Run ORFquant classification — must use Rscript (kept as subprocess for now)."""
+def call_classify_orfquant(gtf_path, annotation_path, output_path, metadata_path=None,
+                         output_prefix=None, cpus=1, parallel=True):
+    """Run ORFquant classification via Rscript with mirai-based parallelization.
+
+    Passes --parallel and --threads to the R script, which dispatches ORF
+    chunks to mirai daemons.  Annotation is shared via temp RDS files so each
+    daemon loads its own copy (no serialization overhead).  Falls back to
+    serial orfquant_classify_orfs() when mirai is unavailable or n_cores <= 1.
+    """
     import subprocess
     script = os.path.join(
         _scripts_dir(), 'class_orf', 'run_orfquant_classify.R')
@@ -91,6 +98,8 @@ def call_classify_orfquant(gtf_path, annotation_path, output_path, metadata_path
         cmd.extend(['--metadata', metadata_path])
     if output_prefix:
         cmd.extend(['--output_prefix', output_prefix])
+    if parallel and cpus > 1:
+        cmd.extend(['--parallel', '--threads', str(cpus)])
     subprocess.run(cmd, check=True)
 
 

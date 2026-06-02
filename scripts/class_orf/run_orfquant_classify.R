@@ -19,7 +19,11 @@ option_list <- list(
   make_option(c("-m", "--metadata"), type="character", default=NULL,
               help="Unified ORF metadata TSV (for FA/per-sample outputs)", metavar="file"),
   make_option(c("-p", "--output_prefix"), type="character", default="orfquant_results",
-              help="Prefix for extra output files (BED/GTF/FA/logs/out) [default: orfquant_results]")
+              help="Prefix for extra output files (BED/GTF/FA/logs/out) [default: orfquant_results]"),
+  make_option("--parallel", action="store_true", default=FALSE,
+              help="Use mirai-based parallel classification"),
+  make_option("--threads", type="integer", default=1L,
+              help="Number of threads for parallel classification [default: 1]")
 )
 
 opt_parser <- OptionParser(option_list=option_list)
@@ -38,10 +42,22 @@ orfs_gr <- rtracklayer::import(opt$input)
 orfs_gr <- orfs_gr[orfs_gr$type == "CDS"]
 orfs_grl <- split(orfs_gr, orfs_gr$orf_id)
 
-results <- orfquant_classify_orfs(
-  orfs = orfs_grl,
-  annotation = opt$annotation
-)
+if (isTRUE(opt$parallel) && requireNamespace("mirai", quietly = TRUE)) {
+  message("Using mirai-based parallel classification with ", opt$threads, " threads")
+  results <- orfquant_classify_orfs_parallel(
+    orfs = orfs_grl,
+    annotation = opt$annotation,
+    n_cores = as.integer(opt$threads)
+  )
+} else {
+  if (isTRUE(opt$parallel)) {
+    message("--parallel requested but mirai not available; falling back to serial")
+  }
+  results <- orfquant_classify_orfs(
+    orfs = orfs_grl,
+    annotation = opt$annotation
+  )
+}
 
 message("Writing results to: ", opt$output)
 write.table(results, file = opt$output, sep = "\t", quote = FALSE, row.names = FALSE)

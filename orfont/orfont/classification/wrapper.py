@@ -48,20 +48,32 @@ def classify_gencode(bed_path, metadata_path, ensembl_dir, output_dir='.',
 
 
 def classify_orfquant(gtf_path, metadata_path, ref_gtf, output_dir='.',
-                      extra_args=None):
-    """Run ORFquant-based classification (R script — requires subprocess)."""
+                      cpus=1, parallel=True, extra_args=None):
+    """Run ORFquant-based classification with mirai parallelization.
+
+    Args:
+        gtf_path: unified ORF GTF file
+        metadata_path: unified metadata TSV
+        ref_gtf: reference annotation GTF
+        output_dir: output directory
+        cpus: number of CPU cores for mirai daemons
+        parallel: enable mirai-based parallel classification
+        extra_args: additional CLI args (unused for now)
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     output_path = os.path.join(output_dir, 'orfquant_classification.tsv')
     output_prefix = os.path.join(output_dir, 'orfquant_results')
 
-    logger.info("Running ORFquant classification (Rscript)")
+    logger.info(f"Running ORFquant classification (Rscript, parallel={parallel}, cpus={cpus})")
     call_classify_orfquant(
         gtf_path=gtf_path,
         annotation_path=ref_gtf,
         output_path=output_path,
         metadata_path=metadata_path,
-        output_prefix=output_prefix)
+        output_prefix=output_prefix,
+        cpus=cpus,
+        parallel=parallel)
 
     return output_path
 

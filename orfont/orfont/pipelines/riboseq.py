@@ -94,6 +94,7 @@ def run(ribotish_files=None, ribotricer_files=None, ribocode_files=None,
             metadata_path=unified['metadata'],
             ref_gtf=gtf_path,
             output_dir=classify_outdir,
+            cpus=cpus,
             extra_args=extra_args,
         )
 
