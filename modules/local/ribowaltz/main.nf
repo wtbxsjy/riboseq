@@ -62,8 +62,16 @@ INSTALL_SCRIPT
     Rscript install_ribowaltz.R
 
     # Run main analysis
+    # Note: template variables are expanded manually because template()
+    # in Nextflow 26.x returns a file path instead of content.
     cat <<'RSCRIPT' > script.R
-    ${template('run_ribowaltz.R')}
+    ${file("${moduleDir}/templates/run_ribowaltz.R")
+        .text
+        .replace('${prefix}', prefix)
+        .replace('${bam}', bam instanceof Path ? bam.name : bam.toString())
+        .replace('${gtf}', gtf instanceof Path ? gtf.name : gtf.toString())
+        .replace('${read_lengths_r}', read_lengths_r)
+        .replace('${task.process}', task.process)}
 RSCRIPT
 
     Rscript script.R
