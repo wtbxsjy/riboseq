@@ -25,9 +25,14 @@ process MERGE_COUNTS {
 
     # Build R script for merging
     cat <<'RSCRIPT' > merge_counts.R
-    # Get input files from glob pattern
-    input_pattern <- "${count_files}"
-    count_files <- Sys.glob(input_pattern)
+    # Get input files from glob pattern or space-separated path list
+    input_str <- "${count_files}"
+    if (grepl(" ", input_str)) {
+        count_files <- strsplit(input_str, " ")[[1]]
+        count_files <- count_files[file.exists(count_files)]
+    } else {
+        count_files <- Sys.glob(input_str)
+    }
     if (length(count_files) == 0) {
         count_files <- list.files(pattern = "_counts\\\\.tsv\$", recursive = TRUE, full.names = TRUE)
     }

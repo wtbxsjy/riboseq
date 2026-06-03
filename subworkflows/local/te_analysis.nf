@@ -37,7 +37,7 @@ workflow TE_ANALYSIS {
         )
         ch_versions = ch_versions.mix(QUANTIFY_ORFS.out.versions)
 
-        // Collect all count files
+        // Collect all count files into a list
         ch_all_counts = QUANTIFY_ORFS.out.counts
             .map { meta, counts -> counts }
             .collect()
@@ -45,6 +45,9 @@ workflow TE_ANALYSIS {
         // Step 2: Merge per-sample counts into a single matrix
         // Input: all *_counts.tsv + sample sheet → Output: merged_counts.tsv
         // The sample sheet is forwarded from the pipeline input
+        // NOTE: .collect() produces List<Path>; MERGE_COUNTS R script uses
+        // list.files("*_counts.tsv") as fallback when Sys.glob fails, so all
+        // staged files will be found as long as they end with _counts.tsv
         ch_sample_sheet = Channel.fromPath(params.input, checkIfExists: true)
 
         MERGE_COUNTS(
