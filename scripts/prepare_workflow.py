@@ -777,7 +777,7 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     if getattr(args, 'bg', False):
         nf_cmd_parts.append("-bg")
     if args.save_reference:
-        nf_cmd_parts.append("--save_reference")
+        nf_cmd_parts.append("--save_reference true")
     
     # Add container paths
     if 'orfquant' in containers:
@@ -834,14 +834,14 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     
     # Add pipeline options
     if args.run_prefilter_qc:
-        nf_cmd_parts.append("--run_prefilter_qc")
+        nf_cmd_parts.append("--run_prefilter_qc true")
     
     # Skip RPBP by default (not fully validated yet)
-    nf_cmd_parts.append("--skip_rpbp")
+    nf_cmd_parts.append("--skip_rpbp true")
     
     # Replicate BAM merging
     if getattr(args, 'merge_replicates', False):
-        nf_cmd_parts.append("--merge_replicates")
+        nf_cmd_parts.append("--merge_replicates true")
 
     # Ribotricer phase score cutoff (only set when explicitly provided)
     if getattr(args, 'ribotricer_phase_score_cutoff', None) is not None:
@@ -853,7 +853,7 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
 
     # Skip collect QC stats
     if getattr(args, 'skip_collect_qc_stats', False):
-        nf_cmd_parts.append("--skip_collect_qc_stats")
+        nf_cmd_parts.append("--skip_collect_qc_stats true")
 
     # P-site offset correction for ORFquant (enabled by default)
     if hasattr(args, 'orfquant_psite_correction'):
