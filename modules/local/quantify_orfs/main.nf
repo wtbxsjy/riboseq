@@ -4,8 +4,8 @@ process QUANTIFY_ORFS {
 
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'oras://community.wave.seqera.io/library/subread:latest' :
-        'community.wave.seqera.io/library/subread:latest' }"
+        'https://depot.galaxyproject.org/singularity/subread:2.1.1--h577a1d6_0' :
+        'quay.io/biocontainers/subread:2.1.1--h577a1d6_0' }"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -20,17 +20,22 @@ process QUANTIFY_ORFS {
 
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def paired = meta.single_end ? '' : '-p --countReadPairs'
     """
+    # Convert BED to SAF format (subread 2.1.1 lacks BED support)
+    awk 'BEGIN{OFS="\\t"; print "GeneID\\tChr\\tStart\\tEnd\\tStrand"}
+         {print \$4, \$1, \$2+1, \$3, \$6}' ${annotation_bed} > annotation.saf
+
     featureCounts \\
-        -a ${annotation_bed} \\
+        -a annotation.saf \\
         -o ${prefix}_counts.tsv \\
-        -F BED \\
+        -F SAF \\
         -t exon \\
-        -g gene_id \\
+        -g GeneID \\
         -s 0 \\
         -T ${task.cpus} \\
         --minOverlap 1 \\
-        -R BAM \\
+        ${paired} \\
         ${bam}
 
     cat <<-END_VERSIONS > versions.yml

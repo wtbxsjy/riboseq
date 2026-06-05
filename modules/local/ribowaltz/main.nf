@@ -28,17 +28,41 @@ process RIBOWALTZ {
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
     def read_lengths = params.ribowaltz_read_lengths ?: [28, 29, 30]
+    // Normalize: Nextflow 26.x may parse CLI array as string "[20,21,...]"
+    def read_lengths_list = (read_lengths instanceof String) ?
+        read_lengths.replaceAll('[\\[\\]\\s]', '').split(',').collect { it.toInteger() } :
+        read_lengths
     // Convert Groovy list to R vector string: [28, 29, 30] -> "c(28, 29, 30)"
-    def read_lengths_r = "c(${read_lengths.join(', ')})"
+    def read_lengths_r = "c(${read_lengths_list.join(', ')})"
+    // Resolve GTF symlink to original path so annotation cache (RDS)
+    // built next to the GTF can be found via dirname()
+    def gtf_file = gtf instanceof Path ? gtf.name : gtf.toString()
     def r_script = file("${moduleDir}/templates/run_ribowaltz.R").text
         .replace('${prefix}', prefix)
         .replace('${bam}', bam instanceof Path ? bam.name : bam.toString())
-        .replace('${gtf}', gtf instanceof Path ? gtf.name : gtf.toString())
+        .replace('${gtf_file}', gtf_file)
         .replace('${read_lengths_r}', read_lengths_r)
         .replace('${task.process}', task.process.toString())
     """
     #!/bin/bash
     set -euo pipefail
+
+    # Find annotation cache (pre-built RDS). Look in:
+    #   1. Reference dir next to the original GTF file (via params.gtf)
+    #   2. Directory of the resolved GTF symlink target
+    #   3. Build from scratch if not found
+    annotation_cache=""
+    for try_dir in "\$(dirname '${params.gtf}')" "\$(dirname "\$(readlink -f '${gtf_file}' 2>/dev/null)")" "."; do
+        try_cache="\${try_dir}/ribowaltz_annotation.rds"
+        if [ -f "\$try_cache" ]; then
+            annotation_cache="\$try_cache"
+            echo "Found annotation cache: \$annotation_cache"
+            break
+        fi
+    done
+    if [ -z "\$annotation_cache" ]; then
+        echo "No annotation cache found (will build from GTF with txdbmaker)"
+    fi
 
     # Install dependencies if not available
     cat <<'INSTALL_SCRIPT' > install_ribowaltz.R
@@ -74,6 +98,8 @@ INSTALL_SCRIPT
 ${r_script}
 RSCRIPT
 
+    # Pass annotation_cache as env var for the R script
+    export ANNOTATION_CACHE="\${annotation_cache}"
     Rscript script.R
     """
 
