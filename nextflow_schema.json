@@ -162,7 +162,8 @@
                     "fa_icon": "fas fa-layer-group"
                 },
                 "igenomes_ignore": {
-                    "type": "boolean",
+                    "type": ["boolean", "string"],
+                    "enum": [true, false, "true", "false"],
                     "description": "Do not load the iGenomes reference config.",
                     "fa_icon": "fas fa-ban",
                     "hidden": true,
@@ -485,14 +486,14 @@
                     "description": "MAPQ threshold used when sorf_unique_mode is 'mapq' (or in 'auto' mode when NH is not available)."
                 },
                 "sorf_read_len_min": {
-                    "type": "integer",
+                    "type": ["integer", "string"],
                     "default": 28,
                     "minimum": 0,
                     "fa_icon": "fas fa-ruler-horizontal",
                     "description": "Minimum read length to keep (inclusive) when filtering for sORF prediction."
                 },
                 "sorf_read_len_max": {
-                    "type": "integer",
+                    "type": ["integer", "string"],
                     "default": 30,
                     "minimum": 0,
                     "fa_icon": "fas fa-ruler-horizontal",
@@ -875,7 +876,8 @@
                     "fa_icon": "fas fa-ruler"
                 },
                 "skip_price": {
-                    "type": "boolean",
+                    "type": ["boolean", "string"],
+                    "enum": [true, false, "true", "false"],
                     "description": "Skip GEDI PRICE ORF detection pipeline.",
                     "fa_icon": "fas fa-fast-forward"
                 },
