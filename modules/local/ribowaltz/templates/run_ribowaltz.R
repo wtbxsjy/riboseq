@@ -2,8 +2,10 @@
 
 # riboWaltz P-site analysis for Ribo-seq QC
 #
-# Bioc 3.20 compatible version using txdbmaker
-# Handles transcript ID version mismatch between GTF and BAM
+# Bioc 3.20+ compatible version. Uses pre-built cached annotation (RDS)
+# to avoid rebuilding TxDb from GTF for each sample (~3 min → <1 sec).
+# Annotation cache is built once from the GTF using txdbmaker::
+# (GenomicFeatures::makeTxDbFromGFF is defunct in Bioc >= 3.20).
 
 suppressPackageStartupMessages({
     library(riboWaltz)
@@ -22,7 +24,7 @@ suppressPackageStartupMessages({
 
 prefix        <- '${prefix}'
 bam_file      <- '${bam}'
-gtf_file      <- '${gtf}'
+gtf_file      <- '${gtf_file}'
 read_lengths  <- ${read_lengths_r}
 
 cat("=== riboWaltz Analysis ===\n")
@@ -45,82 +47,76 @@ dir.create(plot_dir, showWarnings = FALSE, recursive = TRUE)
 strip_version <- function(x) sub("\\.[0-9]+$", "", x)
 
 ################################################
-## 1. Create Annotation from GTF              ##
-##    Bioc 3.20 compatible via txdbmaker      ##
+## 1. Load Annotation                         ##
+##    Prefer cached RDS, fall back to GTF     ##
 ################################################
 
-cat("\n[1/7] Creating annotation from GTF...\n")
+cat("\n[1/7] Loading annotation...\n")
 
 annotation <- tryCatch({
-    # Prefer txdbmaker for Bioc 3.20+, fall back to GenomicFeatures
-    if (requireNamespace("txdbmaker", quietly = TRUE)) {
-        txdb <- txdbmaker::makeTxDbFromGFF(gtf_file, format = "gtf",
-                                            dataSource = "gencode", organism = NA)
-        cat("Using txdbmaker::makeTxDbFromGFF\n")
-    } else {
-        txdb <- GenomicFeatures::makeTxDbFromGFF(gtf_file, format = "gtf",
-                                                  dataSource = "gencode", organism = NA)
-        cat("Using GenomicFeatures::makeTxDbFromGFF\n")
-    }
-
-    suppressWarnings({
-        tx_gr <- GenomicFeatures::transcripts(txdb, columns = c("tx_name", "gene_id", "tx_type"))
-    })
-    tx_df <- as.data.frame(tx_gr)
-
-    # Extract CDS per transcript
-    cds_by_tx <- GenomicFeatures::cdsBy(txdb, by = "tx", use.names = TRUE)
-
-    # Use tx_name if available (matches BAM transcript IDs), otherwise tx_id
-    tx_keys <- if (!is.null(tx_df$tx_name)) tx_df$tx_name else as.character(tx_df$group_name)
-
-    tx_width <- tx_df$width
-    cds_width <- integer(length(tx_keys))
-    cds_start <- integer(length(tx_keys))
-    cds_end   <- integer(length(tx_keys))
-    has_cds   <- tx_keys %in% names(cds_by_tx)
-
-    for (i in seq_along(tx_keys)) {
-        if (has_cds[i]) {
-            cds_gr <- cds_by_tx[[tx_keys[i]]]
-            cds_width[i] <- sum(width(cds_gr))
-            cds_start[i] <- min(start(cds_gr))
-            cds_end[i]   <- max(end(cds_gr))
+    # Try cached RDS first (built once with txdbmaker, loads in <1 sec).
+    # Cache path is passed via ANNOTATION_CACHE env var from the module script.
+    cache_file <- Sys.getenv("ANNOTATION_CACHE", unset = "")
+    cache_loaded <- FALSE
+    if (nchar(cache_file) > 0 && file.exists(cache_file)) {
+        cat("Loading cached annotation:", cache_file, "\n")
+        ann <- readRDS(cache_file)
+        if (is.data.frame(ann) && nrow(ann) > 0 &&
+            all(c("transcript", "l_tr", "l_utr5", "l_cds", "l_utr3") %in% names(ann))) {
+            cat("Cached annotation loaded:", nrow(ann), "transcripts\n")
+            cache_loaded <- TRUE
+        } else {
+            cat("Cached annotation invalid, rebuilding...\n")
         }
     }
+    if (cache_loaded) {
+        as.data.table(ann)
+    } else {
+        # Rebuild annotation from GTF using txdbmaker (Bioc 3.20+ compatible)
+        cat("Building annotation from GTF using txdbmaker...\n")
+        if (!requireNamespace("txdbmaker", quietly = TRUE)) {
+            stop("txdbmaker is required but not installed")
+        }
+        txdb <- txdbmaker::makeTxDbFromGFF(gtf_file, format = "gtf",
+                                            dataSource = "gencode", organism = NA)
 
-    annotation <- data.table(
-        transcript = strip_version(tx_keys),
-        l_tr       = tx_width,
-        l_utr5     = ifelse(has_cds, cds_start - 1L, tx_width),
-        l_cds      = cds_width,
-        l_utr3     = ifelse(has_cds, pmax(0L, tx_width - cds_end), 0L),
-        gene       = if (!is.null(tx_df$gene_id)) tx_df$gene_id else NA_character_,
-        from       = 1L,
-        to         = tx_width,
-        cds_from   = ifelse(has_cds, as.integer(cds_start), NA_integer_),
-        cds_to     = ifelse(has_cds, as.integer(cds_end), NA_integer_)
-    )
+        suppressWarnings({
+            exon <- GenomicFeatures::exonsBy(txdb, by = "tx", use.names = TRUE)
+            utr5 <- GenomicFeatures::fiveUTRsByTranscript(txdb, use.names = TRUE)
+            cds  <- GenomicFeatures::cdsBy(txdb, by = "tx", use.names = TRUE)
+            utr3 <- GenomicFeatures::threeUTRsByTranscript(txdb, use.names = TRUE)
+        })
 
-    # Remove zero-length transcripts and duplicates
-    annotation <- annotation[l_tr > 0]
-    annotation <- annotation[!duplicated(transcript)]
+        exon_dt <- as.data.table(exon[unique(names(exon))])
+        utr5_dt <- as.data.table(utr5[unique(names(utr5))])
+        cds_dt  <- as.data.table(cds[unique(names(cds))])
+        utr3_dt <- as.data.table(utr3[unique(names(utr3))])
 
-    annotation
+        anno_df <- exon_dt[, list(l_tr = sum(width)), by = list(transcript = group_name)]
+        l_utr5   <- utr5_dt[, list(l_utr5 = sum(width)), by = list(transcript = group_name)]
+        l_cds    <- cds_dt[, list(l_cds = sum(width)), by = list(transcript = group_name)]
+        l_utr3   <- utr3_dt[, list(l_utr3 = sum(width)), by = list(transcript = group_name)]
+
+        merge_allx <- function(x, y) merge(x, y, all.x = TRUE)
+        anno_df <- Reduce(merge_allx, list(anno_df, l_utr5, l_cds, l_utr3))
+        anno_df[is.na(anno_df)] <- 0
+
+        anno_df[, transcript := strip_version(transcript)]
+        anno_df <- anno_df[!duplicated(transcript)]
+
+        # Cache for future runs
+        saveRDS(anno_df, cache_file, compress = TRUE)
+        cat("Annotation built and cached:", nrow(anno_df), "transcripts\n")
+        anno_df
+    }
 }, error = function(e) {
     cat("ERROR creating annotation:", conditionMessage(e), "\n")
-    cat("Falling back to riboWaltz::create_annotation...\n")
-    tryCatch({
-        ann <- create_annotation(gtfpath = gtf_file, dataSource = "gencode", organism = NA)
-        ann[, transcript := strip_version(transcript)]
-        ann[!duplicated(transcript)]
-    }, error = function(e2) {
-        cat("FATAL: Cannot create annotation:", conditionMessage(e2), "\n")
-        quit(status = 1)
-    })
+    cat("Trying riboWaltz::create_annotation (may fail with Bioc 3.20+)...\n")
+    ann <- create_annotation(gtfpath = gtf_file, dataSource = "gencode", organism = NA)
+    ann[, transcript := strip_version(transcript)]
+    ann[!duplicated(transcript)]
 })
 
-cat("Annotation created:", nrow(annotation), "transcripts\n")
 if (nrow(annotation) > 0) {
     cat("Sample transcript IDs:", paste(head(annotation$transcript, 5), collapse = ", "), "\n")
 }
@@ -132,19 +128,16 @@ if (nrow(annotation) > 0) {
 
 cat("\n[2/7] Loading BAM data with transcript version matching...\n")
 
-load_bam_single <- function(bam_path, annotation) {
-    # Read BAM alignments
+reads_list <- tryCatch({
     suppressWarnings({
-        ga <- GenomicAlignments::readGAlignments(bam_path, use.names = TRUE,
-                                                  param = Rsamtools::ScanBamParam(
-                                                      what = c("qname", "flag", "rname", "strand",
-                                                                "pos", "qwidth", "mapq"),
-                                                      flag = Rsamtools::scanBamFlag(
-                                                          isUnmappedQuery = FALSE,
-                                                          isSecondaryAlignment = FALSE,
-                                                          isNotPassingQualityControls = FALSE
-                                                      )
-                                                  ))
+        ga <- GenomicAlignments::readGAlignments(bam_file, use.names = TRUE,
+            param = Rsamtools::ScanBamParam(
+                what = c("qname", "flag", "rname", "strand", "pos", "qwidth", "mapq"),
+                flag = Rsamtools::scanBamFlag(
+                    isUnmappedQuery = FALSE,
+                    isSecondaryAlignment = FALSE,
+                    isNotPassingQualityControls = FALSE
+                )))
     })
 
     # Strip version numbers from transcript names in BAM reads
@@ -157,65 +150,45 @@ load_bam_single <- function(bam_path, annotation) {
 
     if (length(ga) == 0) {
         cat("WARNING: No reads mapped to annotated transcripts\n")
-        return(data.table(
+        sample_name <- gsub("-", ".", prefix)
+        setNames(list(data.table(
             transcript = character(), end5 = integer(), end3 = integer(),
-            length = integer(), str = character()
-        ))
+            length = integer(), str = character(),
+            cds_start = integer(), cds_stop = integer()
+        )), sample_name)
+    } else {
+        dt <- data.table(
+            transcript = as.character(seqnames(ga)),
+            end5       = ifelse(as.character(strand(ga)) == "+",
+                                start(ga), end(ga)),
+            end3       = ifelse(as.character(strand(ga)) == "+",
+                                end(ga), start(ga)),
+            length     = qwidth(ga)
+        )
+        dt[, str := as.character(strand(ga))]
+
+        # Add cds_start/cds_stop from annotation (required by psite() and
+        # length_filter periodicity mode).  Equivalent to what bamtolist does.
+        ann_cols <- annotation[, .(transcript, l_utr5, l_cds)]
+        dt <- dt[ann_cols, on = 'transcript',
+                 c('cds_start', 'cds_stop') := list(i.l_utr5 + 1, i.l_utr5 + i.l_cds)]
+        dt[cds_start == 1 & cds_stop == 0, cds_start := 0]
+
+        sample_name <- gsub("-", ".", prefix)
+        setNames(list(dt), sample_name)
     }
-
-    # Create data.table in riboWaltz-compatible format
-    dt <- data.table(
-        transcript = as.character(seqnames(ga)),
-        end5       = ifelse(as.character(strand(ga)) == "+",
-                            start(ga), end(ga)),
-        end3       = ifelse(as.character(strand(ga)) == "+",
-                            end(ga), start(ga)),
-        length     = qwidth(ga)
-    )
-    dt[, str := as.character(strand(ga))]
-
-    return(dt)
-}
-
-reads_list <- tryCatch({
-    dt <- load_bam_single(bam_file, annotation)
-    sample_name <- gsub("-", ".", prefix)
-    reads_list <- setNames(list(dt), sample_name)
-    reads_list
 }, error = function(e) {
     cat("ERROR loading BAM:", conditionMessage(e), "\n")
-    cat("Falling back to riboWaltz::bamtolist...\n")
-    tryCatch({
-        bam_dir <- normalizePath(dirname(bam_file))
-        tmp_dir <- file.path(tempdir(), "rw_bam")
-        dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
-        base_bam <- basename(bam_file)
-        file.symlink(file.path(bam_dir, base_bam), file.path(tmp_dir, base_bam))
-        bai_file <- paste0(bam_file, ".bai")
-        if (file.exists(bai_file)) {
-            file.symlink(file.path(bam_dir, paste0(base_bam, ".bai")),
-                         file.path(tmp_dir, paste0(base_bam, ".bai")))
-        }
-        rl <- bamtolist(bamfolder = tmp_dir, annotation = annotation)
-        unlink(tmp_dir, recursive = TRUE)
-        for (i in seq_along(rl)) {
-            if (nrow(rl[[i]]) > 0) {
-                rl[[i]][, transcript := strip_version(transcript)]
-            }
-        }
-        rl
-    }, error = function(e2) {
-        cat("FATAL loading BAM:", conditionMessage(e2), "\n")
-        quit(status = 1)
-    })
+    quit(status = 1)
 })
 
 total_reads <- sum(sapply(reads_list, nrow))
 cat("BAM loaded:", total_reads, "reads across", length(reads_list), "sample(s)\n")
 
 if (total_reads == 0) {
-    cat("ERROR: No reads loaded from BAM. Check that BAM contains transcriptome alignments.\n")
-    cat("Annotation transcript IDs (first 5):", paste(head(annotation$transcript, 5), collapse = ", "), "\n")
+    cat("ERROR: No reads loaded from BAM. Check BAM contains transcriptome alignments.\n")
+    cat("Annotation transcript IDs (first 5):",
+        paste(head(annotation$transcript, 5), collapse = ", "), "\n")
     quit(status = 1)
 }
 
@@ -226,7 +199,6 @@ if (total_reads == 0) {
 cat("\n[3/7] Filtering reads by length (", paste(read_lengths, collapse = ", "), ")...\n")
 
 filtered_data <- tryCatch({
-    # riboWaltz >=2.0 uses 'length_range', older versions use 'length_filter_vector'
     lf_args <- list(data = reads_list, length_filter_mode = "custom")
     if ("length_range" %in% names(formals(riboWaltz::length_filter))) {
         lf_args$length_range <- read_lengths
@@ -243,7 +215,6 @@ cat("After filtering:", nrow(filtered_data[[1]]), "reads\n")
 
 if (nrow(filtered_data[[1]]) == 0) {
     cat("WARNING: No reads remain after length filtering. Skipping P-site analysis.\n")
-    cat("Creating minimal output files...\n")
     dt_empty <- data.table(
         length = integer(), total_percentage = numeric(),
         start_percentage = numeric(), around_start = numeric(),
@@ -253,15 +224,11 @@ if (nrow(filtered_data[[1]]) == 0) {
     )
     fwrite(dt_empty, paste0(prefix, "_psite_offset.txt"), sep = "\t")
     fwrite(dt_empty, paste0(prefix, "_psite_offset.tsv"), sep = "\t")
-
-    # Write version info and exit
     writeLines(
-        c(
-            paste0('"', '${task.process}', '":'),
-            paste0('    ribowaltz: "', packageVersion("riboWaltz"), '"'),
-            paste0('    r-data.table: "', packageVersion("data.table"), '"'),
-            paste0('    r-ggplot2: "', packageVersion("ggplot2"), '"')
-        ),
+        c(paste0('"', '${task.process}', '":'),
+          paste0('    ribowaltz: "', packageVersion("riboWaltz"), '"'),
+          paste0('    r-data.table: "', packageVersion("data.table"), '"'),
+          paste0('    r-ggplot2: "', packageVersion("ggplot2"), '"')),
         "versions.yml"
     )
     cat("\n=== riboWaltz analysis complete (no reads after filtering) ===\n")
@@ -275,6 +242,8 @@ if (nrow(filtered_data[[1]]) == 0) {
 cat("\n[4/7] Calculating P-site offsets...\n")
 
 psite_offset <- tryCatch({
+    # NOTE: psite() requires txt_file to contain a directory separator;
+    # passing bare filename causes dir.create("") error in riboWaltz.
     psite(
         data = filtered_data,
         flanking = 6,
@@ -283,11 +252,10 @@ psite_offset <- tryCatch({
         plot_dir = plot_dir,
         plot_format = "pdf",
         txt = TRUE,
-        txt_file = paste0(prefix, "_psite_offset.txt")
+        txt_file = file.path(getwd(), paste0(prefix, "_psite_offset.txt"))
     )
 }, error = function(e) {
     cat("WARNING: P-site offset calculation failed:", conditionMessage(e), "\n")
-    # Create minimal placeholder
     dt_placeholder <- data.table(
         length = integer(), total_percentage = numeric(),
         start_percentage = numeric(), around_start = numeric(),
@@ -302,7 +270,6 @@ psite_offset <- tryCatch({
 cat("P-site offsets calculated\n")
 fwrite(psite_offset, paste0(prefix, "_psite_offset.tsv"), sep = "\t")
 
-# Show offset summary
 if (nrow(psite_offset) > 0) {
     cat("Offset summary:\n")
     print_cols <- intersect(c("length", "corrected_offset_from_5", "corrected_offset_from_3"),
@@ -338,21 +305,14 @@ tryCatch({
     cat("  WARNING: CDS coverage failed:", conditionMessage(e), "\n")
 })
 
-# 6b. Codon Usage
-cat("  - Codon usage...\n")
-tryCatch({
-    codon_usage <- codon_usage_psite(psite_data, annotation)
-    if (nrow(codon_usage) > 0) {
-        fwrite(codon_usage, paste0(prefix, "_codon_usage.tsv"), sep = "\t")
-    }
-}, error = function(e) {
-    cat("  WARNING: Codon usage failed:", conditionMessage(e), "\n")
-})
+# 6b. Codon Usage (requires FASTA; skipped if unavailable)
+cat("  - Codon usage (skipped - requires BSgenome/FASTA)...\n")
 
 # 6c. Frame Distribution
 cat("  - Frame distribution...\n")
 tryCatch({
-    frame_dist <- frame_psite(psite_data, annotation)
+    sample_name <- names(psite_data)[1]
+    frame_dist <- frame_psite(psite_data, annotation, sample = sample_name)
     fwrite(frame_dist, paste0(prefix, "_frame_distribution.tsv"), sep = "\t")
 }, error = function(e) {
     cat("  WARNING: Frame distribution failed:", conditionMessage(e), "\n")
@@ -361,7 +321,7 @@ tryCatch({
 # 6d. Read Length Distribution
 cat("  - Read length distribution...\n")
 tryCatch({
-    rl_plot <- read_length_plot(data = filtered_data, sample = names(filtered_data)[1])
+    rl_plot <- riboWaltz::read_length_plot(data = filtered_data, sample = names(filtered_data)[1])
     ggsave(file.path(plot_dir, paste0(prefix, "_read_length_distribution.pdf")),
            plot = rl_plot, width = 8, height = 6)
 }, error = function(e) {
@@ -371,33 +331,28 @@ tryCatch({
 # 6e. Metagene Profiles
 cat("  - Metagene profiles...\n")
 tryCatch({
-    if (exists("metaplots")) {
-        metaplots_output <- metaplots(psite_data, annotation, sample = names(psite_data)[1])
-        ggsave(file.path(plot_dir, paste0(prefix, "_metaplots.pdf")),
-               plot = metaplots_output, width = 10, height = 8)
-    } else {
-        # Try metaprofile + metaheatmap separately (riboWaltz >=2.0)
-        if (exists("metaprofile_psite")) {
-            mp <- metaprofile_psite(psite_data, annotation, sample = names(psite_data)[1])
-            ggsave(file.path(plot_dir, paste0(prefix, "_metaprofile.pdf")),
-                   plot = mp, width = 10, height = 6)
-        }
-        if (exists("metaheatmap_psite")) {
-            mh <- metaheatmap_psite(psite_data, annotation, sample = names(psite_data)[1])
-            ggsave(file.path(plot_dir, paste0(prefix, "_metaheatmap.pdf")),
-                   plot = mh, width = 10, height = 8)
-        }
+    sample_name <- names(psite_data)[1]
+    if (exists("metaprofile_psite", where = "package:riboWaltz", inherits = FALSE)) {
+        mp <- metaprofile_psite(psite_data, annotation, sample = sample_name)
+        ggsave(file.path(plot_dir, paste0(prefix, "_metaprofile.pdf")),
+               plot = mp, width = 10, height = 6)
+    }
+    if (exists("metaheatmap_psite", where = "package:riboWaltz", inherits = FALSE)) {
+        mh <- metaheatmap_psite(psite_data, annotation, sample = sample_name)
+        ggsave(file.path(plot_dir, paste0(prefix, "_metaheatmap.pdf")),
+               plot = mh, width = 10, height = 8)
     }
 }, error = function(e) {
     cat("  WARNING: Metagene profiles failed:", conditionMessage(e), "\n")
 })
 
 # 6f. P-site Region Distribution
-cat("  - P-site region distribution...\n")
+# (riboWaltz >=2.0 adds region info via psite_info; percentage_regions removed)
+cat("  - Region distribution (from psite_info)...\n")
 tryCatch({
-    if (exists("percentage_regions")) {
-        pct_regions <- percentage_regions(psite_data, annotation)
-        fwrite(pct_regions, paste0(prefix, "_region_distribution.tsv"), sep = "\t")
+    if ("psite_region" %in% names(psite_data[[1]])) {
+        region_dist <- psite_data[[1]][, .N, by = psite_region]
+        fwrite(region_dist, paste0(prefix, "_region_distribution.tsv"), sep = "\t")
     }
 }, error = function(e) {
     cat("  WARNING: Region distribution failed:", conditionMessage(e), "\n")

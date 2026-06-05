@@ -71,6 +71,7 @@ include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER} from '..
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOCODE  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_ORFQUANT  } from '../../modules/local/classify_orfs/main'
 include { COLLECT_QC_STATS                                     } from '../../modules/local/collect_qc_stats/main'
+include { JOINT_QC_REPORT                                      } from '../../modules/local/joint_qc_report/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -136,6 +137,9 @@ workflow RIBOSEQ {
     ch_qc_ribotricer_orfs = Channel.empty()
     ch_qc_orfquant_results = Channel.empty()
     ch_qc_ribocode_txt    = Channel.empty()
+    ch_qc_rt_qual         = Channel.empty()
+    ch_qc_rtr_bam_summary = Channel.empty()
+    ch_qc_rw_region       = Channel.empty()
 
     //
     // BAM INPUT MODE: Skip preprocessing and alignment
@@ -547,6 +551,7 @@ workflow RIBOSEQ {
             ch_gtf.map { [ [:], it ] }
         )
         ch_versions      = ch_versions.mix(RIBOTISH_QUALITY_RIBOSEQ.out.versions)
+        ch_qc_rt_qual    = RIBOTISH_QUALITY_RIBOSEQ.out.distribution
 
         // Prefilter: using unfiltered BAMs (optional, for QC comparison)
         if (params.run_prefilter_qc) {
@@ -643,6 +648,7 @@ workflow RIBOSEQ {
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_POSTFILTER.out.versions)
         ch_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs
         ch_qc_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs.map { meta, f -> f }
+        ch_qc_rtr_bam_summary = RIBOTRICER_DETECTORFS_POSTFILTER.out.bam_summary
     }
 
     if (!params.skip_rpbp){
@@ -719,6 +725,7 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOWALTZ.out.versions)
         ch_ribowaltz_psite = RIBOWALTZ.out.psite_offset
+        ch_qc_rw_region = RIBOWALTZ.out.region_distribution
         // Feed QC outputs to MultiQC-compatible collection
         ch_multiqc_files = ch_multiqc_files.mix(
             RIBOWALTZ.out.psite_offset.map { meta, f -> f },
@@ -1214,7 +1221,7 @@ workflow RIBOSEQ {
         }
 
         // Pathogen TE analysis (dual-genome mode)
-        if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
+        if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis && !params.skip_te_analysis_pathogen) {
             def ch_pathogen_cds_bed = GTF2BED_PATHOGEN.out.bed
             if (ch_pathogen_cds_bed) {
                 TE_ANALYSIS_PATHOGEN(
@@ -1245,6 +1252,28 @@ workflow RIBOSEQ {
             ch_collect_script
         )
         ch_versions = ch_versions.mix(COLLECT_QC_STATS.out.versions)
+    }
+
+    //
+    // Joint Ribo-seq QC Report: Integrate metrics from riboWaltz + RiboseQC +
+    // Ribo-TISH + Ribotricer into a unified per-sample quality assessment.
+    //
+    if (!params.skip_joint_qc_report) {
+        def ch_joint_qc_script = Channel.value(file("${projectDir}/scripts/joint_qc_report.R", checkIfExists: true))
+
+        JOINT_QC_REPORT(
+            ch_ribowaltz_psite.map { meta, f -> f }.collect().ifEmpty([]),
+            ch_qc_rw_region.map { meta, f -> f }.collect().ifEmpty([]),
+            ch_qc_psites_calcs.collect().ifEmpty([]),
+            ch_qc_rt_qual.map { meta, f -> f }.collect().ifEmpty([]),
+            ch_qc_rtr_bam_summary.map { meta, f -> f }.collect().ifEmpty([]),
+            ch_joint_qc_script
+        )
+        ch_versions = ch_versions.mix(JOINT_QC_REPORT.out.versions)
+        // Feed to MultiQC: the YAML config enables custom_content, TSV data follows
+        ch_multiqc_files = ch_multiqc_files
+            .mix(JOINT_QC_REPORT.out.mqc_yaml.map { it })
+            .mix(JOINT_QC_REPORT.out.mqc_data.map { it })
     }
 
     //
