@@ -1200,7 +1200,7 @@ workflow RIBOSEQ {
         // Get unified ORFs BED for quantification annotation
         def ch_unified_bed_for_te = params.skip_unify_orf_predictions ?
             Channel.empty() :
-            ch_unify_bed.map { meta, f -> f }.first()
+            ch_unify_bed.first()
 
         if (ch_unified_bed_for_te) {
             TE_ANALYSIS(
