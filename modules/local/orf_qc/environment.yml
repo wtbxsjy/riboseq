@@ -1,0 +1,11 @@
+name: orf_qc
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.9
+  - pandas
+  - numpy
+  - scipy
+  - bedtools
+  - plotly

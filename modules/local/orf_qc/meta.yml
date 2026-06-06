@@ -1,0 +1,89 @@
+name: "orf_qc"
+description: "Unified ORF prediction QC module — harmonizes metrics across all ORF prediction tools and computes per-ORF confidence scores"
+keywords:
+  - riboseq
+  - orf
+  - qc
+  - quality control
+tools:
+  - "python":
+      description: "Python scripts for metric extraction, harmonization, comparison, and reporting"
+input:
+  - meta:
+      type: map
+      description: Groovy map containing sample metadata
+  - unified_bed:
+      type: file
+      description: Unified ORFs in BED12 format
+      pattern: "*.bed"
+  - unified_meta:
+      type: file
+      description: Unified ORF metadata TSV
+      pattern: "*.metadata.tsv"
+  - ribocode_collapsed:
+      type: file
+      description: RiboCode collapsed output (optional)
+      pattern: "*_collapsed.txt"
+  - riboseqc_psites:
+      type: file
+      description: RiboseQC P-site calculations (optional)
+      pattern: "*_P_sites_calcs"
+  - ribowaltz_offsets:
+      type: file
+      description: riboWaltz P-site offsets (optional)
+      pattern: "*_psite_offset.tsv"
+  - ribowaltz_frames:
+      type: file
+      description: riboWaltz frame distribution (optional)
+      pattern: "*_frame_distribution.tsv"
+  - ribotricer_tsv:
+      type: file
+      description: Ribotricer translating ORFs (optional)
+      pattern: "*_translating_ORFs.tsv"
+  - ribotish_pred:
+      type: file
+      description: Ribo-TISH predictions (optional)
+      pattern: "*_pred.txt"
+  - ribotish_para:
+      type: file
+      description: Ribo-TISH P-site parameters (optional)
+      pattern: "*.para.py"
+  - price_tsv:
+      type: file
+      description: PRICE ORF output (optional)
+      pattern: "*.orfs.tsv"
+  - rpbp_bayes:
+      type: file
+      description: rp-bp Bayes factors (optional)
+      pattern: "*bayes-factors.bed.gz"
+  - orfquant_gtf:
+      type: file
+      description: ORFquant detected ORFs (optional)
+      pattern: "*_Detected_ORFs.gtf.gz"
+output:
+  - qc_report:
+      type: file
+      description: Interactive HTML QC report
+      pattern: "qc_report.html"
+  - orf_confidence:
+      type: file
+      description: Per-ORF confidence scores
+      pattern: "orf_confidence.tsv"
+  - tool_agreement:
+      type: file
+      description: Cross-tool agreement matrix
+      pattern: "tool_agreement.tsv"
+  - psite_harmonized:
+      type: file
+      description: Harmonized P-site offsets
+      pattern: "psite_harmonized.tsv"
+  - sample_flags:
+      type: file
+      description: Machine-readable quality flags
+      pattern: "sample_flags.json"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+authors:
+  - "@renzhe"
