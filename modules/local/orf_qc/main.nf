@@ -24,15 +24,15 @@ process ORF_QC {
     tuple val(meta11), path(orfquant_gtf)             // ORFquant _Detected_ORFs.gtf.gz
 
     output:
-    tuple val(meta), path("${prefix}_qc_report.html")     , emit: report
-    tuple val(meta), path("${prefix}_orf_confidence.tsv") , emit: confidence
-    tuple val(meta), path("${prefix}_tool_agreement.tsv") , emit: agreement
-    tuple val(meta), path("${prefix}_psite_harmonized.tsv"), emit: psite_harmonized
-    tuple val(meta), path("${prefix}_sample_flags.json")  , emit: flags
-    tuple val(meta), path("${prefix}_qc_metrics.tsv")     , emit: metrics
-    tuple val(meta), path("${prefix}_joint_riboseq_qc_mqc.yaml"), emit: mqc_yaml
-    tuple val(meta), path("${prefix}_joint_riboseq_qc_mqc.txt"),  emit: mqc_data
-    path "versions.yml"                                   , emit: versions
+    tuple val(meta), path("*_qc_report.html")              , emit: report
+    tuple val(meta), path("*_orf_confidence.tsv")          , emit: confidence
+    tuple val(meta), path("*_tool_agreement.tsv")          , emit: agreement
+    tuple val(meta), path("*_psite_harmonized.tsv")        , emit: psite_harmonized
+    tuple val(meta), path("*_sample_flags.json")           , emit: flags
+    tuple val(meta), path("*_qc_metrics.tsv")              , emit: metrics
+    tuple val(meta), path("*_joint_riboseq_qc_mqc.yaml")   , emit: mqc_yaml
+    tuple val(meta), path("*_joint_riboseq_qc_mqc.txt")    , emit: mqc_data
+    path "versions.yml"                                    , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
