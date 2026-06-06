@@ -140,13 +140,17 @@ reads_list <- tryCatch({
                 )))
     })
 
-    # Strip version numbers from transcript names in BAM reads
-    new_seqlevels <- strip_version(seqlevels(ga))
-    names(new_seqlevels) <- seqlevels(ga)
-    ga <- GenomeInfoDb::renameSeqlevels(ga, new_seqlevels)
-
-    # Filter to transcripts in annotation
-    ga <- ga[seqnames(ga) %in% annotation$transcript]
+    # Strip version numbers from transcript names.
+    # renameSeqlevels() requires unique seqlevels — impossible after stripping
+    # because multiple isoforms (AT1G01020.1, AT1G01020.2) collapse to the
+    # same gene-level ID. seqlevels<- also fails because old seqlevels are
+    # "in use" by reads.
+    # Solution: convert to character early, filter, and build the data.table
+    # directly — avoids all GenomicRanges seqlevels/seqnames constraints.
+    stripped_names <- strip_version(as.character(seqnames(ga)))
+    keep <- stripped_names %in% annotation$transcript
+    ga <- ga[keep]
+    stripped_names <- stripped_names[keep]
 
     if (length(ga) == 0) {
         cat("WARNING: No reads mapped to annotated transcripts\n")
@@ -158,7 +162,7 @@ reads_list <- tryCatch({
         )), sample_name)
     } else {
         dt <- data.table(
-            transcript = as.character(seqnames(ga)),
+            transcript = stripped_names,
             end5       = ifelse(as.character(strand(ga)) == "+",
                                 start(ga), end(ga)),
             end3       = ifelse(as.character(strand(ga)) == "+",
