@@ -1,0 +1,2 @@
+sample	extremity	offset(nts)
+test	5'end	18

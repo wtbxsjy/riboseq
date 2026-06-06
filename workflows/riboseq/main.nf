@@ -1010,16 +1010,18 @@ workflow RIBOSEQ {
                         )
                         ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_RIBOTISH.out.versions)
                     }
-                    CLASSIFY_ORFS_ORFQUANT_RIBOTISH(
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_gtf,
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_metadata,
-                        rt_prefix,
-                        classify_wrapper,
-                        class_orf_dir,
-                        ch_gtf,
-                        "${base_classify_dir}/per_tool/ribotish/orfquant"
-                    )
-                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOTISH.out.versions)
+                    if (!params.skip_orf_classify_orfquant) {
+                        CLASSIFY_ORFS_ORFQUANT_RIBOTISH(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_gtf,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_metadata,
+                            rt_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            ch_gtf,
+                            "${base_classify_dir}/per_tool/ribotish/orfquant"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOTISH.out.versions)
+                    }
                     CLASSIFY_ORFS_ORF_TYPE_RIBOTISH(
                         UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotish_metadata,
                         rt_prefix,
@@ -1046,16 +1048,18 @@ workflow RIBOSEQ {
                         )
                         ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_RIBOTRICER.out.versions)
                     }
-                    CLASSIFY_ORFS_ORFQUANT_RIBOTRICER(
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_gtf,
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_metadata,
-                        rtr_prefix,
-                        classify_wrapper,
-                        class_orf_dir,
-                        ch_gtf,
-                        "${base_classify_dir}/per_tool/ribotricer/orfquant"
-                    )
-                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOTRICER.out.versions)
+                    if (!params.skip_orf_classify_orfquant) {
+                        CLASSIFY_ORFS_ORFQUANT_RIBOTRICER(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_gtf,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_metadata,
+                            rtr_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            ch_gtf,
+                            "${base_classify_dir}/per_tool/ribotricer/orfquant"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOTRICER.out.versions)
+                    }
                     CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER(
                         UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribotricer_metadata,
                         rtr_prefix,
@@ -1082,16 +1086,18 @@ workflow RIBOSEQ {
                         )
                         ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_RIBOCODE.out.versions)
                     }
-                    CLASSIFY_ORFS_ORFQUANT_RIBOCODE(
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_gtf,
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_metadata,
-                        rc_prefix,
-                        classify_wrapper,
-                        class_orf_dir,
-                        ch_gtf,
-                        "${base_classify_dir}/per_tool/ribocode/orfquant"
-                    )
-                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOCODE.out.versions)
+                    if (!params.skip_orf_classify_orfquant) {
+                        CLASSIFY_ORFS_ORFQUANT_RIBOCODE(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_gtf,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_metadata,
+                            rc_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            ch_gtf,
+                            "${base_classify_dir}/per_tool/ribocode/orfquant"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_RIBOCODE.out.versions)
+                    }
                     CLASSIFY_ORFS_ORF_TYPE_RIBOCODE(
                         UNIFY_ORF_PREDICTIONS_PER_TOOL.out.ribocode_metadata,
                         rc_prefix,
@@ -1118,16 +1124,18 @@ workflow RIBOSEQ {
                         )
                         ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE_ORFQUANT.out.versions)
                     }
-                    CLASSIFY_ORFS_ORFQUANT_ORFQUANT(
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_gtf,
-                        UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_metadata,
-                        oq_prefix,
-                        classify_wrapper,
-                        class_orf_dir,
-                        ch_gtf,
-                        "${base_classify_dir}/per_tool/orfquant/orfquant"
-                    )
-                    ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_ORFQUANT.out.versions)
+                    if (!params.skip_orf_classify_orfquant) {
+                        CLASSIFY_ORFS_ORFQUANT_ORFQUANT(
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_gtf,
+                            UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_metadata,
+                            oq_prefix,
+                            classify_wrapper,
+                            class_orf_dir,
+                            ch_gtf,
+                            "${base_classify_dir}/per_tool/orfquant/orfquant"
+                        )
+                        ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT_ORFQUANT.out.versions)
+                    }
                     CLASSIFY_ORFS_ORF_TYPE_ORFQUANT(
                         UNIFY_ORF_PREDICTIONS_PER_TOOL.out.orfquant_metadata,
                         oq_prefix,
@@ -1160,16 +1168,18 @@ workflow RIBOSEQ {
             )
             ch_versions = ch_versions.mix(CLASSIFY_ORFS_GENCODE.out.versions)
 
-            CLASSIFY_ORFS_ORFQUANT(
-                ch_unify_gtf,
-                ch_unify_metadata,
-                classify_prefix,
-                classify_wrapper,
-                class_orf_dir,
-                ch_gtf,
-                orfquant_outdir
-            )
-            ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
+            if (!params.skip_orf_classify_orfquant) {
+                CLASSIFY_ORFS_ORFQUANT(
+                    ch_unify_gtf,
+                    ch_unify_metadata,
+                    classify_prefix,
+                    classify_wrapper,
+                    class_orf_dir,
+                    ch_gtf,
+                    orfquant_outdir
+                )
+                ch_versions = ch_versions.mix(CLASSIFY_ORFS_ORFQUANT.out.versions)
+            }
 
             CLASSIFY_ORFS_ORF_TYPE(
                 ch_unify_metadata,
