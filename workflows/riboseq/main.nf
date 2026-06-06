@@ -1278,18 +1278,19 @@ workflow RIBOSEQ {
         def ch_orf_qc_unified = ch_unify_bed.join(ch_unify_metadata)
 
         if (ch_orf_qc_unified) {
+            // Strip meta from all tool channels and collect into plain file lists
             ORF_QC(
                 ch_orf_qc_unified,
-                ch_qc_ribocode_txt.collect().ifEmpty([]),              // RiboCode
-                ch_qc_psites_calcs.collect().ifEmpty([]),              // RiboseQC
-                ch_ribowaltz_psite.collect().ifEmpty([]),              // riboWaltz
-                ch_qc_rw_region.collect().ifEmpty([]),                 // riboWaltz frames
-                ch_qc_ribotricer_orfs.collect().ifEmpty([]),           // Ribotricer
-                ch_ribotish_predictions.map { meta, f -> f }.collect().ifEmpty([]), // Ribo-TISH
-                ch_offset_for_ribotish.collect().ifEmpty([]),           // Ribo-TISH para
-                ch_price_gtf.collect().ifEmpty([]),                     // PRICE
-                ch_rpbp_bayes.collect().ifEmpty([]),                    // rp-bp
-                ch_orfquant_gtf.collect().ifEmpty([])                   // ORFquant
+                ch_qc_ribocode_txt.collect().ifEmpty([]),
+                ch_qc_psites_calcs.collect().ifEmpty([]),
+                ch_ribowaltz_psite.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_qc_rw_region.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_qc_ribotricer_orfs.collect().ifEmpty([]),
+                ch_ribotish_predictions.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_offset_for_ribotish.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_price_gtf.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_rpbp_bayes.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_orfquant_gtf.map { meta, f -> f }.collect().ifEmpty([])
             )
             ch_versions = ch_versions.mix(ORF_QC.out.versions)
             // Feed to MultiQC: YAML config + TSV data table

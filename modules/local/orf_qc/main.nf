@@ -11,17 +11,17 @@ process ORF_QC {
     // Required: unified ORFs (post-UNIFY_ORF_PREDICTIONS)
     tuple val(meta), path(unified_bed), path(unified_meta)
 
-    // All ORF prediction tool outputs — each optional
-    tuple val(meta2), path(ribocode_collapsed)       // RiboCode _collapsed.txt
-    tuple val(meta3), path(riboseqc_psites)           // RiboseQC _P_sites_calcs
-    tuple val(meta4), path(ribowaltz_offsets)         // riboWaltz _psite_offset.tsv
-    tuple val(meta5), path(ribowaltz_frames)          // riboWaltz _frame_distribution.tsv
-    tuple val(meta6), path(ribotricer_tsv)            // Ribotricer _translating_ORFs.tsv
-    tuple val(meta7), path(ribotish_pred)             // Ribo-TISH _pred.txt
-    tuple val(meta8), path(ribotish_para)             // Ribo-TISH .para.py
-    tuple val(meta9), path(price_tsv)                 // PRICE .orfs.tsv
-    tuple val(meta10), path(rpbp_bayes)               // rp-bp bayes-factors.bed.gz
-    tuple val(meta11), path(orfquant_gtf)             // ORFquant _Detected_ORFs.gtf.gz
+    // All ORF prediction tool outputs — each optional, collected as lists
+    path ribocode_collapsed       // RiboCode _collapsed.txt
+    path riboseqc_psites          // RiboseQC _P_sites_calcs
+    path ribowaltz_offsets        // riboWaltz _psite_offset.tsv
+    path ribowaltz_frames         // riboWaltz _frame_distribution.tsv
+    path ribotricer_tsv           // Ribotricer _translating_ORFs.tsv
+    path ribotish_pred            // Ribo-TISH _pred.txt
+    path ribotish_para            // Ribo-TISH .para.py
+    path price_tsv                // PRICE .orfs.tsv
+    path rpbp_bayes               // rp-bp bayes-factors.bed.gz
+    path orfquant_gtf             // ORFquant _Detected_ORFs.gtf.gz
 
     output:
     tuple val(meta), path("*_qc_report.html")              , emit: report
@@ -48,21 +48,11 @@ process ORF_QC {
     echo "Sample: ${prefix}"
 
     # Collect all available tool output files into a list
-    # We use a file list approach so the QC scripts can auto-detect
     rm -f input_files.txt
 
-    for f in \\
-        ${ribocode_collapsed} \\
-        ${riboseqc_psites} \\
-        ${ribowaltz_offsets} \\
-        ${ribowaltz_frames} \\
-        ${ribotricer_tsv} \\
-        ${ribotish_pred} \\
-        ${ribotish_para} \\
-        ${price_tsv} \\
-        ${rpbp_bayes} \\
-        ${orfquant_gtf} \\
-        ; do
+    for f in ${ribocode_collapsed} ${riboseqc_psites} ${ribowaltz_offsets} \\
+             ${ribowaltz_frames} ${ribotricer_tsv} ${ribotish_pred} \\
+             ${ribotish_para} ${price_tsv} ${rpbp_bayes} ${orfquant_gtf}; do
         if [ -n "\$f" ] && [ "\$f" != "null" ] && [ -f "\$f" ]; then
             echo "\$f" >> input_files.txt
         fi
