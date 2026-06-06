@@ -23,8 +23,14 @@ process QUANTIFY_ORFS {
     def paired = meta.single_end ? '' : '-p --countReadPairs'
     """
     # Convert BED to SAF format (subread 2.1.1 lacks BED support)
-    awk 'BEGIN{OFS="\\t"; print "GeneID\\tChr\\tStart\\tEnd\\tStrand"}
-         {print \$4, \$1, \$2+1, \$3, \$6}' ${annotation_bed} > annotation.saf
+    # Handle both gzipped and plain BED files
+    if [[ "${annotation_bed}" == *.gz ]]; then
+        zcat ${annotation_bed} | awk 'BEGIN{OFS="\\t"; print "GeneID\\tChr\\tStart\\tEnd\\tStrand"}
+            {print \$4, \$1, \$2+1, \$3, \$6}' > annotation.saf
+    else
+        awk 'BEGIN{OFS="\\t"; print "GeneID\\tChr\\tStart\\tEnd\\tStrand"}
+             {print \$4, \$1, \$2+1, \$3, \$6}' ${annotation_bed} > annotation.saf
+    fi
 
     featureCounts \\
         -a annotation.saf \\
