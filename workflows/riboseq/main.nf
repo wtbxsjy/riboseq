@@ -1274,14 +1274,12 @@ workflow RIBOSEQ {
     // and assign per-ORF confidence scores (OCS).
     //
     if (!params.skip_orf_qc) {
-        // Collect unified ORF outputs — required
-        def ch_orf_qc_unified_bed = ch_unify_bed.map { meta, f -> [meta, f] }
-        def ch_orf_qc_unified_meta = ch_unify_metadata.map { meta, f -> [meta, f] }
+        // Collect unified ORF outputs — join BED + metadata on meta
+        def ch_orf_qc_unified = ch_unify_bed.join(ch_unify_metadata)
 
-        if (ch_orf_qc_unified_bed && ch_orf_qc_unified_meta) {
+        if (ch_orf_qc_unified) {
             ORF_QC(
-                ch_orf_qc_unified_bed,
-                ch_orf_qc_unified_meta,
+                ch_orf_qc_unified,
                 ch_qc_ribocode_txt.collect().ifEmpty([]),              // RiboCode
                 ch_qc_psites_calcs.collect().ifEmpty([]),              // RiboseQC
                 ch_ribowaltz_psite.collect().ifEmpty([]),              // riboWaltz
