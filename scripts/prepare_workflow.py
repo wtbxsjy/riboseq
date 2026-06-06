@@ -226,6 +226,8 @@ Examples:
                         help='Path to container for unify_orf_predictions and classify_orfs (Python/biopython)')
     parser.add_argument('--gencode-orf-mapper-container', default=None,
                         help='Path to gencode-orf-mapper container for GENCODE ORF classification')
+    parser.add_argument('--ribowaltz-container', default=None,
+                        help='Path to riboWaltz container for P-site analysis')
     
     # Pipeline options
     parser.add_argument('--run-prefilter-qc', action='store_true',
@@ -605,9 +607,10 @@ def prepare_orf_classify_ensembl_dir(workdir, args, dry_run=False):
     return ensembl_dir
 
 
-def setup_container_directory(workdir, container_dir, orfquant_container=None, 
+def setup_container_directory(workdir, container_dir, orfquant_container=None,
                               rpbp_container=None, unify_orf_container=None,
-                              gencode_orf_mapper_container=None, dry_run=False):
+                              gencode_orf_mapper_container=None, ribowaltz_container=None,
+                              dry_run=False):
     """Setup container directory by copying specified images into workdir"""
     logger.info("\n" + "=" * 60)
     logger.info("Setting up container directory")
@@ -664,7 +667,19 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                     shutil.copy2(gencode_path, link_path)
                     logger.info(f"✓ Copied gencode-orf-mapper container: {gencode_path.name}")
             linked_containers['gencode_orf_mapper'] = link_path
-    
+
+    if ribowaltz_container:
+        rw_path = Path(ribowaltz_container).resolve()
+        if rw_path.exists():
+            link_path = target_dir / 'ribowaltz.sif'
+            if dry_run:
+                logger.info(f"[DRY RUN] Would copy riboWaltz: {rw_path} -> {link_path}")
+            else:
+                if not link_path.exists():
+                    shutil.copy2(rw_path, link_path)
+                    logger.info(f"✓ Copied riboWaltz container: {rw_path.name}")
+            linked_containers['ribowaltz'] = link_path
+
     # Backward-compatible: copy all containers from container_dir
     if container_dir:
         logger.warning("container-dir is deprecated. Prefer specifying containers directly.")
@@ -791,6 +806,9 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     
     if 'gencode_orf_mapper' in containers:
         nf_cmd_parts.append(f"--gencode_orf_mapper_container {containers['gencode_orf_mapper']}")
+
+    if 'ribowaltz' in containers:
+        nf_cmd_parts.append(f"--ribowaltz_container {containers['ribowaltz']}")
     
     def prefer_uncompressed(path_obj):
         path_obj = Path(path_obj)
@@ -1131,12 +1149,13 @@ def main():
 
     # Step 5: Setup container directory
     containers = setup_container_directory(
-        workdir, 
+        workdir,
         args.container_dir,
         args.orfquant_container,
         args.rpbp_container,
         args.unify_orf_container,
         args.gencode_orf_mapper_container,
+        args.ribowaltz_container,
         args.dry_run
     )
     
