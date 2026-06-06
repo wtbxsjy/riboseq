@@ -71,7 +71,7 @@ include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER} from '..
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOCODE  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_ORFQUANT  } from '../../modules/local/classify_orfs/main'
 include { COLLECT_QC_STATS                                     } from '../../modules/local/collect_qc_stats/main'
-include { JOINT_QC_REPORT                                      } from '../../modules/local/joint_qc_report/main'
+include { ORF_QC                                               } from '../../modules/local/orf_qc/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -651,6 +651,7 @@ workflow RIBOSEQ {
         ch_qc_rtr_bam_summary = RIBOTRICER_DETECTORFS_POSTFILTER.out.bam_summary
     }
 
+    ch_rpbp_bayes = Channel.empty()
     if (!params.skip_rpbp){
         def ribosomal_fasta = params.contaminant_fasta ? file(params.contaminant_fasta) : []
         if (!ribosomal_fasta) {
@@ -664,6 +665,7 @@ workflow RIBOSEQ {
             ribosomal_fasta
         )
         ch_versions = ch_versions.mix(RPBP.out.versions)
+        ch_rpbp_bayes = RPBP.out.bayes_factors
     }
 
     // Create shared transcriptome BAM channel for riboseq samples
@@ -1265,25 +1267,40 @@ workflow RIBOSEQ {
     }
 
     //
-    // Joint Ribo-seq QC Report: Integrate metrics from riboWaltz + RiboseQC +
-    // Ribo-TISH + Ribotricer into a unified per-sample quality assessment.
+    // ORF QC Module: Unified quality control across all ORF prediction tools.
+    // Replaces the previous JOINT_QC_REPORT — provides read-level QC, per-ORF
+    // confidence scores, cross-tool comparison, and MultiQC integration.
+    // Runs post-unification to harmonize metrics, compute cross-tool agreement,
+    // and assign per-ORF confidence scores (OCS).
     //
-    if (!params.skip_joint_qc_report) {
-        def ch_joint_qc_script = Channel.value(file("${projectDir}/scripts/joint_qc_report.R", checkIfExists: true))
+    if (!params.skip_orf_qc) {
+        // Collect unified ORF outputs — required
+        def ch_orf_qc_unified_bed = ch_unify_bed.map { meta, f -> [meta, f] }
+        def ch_orf_qc_unified_meta = ch_unify_metadata.map { meta, f -> [meta, f] }
 
-        JOINT_QC_REPORT(
-            ch_ribowaltz_psite.map { meta, f -> f }.collect().ifEmpty([]),
-            ch_qc_rw_region.map { meta, f -> f }.collect().ifEmpty([]),
-            ch_qc_psites_calcs.collect().ifEmpty([]),
-            ch_qc_rt_qual.map { meta, f -> f }.collect().ifEmpty([]),
-            ch_qc_rtr_bam_summary.map { meta, f -> f }.collect().ifEmpty([]),
-            ch_joint_qc_script
-        )
-        ch_versions = ch_versions.mix(JOINT_QC_REPORT.out.versions)
-        // Feed to MultiQC: the YAML config enables custom_content, TSV data follows
-        ch_multiqc_files = ch_multiqc_files
-            .mix(JOINT_QC_REPORT.out.mqc_yaml.map { it })
-            .mix(JOINT_QC_REPORT.out.mqc_data.map { it })
+        if (ch_orf_qc_unified_bed && ch_orf_qc_unified_meta) {
+            ORF_QC(
+                ch_orf_qc_unified_bed,
+                ch_orf_qc_unified_meta,
+                ch_qc_ribocode_txt.collect().ifEmpty([]),              // RiboCode
+                ch_qc_psites_calcs.collect().ifEmpty([]),              // RiboseQC
+                ch_ribowaltz_psite.collect().ifEmpty([]),              // riboWaltz
+                ch_qc_rw_region.collect().ifEmpty([]),                 // riboWaltz frames
+                ch_qc_ribotricer_orfs.collect().ifEmpty([]),           // Ribotricer
+                ch_ribotish_predictions.map { meta, f -> f }.collect().ifEmpty([]), // Ribo-TISH
+                ch_offset_for_ribotish.collect().ifEmpty([]),           // Ribo-TISH para
+                ch_price_gtf.collect().ifEmpty([]),                     // PRICE
+                ch_rpbp_bayes.collect().ifEmpty([]),                    // rp-bp
+                ch_orfquant_gtf.collect().ifEmpty([])                   // ORFquant
+            )
+            ch_versions = ch_versions.mix(ORF_QC.out.versions)
+            // Feed to MultiQC: YAML config + TSV data table
+            ch_multiqc_files = ch_multiqc_files
+                .mix(ORF_QC.out.mqc_yaml.map { meta, f -> f })
+                .mix(ORF_QC.out.mqc_data.map { meta, f -> f })
+        } else {
+            log.warn "ORF QC module enabled but no unified ORFs available — skipping."
+        }
     }
 
     //

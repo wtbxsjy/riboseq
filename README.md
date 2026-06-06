@@ -57,6 +57,7 @@ flowchart TB
     end
 
     subgraph QC["📊 Quality Control"]
+        RW[riboWaltz<br/>P-site Offset +<br/>Diagnostic Plots]
         O[RiboseQC<br/>Comprehensive QC +<br/>P-site Analysis]
         P[Ribo-TISH Quality<br/>P-site Offset]
     end
@@ -65,12 +66,14 @@ flowchart TB
         Q[Ribo-TISH Predict]
         R[Ribotricer]
         S[RiboCode]
-        T[rp-bp]
+        T[rp-bp<br/>Bayesian ORF]
+        PR[PRICE<br/>GEDI ORF]
         OQ[ORFquant<br/>Splice-aware<br/>Quantification]
     end
 
     subgraph Analysis["📈 Downstream Analysis"]
         U[ggRibo<br/>Output Support]
+        ORFQC[ORF QC Module<br/>Cross-tool<br/>Confidence Scores]
     end
 
     subgraph Output["📤 Output"]
@@ -89,14 +92,17 @@ flowchart TB
     K --> L
     L --> M --> N
 
+    N --> RW
     N --> O
     N --> P
     N --> Q
     N --> R
     N --> S
     N --> T
+    N --> PR
     N --> U
 
+    RW --> X
     O --> OQ
     O --> X
     P --> X
@@ -104,7 +110,10 @@ flowchart TB
     R --> W
     S --> W
     T --> W
+    PR --> W
     OQ --> W
+    W --> ORFQC
+    ORFQC --> X
     U --> X
     X --> V
 ```
@@ -123,9 +132,10 @@ flowchart TB
 
 ### Ribo-seq Quality Control
 
-1. **RiboseQC**: Comprehensive quality control including read length distribution, P-site analysis, metagene profiles, codon periodicity, and frame bias ([`RiboseQC`](https://github.com/ohlerlab/RiboseQC))
-2. **Ribo-TISH Quality**: Check reads distribution around annotated protein coding regions, show frame bias and estimate P-site offset ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
-3. **ggRibo Output**: Generates compatible output files for visualization with the [`ggRibo`](https://github.com/hsinyenwu/ggRibo) R package.
+1. **riboWaltz**: Two-step coherence correction for optimal P-site offset determination, metagene profiles, frame distribution analysis, and CDS coverage ([`riboWaltz`](https://github.com/LabTranslationalArchitectomics/riboWaltz))
+2. **RiboseQC**: Comprehensive quality control including read length distribution, P-site analysis, metagene profiles, codon periodicity, and frame bias ([`RiboseQC`](https://github.com/ohlerlab/RiboseQC))
+3. **Ribo-TISH Quality**: Check reads distribution around annotated protein coding regions, show frame bias and estimate P-site offset ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
+4. **ggRibo Output**: Generates compatible output files for visualization with the [`ggRibo`](https://github.com/hsinyenwu/ggRibo) R package.
 
 > [!IMPORTANT]
 > **QC and sORF prediction filtering policy** (IMPLEMENTED)
@@ -144,8 +154,9 @@ flowchart TB
 1. **Ribo-TISH** (default): Predict translated ORFs and translation initiation sites _de novo_ from alignment data ([`Ribo-TISH`](https://github.com/zhpn1024/ribotish))
 2. **Ribotricer** (default): Derive candidate ORFs from reference data and detect translated ORFs ([`Ribotricer`](https://github.com/smithlabcode/ribotricer))
 3. **RiboCode** (optional): Detect actively translating ORFs using transcriptome-aligned reads ([`RiboCode`](https://github.com/xztcwang/RiboCode))
-4. **rp-bp** (optional): Ribosome profiling with Bayesian predictions for translated ORFs ([`rp-bp`](https://github.com/dieterich-lab/rp-bp))
-5. **ORFquant** (default, requires RiboseQC): Splice-aware ORF detection and quantification at the single-ORF level ([`ORFquant`](https://github.com/lcalviell/ORFquant))
+4. **PRICE** (default): GEDI-based ORF detection with start codon prediction and P-site identification ([GEDI/PRICE](https://github.com/erhard-lab/gedi))
+5. **rp-bp** (optional): Ribosome profiling with Bayesian predictions for translated ORFs ([`rp-bp`](https://github.com/dieterich-lab/rp-bp))
+6. **ORFquant** (default, requires RiboseQC): Splice-aware ORF detection and quantification at the single-ORF level ([`ORFquant`](https://github.com/lcalviell/ORFquant))
 
 > [!IMPORTANT]
 > **Per-sample ORF prediction policy** (IMPLEMENTED)
@@ -196,6 +207,41 @@ Disable with `--skip_orf_classification true`.
 Key parameters:
 - `--orf_classify_ensembl_dir` — path to Ensembl annotation directory (required for `gencode` mode; must contain `TRANSCRIPTOME_FASTA`, `SORTED_TRANSCRIPTOME_GTF`, `PROTEOME_FASTA`, `TRANSCRIPT_SUPPORT`, `PSITES_BED`)
 - `--gencode_orf_mapper_container` — Singularity/Docker image with bedtools + BioPython for GENCODE classification
+
+#### ORF QC Module (`bin/extract_orf_qc_metrics.py` → `bin/generate_orf_qc_report.py`)
+
+The **ORF QC Module** runs after ORF unification and classification, providing a unified quality control framework across all 8 tools:
+
+| Tool | Type | QC Contribution |
+|------|------|----------------|
+| riboWaltz | Pure QC | Optimal P-site offsets (two-step correction), frame distributions |
+| RiboseQC | Pure QC | Frame distributions, codon occupancy, biotype analysis |
+| RiboCode | ORF predictor | Per-ORF p-values, frame-0/1/2 coverage, RPKM |
+| ORFquant | ORF predictor | Multi-level classification, DPSS periodicity |
+| Ribotricer | ORF predictor | Fourier coherence phase score, valid codon ratio |
+| Ribo-TISH | ORF predictor | TIS enrichment p-values, Frame Q-values |
+| PRICE | ORF predictor | GEDI ORF detection, p-values |
+| rp-bp | ORF predictor | Bayes factors (periodic vs non-periodic models) |
+
+**Key features:**
+- **P-site offset harmonization**: Cross-validates offsets across all tools, with riboWaltz as the primary authority
+- **3-nt periodicity assessment**: Normalizes periodicity scores to [0,1] across tools
+- **Cross-tool agreement**: Pairwise Jaccard indices and consensus ORF identification
+- **ORF Confidence Score (OCS)**: Weighted combination of translation significance, cross-tool agreement, coverage completeness, periodicity, and sample-level QC
+- **Interactive HTML report**: 5-tab Plotly dashboard (Summary, Read QC, ORF QC, Cross-Tool, Detail Table)
+
+**Outputs** (`results/orf_qc/`):
+- `qc_report.html` — Interactive HTML report
+- `orf_confidence.tsv` — Per-ORF confidence scores (OCS + tier)
+- `tool_agreement.tsv` — Pairwise Jaccard indices
+- `psite_harmonized.tsv` — Cross-tool P-site consensus
+- `sample_flags.json` — Machine-readable quality flags
+
+Disable with `--skip_orf_qc true`.  Key parameters:
+- `--orf_qc_min_consensus_tools` (default `2`) — minimum tool agreement for consensus ORFs
+- `--orf_qc_confidence_weights` — weights for OCS components (default `0.30,0.30,0.20,0.15,0.05`)
+- `--orf_qc_periodicity_min_f0` (default `0.6`) — minimum frame-0 proportion for "periodic"
+- `--orf_qc_offset_max_delta` (default `1`) — maximum nt difference for P-site consensus
 
 ## Usage
 

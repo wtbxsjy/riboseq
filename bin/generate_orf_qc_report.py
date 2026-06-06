@@ -349,6 +349,46 @@ if (agreementData.length > 0) {
     return html
 
 
+def _generate_multiqc_data(sample_id: str, confidence_data: List[Dict],
+                           periodicity: Dict, flags: Dict) -> tuple:
+    """Generate MultiQC-compatible YAML and TSV data.
+
+    Returns (yaml_str, tsv_str).
+    """
+    n_orfs = len(confidence_data)
+    tier_counts = {"High": 0, "Medium": 0, "Low": 0, "Uncertain": 0}
+    for r in confidence_data:
+        tier_counts[r.get("tier", "Uncertain")] = tier_counts.get(r.get("tier", "Uncertain"), 0) + 1
+    mean_ocs = sum(float(r.get("ocs", 0)) for r in confidence_data) / max(n_orfs, 1)
+
+    agg_score = periodicity.get("aggregate_score", "N/A")
+    psite_ok = sum(1 for f in flags.get("summary", {}).get("flags", []) if f == "OK")
+
+    yaml = f"""id: 'orf_qc'
+section_name: 'ORF Prediction QC'
+description: 'Unified quality control across all ORF prediction tools'
+plot_type: 'table'
+pconfig:
+    id: 'orf_qc_table'
+    title: 'ORF Prediction QC Summary'
+data:
+    sample_name: '{sample_id}'
+    unified_orfs: {n_orfs}
+    mean_ocs: {mean_ocs:.3f}
+    high_confidence: {tier_counts['High']}
+    medium_confidence: {tier_counts['Medium']}
+    low_confidence: {tier_counts['Low']}
+    periodicity_score: {agg_score}
+    periodicity_class: '{periodicity.get("classification", "N/A")}'
+    flags_count: {len(flags.get('flags', []))}
+"""
+
+    tsv = f"sample_name\tunified_orfs\tmean_ocs\thigh_confidence\tmedium_confidence\tlow_confidence\tperiodicity_score\tperiodicity_class\tflags_count\n"
+    tsv += f"{sample_id}\t{n_orfs}\t{mean_ocs:.3f}\t{tier_counts['High']}\t{tier_counts['Medium']}\t{tier_counts['Low']}\t{agg_score}\t{periodicity.get('classification', 'N/A')}\t{len(flags.get('flags', []))}\n"
+
+    return yaml, tsv
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate ORF QC HTML report")
     parser.add_argument("--psite", help="psite_harmonized.tsv")
@@ -358,6 +398,7 @@ def main():
     parser.add_argument("--flags", help="sample_flags.json")
     parser.add_argument("--sample-id", default="sample", help="Sample identifier for report title")
     parser.add_argument("--output", "-o", default="qc_report.html", help="Output HTML file")
+    parser.add_argument("--mqc-prefix", default="joint_riboseq_qc", help="MultiQC output prefix")
     args = parser.parse_args()
 
     # Load data
@@ -388,9 +429,17 @@ def main():
     with open(args.output, "w") as fh:
         fh.write(html)
 
+    # Generate MultiQC-compatible output (replaces JOINT_QC_REPORT)
+    mqc_yaml, mqc_tsv = _generate_multiqc_data(args.sample_id, confidence_data, periodicity, flags)
+    with open(f"{args.mqc_prefix}_mqc.yaml", "w") as fh:
+        fh.write(mqc_yaml)
+    with open(f"{args.mqc_prefix}_mqc.txt", "w") as fh:
+        fh.write(mqc_tsv)
+
     print(f"Report written to: {args.output}")
     print(f"  {len(confidence_data)} ORFs scored")
     print(f"  {len(psite_data)} read lengths with P-site data")
+    print(f"  MultiQC output: {args.mqc_prefix}_mqc.yaml, {args.mqc_prefix}_mqc.txt")
 
 
 if __name__ == "__main__":
