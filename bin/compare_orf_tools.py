@@ -175,6 +175,8 @@ def compute_tool_agreement(tool_data: Dict) -> Dict[str, Any]:
         for j, tool_b in enumerate(tool_names):
             if i >= j:
                 continue
+            if tool_a not in bed_files or tool_b not in bed_files:
+                continue
             pairs = _bedtools_intersect(bed_files[tool_a], bed_files[tool_b])
             overlap = len(pairs)
             total_a = len(tool_orfs[tool_a])
@@ -281,10 +283,7 @@ def compute_ocs(
     if not unified_orfs:
         return []
 
-    # Build lookup: orf_id -> {tool: metrics} from all tools
-    tool_metrics = _build_tool_metrics_lookup(tool_data)
-
-    # Count available ORF prediction tools
+    # Count available ORF prediction tools from tool_data
     available_tools = [
         t for t, s in tool_data.get("tool_status", {}).items()
         if s == "OK" and t not in ("riboseqc", "ribowaltz")
@@ -297,48 +296,58 @@ def compute_ocs(
     results = []
     for orf in unified_orfs:
         orf_id = orf.get("orf_id", "")
-        detecting_tools = _parse_detecting_tools(orf.get("tools", ""), orf.get("sources", ""))
 
-        # S_agreement: fraction of tools supporting this ORF
+        # ---- S_agreement: from unified metadata 'tools' column ----
+        detecting_tools = _parse_detecting_tools(
+            orf.get("tools", ""), orf.get("sources", ""))
         n_detecting = len(detecting_tools)
         if n_available > 0:
             agreement_raw = n_detecting / n_available
-            # Non-linear scaling
-            if agreement_raw >= 0.8:
-                s_agreement = 1.0
-            elif agreement_raw >= 0.6:
-                s_agreement = 0.75
-            elif agreement_raw >= 0.4:
-                s_agreement = 0.5
-            elif agreement_raw >= 0.2:
-                s_agreement = 0.25
-            else:
-                s_agreement = 0.1
+            if agreement_raw >= 0.8:    s_agreement = 1.0
+            elif agreement_raw >= 0.6:  s_agreement = 0.75
+            elif agreement_raw >= 0.4:  s_agreement = 0.5
+            elif agreement_raw >= 0.2:  s_agreement = 0.25
+            else:                       s_agreement = 0.1
         else:
             s_agreement = 0.0
 
-        # S_translation, S_periodicity, S_coverage: from detecting tools
+        # ---- S_translation: from unified metadata 'tool_scores' column ----
+        # Format: "Ribotricer:0.678" or "Ribo-TISH:0.5,Ribotricer:0.8"
         best_translation = 0.0
+        tool_scores_str = orf.get("tool_scores", "")
+        if tool_scores_str and tool_scores_str != "NA":
+            for part in tool_scores_str.split(","):
+                part = part.strip()
+                if ":" in part:
+                    try:
+                        score = float(part.split(":", 1)[1])
+                        if score > best_translation:
+                            best_translation = score
+                    except (ValueError, IndexError):
+                        pass
+
+        # ---- S_periodicity: from unified metadata 'pN' column ----
+        # pN is already a 0-1 P-site periodicity score
         best_periodicity = 0.0
+        try:
+            pn_val = float(orf.get("pN", 0))
+            if pn_val > 0:
+                best_periodicity = min(1.0, pn_val)
+        except (ValueError, TypeError):
+            pass
+
+        # ---- S_coverage: from unified metadata 'unique_psites' / length_aa ----
         best_coverage = 0.0
+        try:
+            aa_len = int(orf.get("length_aa", 0))
+            uq_psites = int(float(orf.get("unique_psites", 0)))
+            if aa_len > 0 and uq_psites > 0:
+                # Density: P-sites per codon. Cap at 10 (very high coverage)
+                best_coverage = min(1.0, (uq_psites / aa_len) / 10.0)
+        except (ValueError, TypeError):
+            pass
 
-        for tool_name in detecting_tools:
-            metrics = tool_metrics.get(tool_name, {}).get(orf_id, {})
-            if not metrics:
-                continue
-
-            translation = _normalize_translation(metrics, tool_name)
-            periodicity = _normalize_periodicity(metrics, tool_name)
-            coverage = _normalize_coverage(metrics, tool_name)
-
-            if translation > best_translation:
-                best_translation = translation
-            if periodicity > best_periodicity:
-                best_periodicity = periodicity
-            if coverage > best_coverage:
-                best_coverage = coverage
-
-        # Compute OCS
+        # Compose OCS
         w_t, w_a, w_c, w_p, w_r = weights
         ocs = (
             w_t * best_translation +
@@ -348,8 +357,6 @@ def compute_ocs(
             w_r * s_readlevel
         )
         ocs = round(min(1.0, max(0.0, ocs)), 4)
-
-        # Assign tier
         tier = _assign_tier(ocs)
 
         results.append({
@@ -422,16 +429,74 @@ def _parse_detecting_tools(tools_str: str, sources_str: str) -> Set[str]:
     return tools
 
 
-def _build_tool_metrics_lookup(tool_data: Dict) -> Dict[str, Dict[str, Dict]]:
-    """Build {tool_name: {orf_id: {metrics}}} lookup."""
-    lookup: Dict[str, Dict[str, Dict]] = defaultdict(dict)
+def _extract_coords(orf: Dict) -> Optional[Tuple[str, int, int, str]]:
+    """Extract (chrom, start, end, strand) from an ORF dict.
+    Returns None if coordinates can't be determined.
+    """
+    chrom = orf.get("chrom", "")
+    strand = orf.get("strand", ".")
+
+    # Try multiple coordinate field names
+    start = orf.get("orf_gstart") or orf.get("start")
+    end = orf.get("orf_gstop") or orf.get("end")
+
+    # If start/end are missing, try parsing genome_pos or location
+    if start is None or end is None:
+        pos_str = str(orf.get("genome_pos", "") or orf.get("location", ""))
+        if ":" in pos_str:
+            c, s, e, st = _parse_genome_pos(pos_str)
+            if c:
+                return (c, s + 1, e, st)  # Convert back to 1-based
+
+    try:
+        s = int(start)
+        e = int(end)
+        if s > 0 and e > s:
+            return (str(chrom), s, e, str(strand))
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def _build_tool_spatial_index(tool_data: Dict) -> Dict[str, List[Tuple[str, int, int, str, Dict]]]:
+    """Build spatial index for each tool: {tool_name: [(chrom, start, end, strand, metrics), ...]}."""
+    index: Dict[str, List[Tuple[str, int, int, str, Dict]]] = defaultdict(list)
     for tool_name, samples in tool_data.get("samples", {}).items():
         for sample_data in samples.values():
             for orf in sample_data.get("orfs", []):
-                orf_id = orf.get("orf_id", "")
-                if orf_id:
-                    lookup[tool_name][orf_id] = orf
-    return dict(lookup)
+                coords = _extract_coords(orf)
+                if coords:
+                    index[tool_name].append((*coords, orf))
+    return dict(index)
+
+
+def _overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> float:
+    """Compute overlap fraction of the shorter interval."""
+    overlap = max(0, min(a_end, b_end) - max(a_start, b_start))
+    shorter = min(a_end - a_start, b_end - b_start)
+    return overlap / shorter if shorter > 0 else 0.0
+
+
+def _find_matching_orfs(
+    unified_orf: Dict,
+    tool_spatial_index: Dict[str, List[Tuple]],
+    tool_name: str,
+    min_overlap: float = 0.5,
+) -> List[Dict]:
+    """Find tool ORFs that overlap a unified ORF on the same chrom/strand."""
+    coords = _extract_coords(unified_orf)
+    if not coords:
+        return []
+    u_chrom, u_start, u_end, u_strand = coords
+
+    matches = []
+    for entry in tool_spatial_index.get(tool_name, []):
+        t_chrom, t_start, t_end, t_strand, metrics = entry
+        if t_chrom != u_chrom or t_strand != u_strand:
+            continue
+        if _overlap_fraction(u_start, u_end, t_start, t_end) >= min_overlap:
+            matches.append(metrics)
+    return matches
 
 
 def _normalize_translation(metrics: Dict, tool_name: str) -> float:
