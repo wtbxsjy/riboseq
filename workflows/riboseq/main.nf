@@ -1298,8 +1298,8 @@ workflow RIBOSEQ {
             // (e.g. when ORF_QC is newly added via -resume but upstream
             // inputs are not re-emitted, causing channel poisoning).
             ch_multiqc_files = ch_multiqc_files
-                .mix(ORF_QC.out.mqc_yaml.collect().flatMap { it instanceof List ? it : [] })
-                .mix(ORF_QC.out.mqc_data.collect().flatMap { it instanceof List ? it : [] })
+                .mix(ORF_QC.out.mqc_yaml.ifEmpty([]))
+                .mix(ORF_QC.out.mqc_data.ifEmpty([]))
         } else {
             log.warn "ORF QC module enabled but no unified ORFs available — skipping."
         }
