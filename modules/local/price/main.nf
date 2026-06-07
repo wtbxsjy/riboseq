@@ -23,10 +23,8 @@ process PRICE {
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_name = "price_genome_${meta.id}"
-    def read_lengths = params.sorf_filter_read_lengths ?: [28, 29, 30]
-    // PRICE expects filter as "min:max" e.g. "28:30"
-    def length_min = read_lengths instanceof List ? read_lengths.min() : read_lengths
-    def length_max = read_lengths instanceof List ? read_lengths.max() : read_lengths
+    def length_min = params.sorf_read_len_min ?: 28
+    def length_max = params.sorf_read_len_max ?: 30
     def price_filter = "${length_min}:${length_max}"
     """
     #!/bin/bash
