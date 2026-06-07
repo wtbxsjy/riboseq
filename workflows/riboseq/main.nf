@@ -1293,10 +1293,13 @@ workflow RIBOSEQ {
                 ch_orfquant_gtf.map { meta, f -> f }.collect().ifEmpty([])
             )
             ch_versions = ch_versions.mix(ORF_QC.out.versions)
-            // Feed to MultiQC: YAML config + TSV data table
+            // Feed ORF_QC MQC outputs into MultiQC. Use collect() first
+            // to absorb potential PoisonPill from unresolved channels
+            // (e.g. when ORF_QC is newly added via -resume but upstream
+            // inputs are not re-emitted, causing channel poisoning).
             ch_multiqc_files = ch_multiqc_files
-                .mix(ORF_QC.out.mqc_yaml.map { meta, f -> f })
-                .mix(ORF_QC.out.mqc_data.map { meta, f -> f })
+                .mix(ORF_QC.out.mqc_yaml.collect().flatMap { it instanceof List ? it : [] })
+                .mix(ORF_QC.out.mqc_data.collect().flatMap { it instanceof List ? it : [] })
         } else {
             log.warn "ORF QC module enabled but no unified ORFs available — skipping."
         }
