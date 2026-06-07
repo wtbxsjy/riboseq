@@ -18,6 +18,33 @@ def _open(path, mode='r'):
         return gzip.open(path, mode + 't')
     return open(path, mode)
 
+
+def _detect_file_format(file_path):
+    """Detect file format by reading content, not filename extension.
+
+    Returns one of: 'gtf', 'tsv', 'unknown'.
+    """
+    try:
+        with _open(file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('##'):
+                    continue
+                if line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) == 9 and parts[2] in (
+                    'CDS', 'exon', 'ORF', 'start_codon', 'stop_codon',
+                    'gene', 'transcript', 'five_prime_utr', 'three_prime_utr',
+                ):
+                    return 'gtf'
+                if parts[0] in ('Gene', 'Gid', 'ORF_ID'):
+                    return 'tsv'
+                return 'unknown'
+    except Exception:
+        pass
+    return 'unknown'
+
 # ---------------------------------------------------------------------------
 # Module-level globals shared with parallel worker processes via fork (Linux).
 # Set in main() before the Pool is created; inherited by child processes via
@@ -1251,7 +1278,8 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
 
     metrics = load_txt_metrics(sidecar_txt_path(file_path))
 
-    if file_path.endswith('.gtf') or file_path.endswith('.gtf.gz'):
+    file_format = _detect_file_format(file_path)
+    if file_format == 'gtf':
         grouped = {}
         try:
             with _open(file_path, 'r') as f:
@@ -1927,8 +1955,7 @@ def parse_price(file_path, gtf_index, sample_id, min_len=0,
         exclude_tistypes = {t.strip() for t in exclude_tistypes.split(',')}
 
     # Route GTF files through the orfquant parser
-    fname = str(file_path)
-    if fname.endswith('.gtf') or fname.endswith('.gtf.gz'):
+    if _detect_file_format(file_path) == 'gtf':
         return parse_orfquant(file_path, gtf_index, sample_id,
                               min_len=min_len, exclude_tistypes=exclude_tistypes,
                               atg_only=atg_only)
@@ -2400,7 +2427,21 @@ def main(argv=None):
             parse_tasks.append(('Ribotricer', f, sid, args.min_len, exclude_tistypes, args.atg_only))
     if args.ribocode:
         for f in args.ribocode:
-            suffix = '_collapsed.gtf' if f.endswith('_collapsed.gtf') else '_collapsed.txt' if f.endswith('_collapsed.txt') else '.gtf' if f.endswith('.gtf') else '.txt'
+            # Detect suffix from filename for sample ID extraction
+            if f.endswith('_collapsed.gtf.gz'):
+                suffix = '_collapsed.gtf.gz'
+            elif f.endswith('_collapsed.gtf'):
+                suffix = '_collapsed.gtf'
+            elif f.endswith('_collapsed.txt'):
+                suffix = '_collapsed.txt'
+            elif f.endswith('.gtf.gz'):
+                suffix = '.gtf.gz'
+            elif f.endswith('.gtf'):
+                suffix = '.gtf'
+            elif f.endswith('.txt'):
+                suffix = '.txt'
+            else:
+                suffix = os.path.splitext(f)[1]  # Fallback
             sid = infer_sample_id_from_prediction_path(f, suffix)
             parse_tasks.append(('RiboCode', f, sid, args.min_len, exclude_tistypes, args.atg_only))
     if args.orfquant:
