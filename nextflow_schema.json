@@ -604,7 +604,7 @@
                     "description": "Memory request for each RiboCode ORF-detection task. Increase if a single RiboCode job is killed for exceeding memory."
                 },
                 "ribotricer_phase_score_cutoff": {
-                    "type": "number",
+                    "type": ["number", "string"],
                     "description": "Phase score cutoff for Ribotricer's metagene periodicity detection. When not set, uses Ribotricer's default (3/7 \u2248 0.429). Set to a lower value (e.g. 0.1) for plant or low-depth samples where canonical CDS coverage is sparse."
                 },
                 "extra_anota2seq_run_args": {
@@ -834,6 +834,49 @@
                     "type": "boolean",
                     "description": "Skip RiboseQC quality control analysis.",
                     "fa_icon": "fas fa-fast-forward"
+                },
+                "skip_orf_qc": {
+                    "type": ["boolean", "string"],
+                    "default": false,
+                    "enum": [true, false, "true", "false"],
+                    "description": "Skip the ORF QC module that harmonizes metrics across all prediction tools.",
+                    "fa_icon": "fas fa-clipboard-check"
+                },
+                "orf_qc_min_consensus_tools": {
+                    "type": ["integer", "string"],
+                    "default": 2,
+                    "description": "Minimum number of tools required for a consensus ORF.",
+                    "fa_icon": "fas fa-handshake"
+                },
+                "orf_qc_confidence_weights": {
+                    "type": "string",
+                    "default": "0.30,0.30,0.20,0.15,0.05",
+                    "description": "Comma-separated weights for OCS components.",
+                    "fa_icon": "fas fa-balance-scale"
+                },
+                "orf_qc_periodicity_min_f0": {
+                    "type": ["number", "string"],
+                    "default": 0.6,
+                    "description": "Minimum frame-0 proportion for periodic classification.",
+                    "fa_icon": "fas fa-chart-bar"
+                },
+                "orf_qc_offset_max_delta": {
+                    "type": ["integer", "string"],
+                    "default": 1,
+                    "description": "Maximum nucleotide difference allowed for P-site offset consensus.",
+                    "fa_icon": "fas fa-ruler"
+                },
+                "orf_qc_report_format": {
+                    "type": "string",
+                    "default": "html",
+                    "enum": ["html", "json", "both"],
+                    "description": "Output format for the ORF QC report.",
+                    "fa_icon": "fas fa-file-alt"
+                },
+                "orf_qc_container": {
+                    "type": "string",
+                    "description": "Path to custom ORF QC Singularity container.",
+                    "fa_icon": "fas fa-box"
                 },
                 "extra_riboseqc_args": {
                     "type": "string",
