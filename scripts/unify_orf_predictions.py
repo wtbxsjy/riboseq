@@ -1251,7 +1251,7 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
 
     metrics = load_txt_metrics(sidecar_txt_path(file_path))
 
-    if file_path.endswith('.gtf'):
+    if file_path.endswith('.gtf') or file_path.endswith('.gtf.gz'):
         grouped = {}
         try:
             with _open(file_path, 'r') as f:
@@ -1313,6 +1313,9 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
             col_map = {name: i for i, name in enumerate(header)}
             required = {'ORF_ID', 'chrom', 'strand', 'ORF_gstart', 'ORF_gstop'}
             if not required.issubset(col_map):
+                # If GTF parsing already succeeded above, silently skip TSV fallback
+                if candidates:
+                    return candidates
                 print("Warning: RiboCode file missing required columns. Skipping.", file=sys.stderr)
                 return []
             for line in f:
@@ -1971,17 +1974,42 @@ def parse_price(file_path, gtf_index, sample_id, min_len=0,
                 try:
                     colon_parts = loc_str.split(':')
                     if len(colon_parts) >= 3:
+                        # Format A: aa_start-aa_stop:chr:start-end:strand (old)
                         chrom = colon_parts[1]
                         coords = colon_parts[2]
                         strand = colon_parts[3] if len(colon_parts) > 3 else '+'
                         blocks = [(int(coords.split('-')[0]), int(coords.split('-')[1]))]
+                    elif len(colon_parts) == 2:
+                        # Format B: chr+strand:start-end (actual PRICE output)
+                        # chr+strand part: e.g. "1+" or "MT-"
+                        chr_strand = colon_parts[0]
+                        coords = colon_parts[1]
+                        # Extract strand from last character
+                        if chr_strand[-1] in ('+', '-'):
+                            strand = chr_strand[-1]
+                            chrom = chr_strand[:-1]
+                        else:
+                            strand = '+'
+                            chrom = chr_strand
+                        # Parse coordinates (may have | for multi-exon)
+                        if '|' in coords:
+                            exons = coords.split('|')
+                            parsed = []
+                            for e in exons:
+                                se = e.split('-')
+                                parsed.append((int(se[0]), int(se[1])))
+                            if parsed:
+                                blocks = sorted(parsed)
+                        else:
+                            blocks = [(int(coords.split('-')[0]), int(coords.split('-')[1]))]
                 except (ValueError, IndexError):
                     continue
 
                 if chrom is None:
                     continue
 
-                if cand_loc_str and '|' in cand_loc_str:
+                # Also try Candidate Location for multi-exon blocks if not already multi
+                if cand_loc_str and '|' in cand_loc_str and len(blocks) == 1:
                     try:
                         cp = cand_loc_str.split(':')
                         if len(cp) >= 2:
@@ -2411,6 +2439,7 @@ def main(argv=None):
             'Ribotricer': parse_ribotricer,
             'RiboCode':   parse_ribocode,
             'ORFquant':   parse_orfquant,
+            'PRICE':      parse_price,
         }
         for tool, file_path, sid, min_len, excl, atg in parse_tasks:
             orfs = _parse_fn_map[tool](file_path, gtf_index, sid, min_len,
@@ -2426,7 +2455,7 @@ def main(argv=None):
     # Print statistics before merging
     print("\n=== Input Statistics (raw, per tool and per sample) ===", file=sys.stderr)
     print("By Tool:", file=sys.stderr)
-    for tool in ['ribotish', 'ribotricer', 'ribocode', 'orfquant']:
+    for tool in ['ribotish', 'ribotricer', 'ribocode', 'orfquant', 'price']:
         if tool in tool_stats:
             count = tool_stats[tool]['count']
             samples_ran = sorted(tool_stats[tool]['samples'])
