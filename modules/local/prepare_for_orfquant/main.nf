@@ -51,7 +51,7 @@ library(ORFquant)
 
 # Patch ORFquant::load_annotation to handle NULL genome_package
 # (happens with forge_BSgenome=FALSE for non-model organisms).
-# The original calls library(GTF_annotation$genome_package) which
+# The original calls library(GTF_annotation\$genome_package) which
 # fails with "'package' must be of length 1" when genome_package is NULL.
 # This patched version replicates the original logic exactly,
 # adding only a NULL/nchar guard around the library() call.
@@ -60,10 +60,10 @@ fix_load_annotation <- function() {
     unlockBinding("load_annotation", ns)
     patched_load_annotation <- function(path) {
         GTF_annotation <- get(load(path))
-        if (is(GTF_annotation$genome, "FaFile")) {
-            genome_sequence <- GTF_annotation$genome
+        if (is(GTF_annotation\$genome, "FaFile")) {
+            genome_sequence <- GTF_annotation\$genome
         } else {
-            genome_pkg <- GTF_annotation$genome_package
+            genome_pkg <- GTF_annotation\$genome_package
             if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
                 library(genome_pkg, character.only = TRUE)
                 genome_sequence <- get(genome_pkg)
@@ -76,7 +76,7 @@ fix_load_annotation <- function() {
     }
     assign("load_annotation", patched_load_annotation, envir = ns)
     lockBinding("load_annotation", ns)
-    cat("Patched ORFquant::load_annotation to handle NULL genome_package\n")
+    cat("Patched ORFquant::load_annotation to handle NULL genome_package\\n")
 }
 fix_load_annotation()
 
