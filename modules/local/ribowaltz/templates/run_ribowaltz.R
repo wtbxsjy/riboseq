@@ -104,9 +104,14 @@ annotation <- tryCatch({
         anno_df[, transcript := strip_version(transcript)]
         anno_df <- anno_df[!duplicated(transcript)]
 
-        # Cache for future runs
-        saveRDS(anno_df, cache_file, compress = TRUE)
-        cat("Annotation built and cached:", nrow(anno_df), "transcripts\n")
+        # Cache for future runs (only when a cache path is available)
+        if (nchar(cache_file) > 0) {
+            dir.create(dirname(cache_file), showWarnings = FALSE, recursive = TRUE)
+            saveRDS(anno_df, cache_file, compress = TRUE)
+            cat("Annotation built and cached:", nrow(anno_df), "transcripts\n")
+        } else {
+            cat("Annotation built:", nrow(anno_df), "transcripts\n")
+        }
         anno_df
     }
 }, error = function(e) {

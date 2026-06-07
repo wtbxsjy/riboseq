@@ -62,6 +62,8 @@ process RIBOWALTZ {
     done
     if [ -z "\$annotation_cache" ]; then
         echo "No annotation cache found (will build from GTF with txdbmaker)"
+        # Set a default cache path so the RDS is saved for future reuse
+        annotation_cache="\$(dirname '${params.gtf}')/ribowaltz_annotation.rds"
     fi
 
     # Install dependencies if not available
