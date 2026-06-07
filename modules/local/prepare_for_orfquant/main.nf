@@ -49,6 +49,28 @@ process PREPARE_FOR_ORFQUANT_CORRECTED {
 # Load ORFquant library
 library(ORFquant)
 
+# Patch ORFquant's load_annotation to handle NULL genome_package
+# (happens with forge_BSgenome=FALSE for non-model organisms).
+# Without this fix, library(NULL) fails with "'package' must be of length 1".
+fix_load_annotation <- function() {
+    ns <- asNamespace("ORFquant")
+    unlockBinding("load_annotation", ns)
+    original_load_annotation <- ns[["load_annotation"]]
+    patched_load_annotation <- function(annotation_file, ...) {
+        load(annotation_file, envir = parent.frame())
+        if (!is.null(GTF_annotation[["genome_package"]]) &&
+            nchar(GTF_annotation[["genome_package"]]) > 0) {
+            library(GTF_annotation[["genome_package"]], character.only = TRUE)
+        }
+        annotation <- GTF_annotation
+        return(annotation)
+    }
+    assign("load_annotation", patched_load_annotation, envir = ns)
+    lockBinding("load_annotation", ns)
+    cat("Patched ORFquant::load_annotation to handle NULL genome_package\n")
+}
+fix_load_annotation()
+
 # Read the rl_cutoff file
 rl_cutoff_data <- read.table(
     "${rl_cutoff}",
