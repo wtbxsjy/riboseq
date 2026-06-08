@@ -619,7 +619,7 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
     target_dir = Path(workdir) / 'containers'
     linked_containers = {}
     
-    # Copy specified containers
+    # Copy specified containers (overwrite symlinks to avoid NFS squashfuse timeout)
     if orfquant_container:
         orfquant_path = Path(orfquant_container).resolve()
         if orfquant_path.exists():
@@ -627,9 +627,13 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
             if dry_run:
                 logger.info(f"[DRY RUN] Would copy ORFquant: {orfquant_path} -> {link_path}")
             else:
+                if link_path.is_symlink():
+                    link_path.unlink()
                 if not link_path.exists():
                     shutil.copy2(orfquant_path, link_path)
                     logger.info(f"✓ Copied ORFquant container: {orfquant_path.name}")
+                else:
+                    logger.info(f"  Skipping (exists): {link_path.name}")
             linked_containers['orfquant'] = link_path
 
     if rpbp_container:
@@ -639,9 +643,12 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
             if dry_run:
                 logger.info(f"[DRY RUN] Would copy RPBP: {rpbp_path} -> {link_path}")
             else:
+                if link_path.is_symlink(): link_path.unlink()
                 if not link_path.exists():
                     shutil.copy2(rpbp_path, link_path)
                     logger.info(f"✓ Copied RPBP container: {rpbp_path.name}")
+                else:
+                    logger.info(f"  Skipping (exists): {link_path.name}")
             linked_containers['rpbp'] = link_path
 
     if unify_orf_container:
@@ -651,9 +658,12 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
             if dry_run:
                 logger.info(f"[DRY RUN] Would copy Unify ORF: {unify_path} -> {link_path}")
             else:
+                if link_path.is_symlink(): link_path.unlink()
                 if not link_path.exists():
                     shutil.copy2(unify_path, link_path)
                     logger.info(f"✓ Copied Unify ORF container: {unify_path.name}")
+                else:
+                    logger.info(f"  Skipping (exists): {link_path.name}")
             linked_containers['unify_orf'] = link_path
 
     if gencode_orf_mapper_container:
@@ -663,9 +673,12 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
             if dry_run:
                 logger.info(f"[DRY RUN] Would copy gencode-orf-mapper: {gencode_path} -> {link_path}")
             else:
+                if link_path.is_symlink(): link_path.unlink()
                 if not link_path.exists():
                     shutil.copy2(gencode_path, link_path)
                     logger.info(f"✓ Copied gencode-orf-mapper container: {gencode_path.name}")
+                else:
+                    logger.info(f"  Skipping (exists): {link_path.name}")
             linked_containers['gencode_orf_mapper'] = link_path
 
     if ribowaltz_container:
