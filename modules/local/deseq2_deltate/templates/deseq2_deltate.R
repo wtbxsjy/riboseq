@@ -285,7 +285,7 @@ run_deseq_subset <- function(counts, samples, design, contrast_var, target, ref,
         colData = samples,
         design = design
     )
-    dds <- DESeq(dds, fitType = fit_type, parallel = parallel)
+    dds <- DESeq(dds, fitType = fit_type, parallel = parallel, sfType = "poscounts")
     res <- results(dds, contrast = c(contrast_var, target, ref), alpha = alpha)
 
     if (shrink) {
@@ -420,12 +420,49 @@ design_terms <- c(
 design_formula <- as.formula(paste("~", paste(design_terms, collapse = " + ")))
 cat("Design:", deparse(design_formula), "\\n")
 
+# Pre-filter: keep genes with sufficient non-zero samples in each seq_type.
+# Thresholds are configurable via --te_prefilter_min_nonzero (absolute minimum, default 2)
+# and --te_prefilter_min_frac (fraction of samples, default 0.2).
+# This avoids "every gene contains at least one zero" error in estimateSizeFactors.
+# Pre-filter thresholds from pipeline params (--te_prefilter_min_nonzero, --te_prefilter_min_frac).
+# Overridable via --extra_deltate_args "prefilter_min_nonzero=X --prefilter_min_frac=Y"
+prefilter_min_nonzero <- as.integer('$prefilter_min_nonzero_val')
+prefilter_min_frac    <- as.numeric('$prefilter_min_frac_val')
+if (is.na(prefilter_min_nonzero) || prefilter_min_nonzero < 1) prefilter_min_nonzero <- 2L
+if (is.na(prefilter_min_frac)    || prefilter_min_frac < 0)    prefilter_min_frac <- 0.2
+# Allow override via args_opt (merged from extra_deltate_args)
+if ("prefilter_min_nonzero" %in% names(args_opt)) {
+    prefilter_min_nonzero <- max(1L, as.integer(args_opt[["prefilter_min_nonzero"]]))
+}
+if ("prefilter_min_frac" %in% names(args_opt)) {
+    prefilter_min_frac <- max(0, min(1, as.numeric(args_opt[["prefilter_min_frac"]])))
+}
+
+ribo_sample_names <- rownames(sample_sheet)[sample_sheet[[opt\$seq_type_col]] == ribo_type]
+rna_sample_names  <- rownames(sample_sheet)[sample_sheet[[opt\$seq_type_col]] == rna_type]
+
+min_ribo_nonzero <- max(prefilter_min_nonzero, ceiling(length(ribo_sample_names) * prefilter_min_frac))
+min_rna_nonzero  <- max(prefilter_min_nonzero, ceiling(length(rna_sample_names)  * prefilter_min_frac))
+cat(sprintf("Pre-filter: ribo>=%d/%d non-zero, rna>=%d/%d non-zero (min_abs=%d, min_frac=%.2f)\\n",
+            min_ribo_nonzero, length(ribo_sample_names), min_rna_nonzero, length(rna_sample_names),
+            prefilter_min_nonzero, prefilter_min_frac))
+
+keep_ribo <- rowSums(count_table[, ribo_sample_names, drop = FALSE] > 0) >= min_ribo_nonzero
+keep_rna  <- rowSums(count_table[, rna_sample_names, drop = FALSE] > 0) >= min_rna_nonzero
+keep <- keep_ribo & keep_rna
+cat(sprintf("Filtering: %d / %d genes pass (>= %d non-zero in ribo, >= %d in rna)\\n",
+            sum(keep), nrow(count_table), min_ribo_nonzero, min_rna_nonzero))
+
+count_table_filt <- count_table[keep, , drop = FALSE]
+if (sum(keep) < 10) stop("Too few genes after filtering — check input data quality")
+
 dds_combined <- DESeqDataSetFromMatrix(
-    countData = as.matrix(count_table),
+    countData = as.matrix(count_table_filt),
     colData = sample_sheet,
     design = design_formula
 )
-dds_combined <- DESeq(dds_combined, fitType = opt\$fit_type, parallel = (opt\$cores > 1))
+dds_combined <- DESeq(dds_combined, fitType = opt\$fit_type, parallel = (opt\$cores > 1),
+                      sfType = "poscounts")
 
 result_names <- resultsNames(dds_combined)
 cat("Coefficients:", paste(result_names, collapse = ", "), "\\n")
@@ -458,7 +495,7 @@ ribo_samples <- rownames(sample_sheet)[sample_sheet[[opt\$seq_type_col]] == ribo
 rna_samples <- rownames(sample_sheet)[sample_sheet[[opt\$seq_type_col]] == rna_type]
 
 ribo_analysis <- run_deseq_subset(
-    counts = count_table[, ribo_samples],
+    counts = count_table_filt[, ribo_samples],
     samples = sample_sheet[ribo_samples, , drop = FALSE],
     design = design_individual,
     contrast_var = opt\$contrast_variable,
@@ -472,7 +509,7 @@ ribo_analysis <- run_deseq_subset(
 )
 
 rna_analysis <- run_deseq_subset(
-    counts = count_table[, rna_samples],
+    counts = count_table_filt[, rna_samples],
     samples = sample_sheet[rna_samples, , drop = FALSE],
     design = design_individual,
     contrast_var = opt\$contrast_variable,
@@ -487,8 +524,12 @@ rna_analysis <- run_deseq_subset(
 
 dds_ribo <- ribo_analysis\$dds
 dds_rna <- rna_analysis\$dds
-res_delta_ribo <- ribo_analysis\$results[rownames(res_delta_te), ]
-res_delta_rna <- rna_analysis\$results[rownames(res_delta_te), ]
+# Use genes present in all three analyses
+common_genes <- intersect(rownames(res_delta_te), intersect(
+    rownames(ribo_analysis\$results), rownames(rna_analysis\$results)))
+res_delta_ribo <- ribo_analysis\$results[common_genes, ]
+res_delta_rna <- rna_analysis\$results[common_genes, ]
+res_delta_te   <- res_delta_te[common_genes, ]
 
 ################################################
 ## Gene Classification                        ##

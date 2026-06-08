@@ -2,7 +2,7 @@ Bootstrap: docker
 From: rocker/r-ver:4.5.3
 
 %post
-    # Install system dependencies
+    # ── System dependencies ─────────────────────────────────────────────
     apt-get update -qq && apt-get install -y -qq \
         libcurl4-openssl-dev \
         libssl-dev \
@@ -22,11 +22,30 @@ From: rocker/r-ver:4.5.3
         cmake \
         && rm -rf /var/lib/apt/lists/*
 
-    # R 4.5.x → Bioconductor 3.21
-    Rscript -e 'install.packages(c("BiocManager", "data.table", "dplyr", "tibble", "readr", "purrr", "ggplot2", "ggrepel", "RColorBrewer"), repos = "https://cloud.r-project.org")'
-    Rscript -e 'BiocManager::install(c("DESeq2", "apeglm", "SummarizedExperiment", "ComplexHeatmap"), update = FALSE, ask = FALSE, version = "3.21")'
+    # ── CRAN packages ───────────────────────────────────────────────────
+    Rscript -e 'install.packages(c("BiocManager", "data.table", "dplyr", "tibble",
+        "readr", "purrr", "ggplot2", "ggrepel", "RColorBrewer", "Rcpp", "optparse"),
+        repos = "https://cloud.r-project.org")'
 
-    # Clean up package cache
+    # ── Bioconductor packages (TE analysis) ─────────────────────────────
+    Rscript -e 'BiocManager::install(c("DESeq2", "apeglm", "SummarizedExperiment",
+        "ComplexHeatmap"), update = FALSE, ask = FALSE)'
+
+    # ── Bioconductor packages (annotation — shared with ggRibo) ─────────
+    Rscript -e 'BiocManager::install(c(
+        "GenomicFeatures", "GenomicAlignments", "Rsamtools",
+        "rtracklayer", "AnnotationDbi",
+        "txdbmaker", "S4Vectors", "IRanges", "GenomicRanges",
+        "Biostrings", "GenomeInfoDb", "XVector"
+    ), update = FALSE, ask = FALSE)'
+
+    # ── ggRibo (manual install — source not publicly available) ─────────
+    # Install from your local source or private repo:
+    #   R CMD INSTALL /path/to/ggRibo
+    # Or if available as a tarball:
+    #   Rscript -e 'install.packages("/path/to/ggRibo.tar.gz", repos=NULL)'
+
+    # ── Clean cache ─────────────────────────────────────────────────────
     rm -rf /tmp/downloaded_packages /tmp/Rtmp*
 
 %environment
@@ -37,5 +56,6 @@ From: rocker/r-ver:4.5.3
 
 %labels
     Author Zhe Ren
-    Version 2.0
-    Description R 4.5.3 + Bioc 3.21 with DESeq2, apeglm, data.table for TE analysis (deltaTE)
+    Version 3.1
+    Description R 4.5.3 + Bioconductor with DESeq2, apeglm, ComplexHeatmap, GenomicFeatures.
+                 For TE analysis (deltaTE). ggRibo can be added manually post-build.

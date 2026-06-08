@@ -3,9 +3,14 @@ process DESEQ2_DELTATE {
     label 'process_medium'
 
     conda "${moduleDir}/environment.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'oras://community.wave.seqera.io/library/bioconductor-deseq2_bioconductor-apeglm_r-data.table:latest' :
-        'community.wave.seqera.io/library/bioconductor-deseq2_bioconductor-apeglm_r-data.table:latest' }"
+    // Use custom container if provided, otherwise pull from Seqera OCI registry.
+    // To avoid re-pulling, build a local container and set --deseq2_container:
+    //   apptainer build deseq2_deltate.sif containers/Singularity.r_te_analysis.def
+    //   nextflow run . --deseq2_container /path/to/deseq2_deltate.sif
+    container "${ params.deseq2_container ?:
+        (workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+            'oras://community.wave.seqera.io/library/bioconductor-deseq2_bioconductor-apeglm_r-data.table:latest' :
+            'community.wave.seqera.io/library/bioconductor-deseq2_bioconductor-apeglm_r-data.table:latest') }"
 
     input:
     tuple val(meta), val(contrast_variable), val(reference), val(target)
@@ -37,6 +42,9 @@ process DESEQ2_DELTATE {
     task.ext.when == null || task.ext.when
 
     script:
+    // Expose pre-filter params to R template
+    def prefilter_min_nonzero_val = params.te_prefilter_min_nonzero ?: 2
+    def prefilter_min_frac_val    = params.te_prefilter_min_frac ?: 0.2
     template 'deseq2_deltate.R'
 
     stub:
