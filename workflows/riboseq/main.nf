@@ -1391,10 +1391,10 @@ workflow RIBOSEQ {
         if (ch_unify_metadata && ch_unify_bed) {
             // Collect P-site + coverage bedgraphs from postfilter RiboseQC
             ch_psites_bg = RIBOSEQC_POSTFILTER.out.psites_bedgraph
-                .map { meta, f -> f }.collect()
+                .map { meta, f -> f }.collect().ifEmpty([])
 
             ch_coverage_bg = RIBOSEQC_POSTFILTER.out.coverage
-                .map { meta, f -> f }.collect()
+                .map { meta, f -> f }.collect().ifEmpty([])
 
             EXPRESSION_QUANT(
                 ch_unify_metadata.first(),
