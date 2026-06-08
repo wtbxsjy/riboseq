@@ -71,8 +71,7 @@ include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOTRICER} from '..
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOCODE  } from '../../modules/local/classify_orfs/main'
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_ORFQUANT  } from '../../modules/local/classify_orfs/main'
 include { COLLECT_QC_STATS                                     } from '../../modules/local/collect_qc_stats/main'
-// ORF_QC temporarily disabled — PoisonPill issue with -resume (TODO: fix channel wiring)
-// include { ORF_QC                                               } from '../../modules/local/orf_qc/main'
+include { ORF_QC                                               } from '../../modules/local/orf_qc/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1274,11 +1273,30 @@ workflow RIBOSEQ {
     // Runs post-unification to harmonize metrics, compute cross-tool agreement,
     // and assign per-ORF confidence scores (OCS).
     //
-    // ORF_QC temporarily disabled — PoisonPill issue with -resume (TODO: fix channel wiring)
-    // See: bin/extract_orf_qc_metrics.py for manual ORF QC analysis
+    // NOTE: On -resume with a newly-added ORF_QC, PoisonPill from unresolved
+    // input channels may propagate to MULTIQC. If using -resume after a code
+    // update, run a clean start or manually invoke scripts in bin/ instead.
+    // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        log.info "ORF QC module is temporarily disabled in the workflow. " +
-                 "Run 'bin/extract_orf_qc_metrics.py' manually on the results directory."
+        def ch_orf_qc_unified = ch_unify_bed.join(ch_unify_metadata)
+
+        if (ch_orf_qc_unified) {
+            ORF_QC(
+                ch_orf_qc_unified,
+                ch_qc_ribocode_txt.collect().ifEmpty([]),
+                ch_qc_psites_calcs.collect().ifEmpty([]),
+                ch_ribowaltz_psite.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_qc_rw_region.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_qc_ribotricer_orfs.collect().ifEmpty([]),
+                ch_ribotish_predictions.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_offset_for_ribotish.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_price_gtf.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_rpbp_bayes.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_orfquant_gtf.map { meta, f -> f }.collect().ifEmpty([])
+            )
+        } else {
+            log.warn "ORF QC module enabled but no unified ORFs available — skipping."
+        }
     }
 
     //
