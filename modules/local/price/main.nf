@@ -23,9 +23,14 @@ process PRICE {
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_name = "price_genome_${meta.id}"
-    def length_min = params.sorf_read_len_min ?: 28
-    def length_max = params.sorf_read_len_max ?: 30
-    def price_filter = "${length_min}:${length_max}"
+    // PRICE read-length filter: by default use 28:30 (canonical RPFs).
+    // Use != null check (not Elvis ?:) because Groovy treats 0 as falsy,
+    // so `params.sorf_read_len_min ?: 28` would silently convert an explicit
+    // `--sorf_read_len_min 0` (user wants "no filter") into the default 28.
+    // When both min/max are 0, pass an empty filter so PRICE uses all reads.
+    def length_min = params.sorf_read_len_min != null ? params.sorf_read_len_min : 28
+    def length_max = params.sorf_read_len_max != null ? params.sorf_read_len_max : 30
+    def price_filter = (length_min == 0 && length_max == 0) ? '' : "${length_min}:${length_max}"
     """
     #!/bin/bash
     set -euo pipefail
@@ -53,7 +58,7 @@ process PRICE {
         -reads ${bam} \
         -genomic ${genome_name}.oml \
         -prefix ${prefix} \
-        -filter ${price_filter} \
+        ${price_filter ? "-filter ${price_filter}" : ''} \
         -nthreads ${task.cpus} \
         -progress \
         || {

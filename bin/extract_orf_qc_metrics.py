@@ -789,6 +789,7 @@ def main():
     indent = 2 if args.pretty else None
     with open(args.output, "w") as fh:
         json.dump(tool_data, fh, indent=indent, default=str)
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     print(f"\nOutput written to: {args.output}")
 
 
