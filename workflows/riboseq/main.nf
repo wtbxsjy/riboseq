@@ -21,10 +21,11 @@ include { ORFQUANT           } from '../../subworkflows/local/orfquant'
 // Local module: sORF BAM filtering (unique mapping + contig exclusion + read length)
 include { SORF_BAM_FILTER } from '../../modules/local/sorf_bam_filter'
 include { SORF_BAM_FILTER as SORF_BAM_FILTER_PATHOGEN } from '../../modules/local/sorf_bam_filter'
+include { SORF_BAM_FILTER as SORF_BAM_FILTER_TRANSCRIPTOME } from '../../modules/local/sorf_bam_filter'
 // Local module: split combined BAM by pathogen contig names for dual-genome analysis
 include { SPLIT_BAM_BY_CONTIG } from '../../modules/local/split_bam_by_contig/main'
 // Local module: merge replicate BAMs (same-group samples) before ORF prediction
-include { SAMTOOLS_MERGE_REPLICATES } from '../../modules/local/samtools_merge/main'
+include { SAMTOOLS_MERGE_REPLICATES; SAMTOOLS_MERGE_REPLICATES as SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME } from '../../modules/local/samtools_merge/main'
 // Local module: riboWaltz P-site analysis and QC
 include { RIBOWALTZ                                         } from '../../modules/local/ribowaltz/main'
 // Local subworkflow: TE analysis (RNA-seq + Ribo-seq integration)
@@ -47,6 +48,7 @@ include { SAMTOOLS_INDEX                                       } from '../../mod
 include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_HOST                 } from '../../modules/nf-core/samtools/index'
 include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_PATHOGEN              } from '../../modules/nf-core/samtools/index'
 include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_PATHOGEN_FILTERED     } from '../../modules/nf-core/samtools/index'
+include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_TRANSCRIPTOME_FILTERED } from '../../modules/nf-core/samtools/index'
 include { MULTIQC                                              } from '../../modules/nf-core/multiqc/main'
 include { RIBOTISH_QUALITY as RIBOTISH_QUALITY_RIBOSEQ         } from '../../modules/nf-core/ribotish/quality'
 include { RIBOTISH_PREDICT as RIBOTISH_PREDICT_PREFILTER       } from '../../modules/nf-core/ribotish/predict'
@@ -511,6 +513,46 @@ workflow RIBOSEQ {
         )
 
         log.info "Replicate merging enabled: merged BAMs will be created for each 'group' and run through all ORF prediction tools."
+
+        //
+        // Also merge transcriptome BAMs for the same replicate groups.
+        // This ensures riboWaltz and RiboCode can process merged samples with
+        // the same grouping as the genomic path, producing per-group P-site
+        // offsets and ORF predictions for downstream tools (RiboseQC fallback, ORFquant).
+        //
+        if (!is_bam_input) {
+            ch_tx_bams_with_group = ch_riboseq_transcriptome_bam_filtered
+                .filter { meta, bam, bai -> meta.group != null && meta.group != '' }
+
+            ch_grouped_tx_bams = ch_tx_bams_with_group
+                .map { meta, bam, bai -> [ meta.group, meta, bam ] }
+                .groupTuple(by: 0)
+                .map { group, metas, bams ->
+                    def merged_meta = [
+                        id          : "${group}_merged",
+                        group       : group,
+                        sample_type : metas[0].sample_type,
+                        strandedness: metas[0].strandedness,
+                        single_end  : metas[0].single_end,
+                        is_merged   : true
+                    ]
+                    [ merged_meta, bams ]
+                }
+
+            SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME( ch_grouped_tx_bams )
+            ch_versions = ch_versions.mix(SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.versions)
+
+            // Build merged transcriptome BAM channel: join bam + bai outputs
+            ch_merged_tx_bams = SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.bam
+                .join(SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.bai)
+
+            // Extend transcriptome BAM channel with merged BAMs so riboWaltz
+            // and RiboCode process them alongside individual replicate BAMs.
+            ch_riboseq_transcriptome_bam_filtered = ch_riboseq_transcriptome_bam_filtered
+                .mix(ch_merged_tx_bams)
+
+            log.info "Merged transcriptome BAMs created for each group — riboWaltz and RiboCode will process them."
+        }
     } else {
         log.info "Replicate merging disabled (set --merge_replicates to enable)."
     }
@@ -679,12 +721,50 @@ workflow RIBOSEQ {
         ch_riboseq_transcriptome_bam = Channel.empty()
     }
 
+    //
+    // Transcriptome BAM sORF filtering: Apply the same read-length, unique-mapping,
+    // and contig-exclusion filters to transcriptome BAMs so RiboCode and riboWaltz
+    // receive data that is consistent with the genome-BAM path used by other tools.
+    // Without this step, RiboCode processes unfiltered transcriptome alignments
+    // (multi-mappers, all read lengths, no contig exclusion) while Ribo-TISH,
+    // Ribotricer, PRICE, and ORFquant all receive sORF-filtered genome BAMs.
+    //
+    if (!is_bam_input) {
+        if (params.sorf_filter) {
+            SORF_BAM_FILTER_TRANSCRIPTOME(
+                ch_riboseq_transcriptome_bam,
+                ch_fai,
+                params.sorf_unique_mode,
+                params.sorf_unique_mapq,
+                params.sorf_read_len_min,
+                params.sorf_read_len_max,
+                ''   // No contig exclusion — transcript IDs don't match genome regex
+            )
+            ch_versions = ch_versions.mix(SORF_BAM_FILTER_TRANSCRIPTOME.out.versions)
+
+            SAMTOOLS_INDEX_TRANSCRIPTOME_FILTERED(
+                SORF_BAM_FILTER_TRANSCRIPTOME.out.bam
+            )
+            ch_versions = ch_versions.mix(SAMTOOLS_INDEX_TRANSCRIPTOME_FILTERED.out.versions)
+
+            def ch_tx_filtered_index = params.bam_csi_index ?
+                SAMTOOLS_INDEX_TRANSCRIPTOME_FILTERED.out.csi :
+                SAMTOOLS_INDEX_TRANSCRIPTOME_FILTERED.out.bai
+            ch_riboseq_transcriptome_bam_filtered = SORF_BAM_FILTER_TRANSCRIPTOME.out.bam
+                .join(ch_tx_filtered_index)
+        } else {
+            ch_riboseq_transcriptome_bam_filtered = ch_riboseq_transcriptome_bam
+        }
+    } else {
+        ch_riboseq_transcriptome_bam_filtered = Channel.empty()
+    }
+
     if (!params.skip_ribocode && !is_bam_input) {
         if (!can_run_ribocode) {
             log.warn "RiboCode requires STAR or HISAT2 alignment to generate transcriptome BAMs. Skipping RiboCode."
         } else {
              RIBOCODE(
-                 ch_riboseq_transcriptome_bam,
+                 ch_riboseq_transcriptome_bam_filtered,
                  ch_gtf,
                  ch_fasta
              )
@@ -718,7 +798,7 @@ workflow RIBOSEQ {
     //
     if (!params.skip_ribowaltz) {
         // Use transcriptome BAM in alignment mode, genome BAM in BAM-input mode
-        def ch_ribowaltz_bam = is_bam_input ? ch_bams_for_postfilter : ch_riboseq_transcriptome_bam
+        def ch_ribowaltz_bam = is_bam_input ? ch_bams_for_postfilter : ch_riboseq_transcriptome_bam_filtered
 
         RIBOWALTZ(
             ch_ribowaltz_bam,

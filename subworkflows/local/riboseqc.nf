@@ -68,7 +68,13 @@ workflow RIBOSEQC {
 
             ch_rl_inputs = ch_psites_keyed
                 .join(ch_rw_keyed, remainder: true, by: 0)
-                .map { id, meta_qc, psites, meta_rw, rw_file ->
+                .map { item ->
+                    // item is a List – matched=[id, meta_qc, psites, meta_rw, rw_file] (5 elts)
+                    //                   remainder=[id, meta_qc, psites, null]       (4 elts)
+                    def meta_qc  = item[1]
+                    def psites   = item[2]
+                    def meta_rw  = item.size() > 4 ? item[3] : null
+                    def rw_file  = item.size() > 4 ? item[4] : null
                     def has_rw = (meta_rw != null && meta_rw.id != '_NO_RW_' && rw_file != null)
                     if (!has_rw) {
                         return tuple(meta_qc, psites, [id: '_NO_RW_'], placeholder, false)
