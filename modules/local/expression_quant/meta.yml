@@ -1,0 +1,47 @@
+name: expression_quant
+description: Quantify per-ORF per-sample P-site expression (reads + pN) from RiboseQC bedgraphs, and compute RPKM/TPM from coverage bedgraphs.
+keywords:
+  - expression
+  - quantification
+  - p-site
+  - rpkm
+  - tpm
+tools:
+  - quantify_orf_expression.py
+  - calc_orf_rpkm_tpm.py
+input:
+  - unified_meta:
+      type: file
+      description: Unified ORF metadata TSV from UNIFY_ORF_PREDICTIONS
+      pattern: "*.metadata.tsv"
+  - unified_bed:
+      type: file
+      description: Unified ORF BED12
+      pattern: "*.bed.gz"
+  - orf_confidence:
+      type: file
+      description: ORF confidence TSV from ORF_QC
+      pattern: "*_orf_confidence.tsv"
+  - psites_bedgraph:
+      type: file
+      description: P-site bedgraph files from RiboseQC (all Ribo samples)
+      pattern: "*_P_sites_*.bedgraph"
+  - coverage_bedgraph:
+      type: file
+      description: Coverage bedgraph files from RiboseQC (all Ribo samples)
+      pattern: "*_coverage_*.bedgraph"
+output:
+  - expression_summary:
+      type: file
+      description: Per-ORF per-sample P-site reads and pN matrix
+      pattern: "*_expression_summary.tsv"
+  - rpkm_tpm:
+      type: file
+      description: Per-ORF per-sample RPKM and TPM matrix
+      pattern: "*_expression_rpkm_tpm.tsv"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+authors:
+  - "@renzhe"

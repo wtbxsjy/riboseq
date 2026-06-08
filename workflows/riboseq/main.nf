@@ -74,6 +74,7 @@ include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_RIBOCODE  } from '..
 include { CLASSIFY_ORFS_ORF_TYPE  as CLASSIFY_ORFS_ORF_TYPE_ORFQUANT  } from '../../modules/local/classify_orfs/main'
 include { COLLECT_QC_STATS                                     } from '../../modules/local/collect_qc_stats/main'
 include { ORF_QC                                               } from '../../modules/local/orf_qc/main'
+include { EXPRESSION_QUANT                                     } from '../../modules/local/expression_quant/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -418,7 +419,8 @@ workflow RIBOSEQ {
             params.sorf_unique_mapq,
             params.sorf_read_len_min,
             params.sorf_read_len_max,
-            params.sorf_exclude_contigs_regex
+            params.sorf_exclude_contigs_regex,
+            []    // No GTF — genome contig regex directly matches chromosome names
         )
         ch_versions = ch_versions.mix(SORF_BAM_FILTER.out.versions)
         ch_multiqc_files = ch_multiqc_files.mix(SORF_BAM_FILTER.out.stats)
@@ -454,6 +456,7 @@ workflow RIBOSEQ {
                 params.sorf_read_len_min,
                 params.sorf_read_len_max,
                 ''   // No contig exclusion — pathogen BAM is already pathogen-only
+                []    // No GTF needed
             )
             ch_versions = ch_versions.mix(SORF_BAM_FILTER_PATHOGEN.out.versions)
 
@@ -513,46 +516,6 @@ workflow RIBOSEQ {
         )
 
         log.info "Replicate merging enabled: merged BAMs will be created for each 'group' and run through all ORF prediction tools."
-
-        //
-        // Also merge transcriptome BAMs for the same replicate groups.
-        // This ensures riboWaltz and RiboCode can process merged samples with
-        // the same grouping as the genomic path, producing per-group P-site
-        // offsets and ORF predictions for downstream tools (RiboseQC fallback, ORFquant).
-        //
-        if (!is_bam_input) {
-            ch_tx_bams_with_group = ch_riboseq_transcriptome_bam_filtered
-                .filter { meta, bam, bai -> meta.group != null && meta.group != '' }
-
-            ch_grouped_tx_bams = ch_tx_bams_with_group
-                .map { meta, bam, bai -> [ meta.group, meta, bam ] }
-                .groupTuple(by: 0)
-                .map { group, metas, bams ->
-                    def merged_meta = [
-                        id          : "${group}_merged",
-                        group       : group,
-                        sample_type : metas[0].sample_type,
-                        strandedness: metas[0].strandedness,
-                        single_end  : metas[0].single_end,
-                        is_merged   : true
-                    ]
-                    [ merged_meta, bams ]
-                }
-
-            SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME( ch_grouped_tx_bams )
-            ch_versions = ch_versions.mix(SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.versions)
-
-            // Build merged transcriptome BAM channel: join bam + bai outputs
-            ch_merged_tx_bams = SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.bam
-                .join(SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.bai)
-
-            // Extend transcriptome BAM channel with merged BAMs so riboWaltz
-            // and RiboCode process them alongside individual replicate BAMs.
-            ch_riboseq_transcriptome_bam_filtered = ch_riboseq_transcriptome_bam_filtered
-                .mix(ch_merged_tx_bams)
-
-            log.info "Merged transcriptome BAMs created for each group — riboWaltz and RiboCode will process them."
-        }
     } else {
         log.info "Replicate merging disabled (set --merge_replicates to enable)."
     }
@@ -738,7 +701,8 @@ workflow RIBOSEQ {
                 params.sorf_unique_mapq,
                 params.sorf_read_len_min,
                 params.sorf_read_len_max,
-                ''   // No contig exclusion — transcript IDs don't match genome regex
+                params.sorf_exclude_contigs_regex,   // Also used to extract MT/Pt transcript IDs from GTF below
+                ch_gtf.first()                        // GTF → extract transcript IDs for MT/Pt chromosomes
             )
             ch_versions = ch_versions.mix(SORF_BAM_FILTER_TRANSCRIPTOME.out.versions)
 
@@ -757,6 +721,41 @@ workflow RIBOSEQ {
         }
     } else {
         ch_riboseq_transcriptome_bam_filtered = Channel.empty()
+    }
+
+    //
+    // Merge transcriptome BAMs for the same replicate groups.
+    // Must run AFTER the sORF filter so ch_riboseq_transcriptome_bam_filtered is available.
+    //
+    if (params.merge_replicates && !is_bam_input) {
+        ch_tx_bams_with_group = ch_riboseq_transcriptome_bam_filtered
+            .filter { meta, bam, bai -> meta.group != null && meta.group != '' }
+
+        ch_grouped_tx_bams = ch_tx_bams_with_group
+            .map { meta, bam, bai -> [ meta.group, meta, bam ] }
+            .groupTuple(by: 0)
+            .map { group, metas, bams ->
+                def merged_meta = [
+                    id          : "${group}_merged",
+                    group       : group,
+                    sample_type : metas[0].sample_type,
+                    strandedness: metas[0].strandedness,
+                    single_end  : metas[0].single_end,
+                    is_merged   : true
+                ]
+                [ merged_meta, bams ]
+            }
+
+        SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME( ch_grouped_tx_bams )
+        ch_versions = ch_versions.mix(SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.versions)
+
+        ch_merged_tx_bams = SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.bam
+            .join(SAMTOOLS_MERGE_REPLICATES_TRANSCRIPTOME.out.bai)
+
+        ch_riboseq_transcriptome_bam_filtered = ch_riboseq_transcriptome_bam_filtered
+            .mix(ch_merged_tx_bams)
+
+        log.info "Merged transcriptome BAMs created for each group — riboWaltz and RiboCode will process them."
     }
 
     if (!params.skip_ribocode && !is_bam_input) {
@@ -1376,6 +1375,43 @@ workflow RIBOSEQ {
             )
         } else {
             log.warn "ORF QC module enabled but no unified ORFs available — skipping."
+        }
+    }
+
+    //
+    // ORF Expression Quantification: per-ORF per-sample P-site reads/pN + RPKM/TPM
+    // Runs after ORF_QC (needs confidence scores). Queries RiboseQC bedgraphs.
+    //
+    if (!params.skip_expression_quant) {
+        // ORF confidence: from ORF_QC if available, otherwise placeholder
+        ch_orf_conf = !params.skip_orf_qc ?
+            ORF_QC.out.confidence.map { meta, f -> f }.collect().ifEmpty([]) :
+            Channel.value([])
+
+        if (ch_unify_metadata && ch_unify_bed) {
+            // Collect P-site + coverage bedgraphs from postfilter RiboseQC
+            ch_psites_bg = RIBOSEQC_POSTFILTER.out.psites_bedgraph
+                .map { meta, f -> f }.collect()
+
+            ch_coverage_bg = RIBOSEQC_POSTFILTER.out.coverage
+                .map { meta, f -> f }.collect()
+
+            EXPRESSION_QUANT(
+                ch_unify_metadata.first(),
+                ch_unify_bed.first(),
+                ch_orf_conf.first(),
+                ch_psites_bg,
+                ch_coverage_bg
+            )
+            ch_versions = ch_versions.mix(EXPRESSION_QUANT.out.versions)
+
+            // Feed expression outputs to MultiQC
+            ch_multiqc_files = ch_multiqc_files.mix(
+                EXPRESSION_QUANT.out.expression,
+                EXPRESSION_QUANT.out.rpkm_tpm
+            )
+        } else {
+            log.warn "EXPRESSION_QUANT requires unified ORFs — skipping."
         }
     }
 

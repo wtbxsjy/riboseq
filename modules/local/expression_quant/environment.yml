@@ -1,0 +1,9 @@
+name: expression_quant
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11
+  - pandas
+  - numpy
