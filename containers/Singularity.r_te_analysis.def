@@ -27,26 +27,12 @@ From: rocker/r-ver:4.5.3
         "readr", "purrr", "ggplot2", "ggrepel", "RColorBrewer", "Rcpp", "optparse"),
         repos = "https://cloud.r-project.org")'
 
-    # ── Bioconductor packages (TE analysis) ─────────────────────────────
+    # ── Bioconductor: DESeq2 + deltaTE stack ────────────────────────────
     Rscript -e 'BiocManager::install(c("DESeq2", "apeglm", "SummarizedExperiment",
         "ComplexHeatmap"), update = FALSE, ask = FALSE)'
 
-    # ── Bioconductor packages (annotation — shared with ggRibo) ─────────
-    Rscript -e 'BiocManager::install(c(
-        "GenomicFeatures", "GenomicAlignments", "Rsamtools",
-        "rtracklayer", "AnnotationDbi",
-        "txdbmaker", "S4Vectors", "IRanges", "GenomicRanges",
-        "Biostrings", "GenomeInfoDb", "XVector"
-    ), update = FALSE, ask = FALSE)'
-
-    # ── ggRibo (manual install — source not publicly available) ─────────
-    # Install from your local source or private repo:
-    #   R CMD INSTALL /path/to/ggRibo
-    # Or if available as a tarball:
-    #   Rscript -e 'install.packages("/path/to/ggRibo.tar.gz", repos=NULL)'
-
-    # ── Clean cache ─────────────────────────────────────────────────────
-    rm -rf /tmp/downloaded_packages /tmp/Rtmp*
+    # ── Clean cache (ignore errors — some tmp dirs may be protected) ───
+    rm -rf /tmp/downloaded_packages /tmp/Rtmp* 2>/dev/null || true
 
 %environment
     export R_LIBS_USER=/usr/local/lib/R/site-library
@@ -56,6 +42,5 @@ From: rocker/r-ver:4.5.3
 
 %labels
     Author Zhe Ren
-    Version 3.1
-    Description R 4.5.3 + Bioconductor with DESeq2, apeglm, ComplexHeatmap, GenomicFeatures.
-                 For TE analysis (deltaTE). ggRibo can be added manually post-build.
+    Version 1.0
+    Description R 4.5.3 + DESeq2, apeglm, ComplexHeatmap for TE deltaTE analysis.
