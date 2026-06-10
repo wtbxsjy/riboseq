@@ -31,11 +31,6 @@ process EXPRESSION_QUANT {
     #!/bin/bash
     set -euo pipefail
 
-    # Install dependencies to /tmp (Singularity has read-only /usr/local/lib)
-    pip install --quiet --target=/tmp/pylib pandas numpy 2>/dev/null
-    PYTHONPATH="/tmp/pylib\${PYTHONPATH:+:\$PYTHONPATH}"
-    export PYTHONPATH
-
     echo "=== ORF Expression Quantification ==="
     echo "Prefix: ${prefix}"
     echo "Min OCS: ${min_ocs}"
