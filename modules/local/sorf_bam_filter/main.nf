@@ -14,6 +14,7 @@ process SORF_BAM_FILTER {
     val read_len_min
     val read_len_max
     val exclude_contigs_regex
+    val gtf                     // GTF path (string) — used to extract MT/Pt transcript IDs
 
     output:
     tuple val(meta), path("*.sorf.filtered.bam"), emit: bam
@@ -31,6 +32,7 @@ process SORF_BAM_FILTER {
     def rlmax = read_len_max ?: 0
     def umode = unique_mode ?: 'auto'
     def mapq = unique_mapq ?: 0
+    def has_gtf = (gtf && gtf != '' && !(gtf instanceof List && gtf.isEmpty())) ? ( gtf instanceof List ? gtf[0] : gtf ) : false
 
     """
     set -euo pipefail
@@ -41,10 +43,33 @@ process SORF_BAM_FILTER {
     rlmin=${rlmin}
     rlmax=${rlmax}
     re='${re}'
+    gtf='${has_gtf}'
 
-    # Record excluded contigs based on the provided reference index (FAI)
+    # Build exclusion list from FAI contig names matching the regex
     if [[ -n "\$re" ]]; then
       awk -v re="\$re" 'BEGIN{FS="\\t"; OFS="\\t"} \$1 ~ re {print \$1}' ${fai} | sort -u > ${prefix}.sorf.excluded_contigs.txt || true
+    fi
+
+    # If GTF is provided, also extract MT/Pt transcript IDs (for transcriptome BAM filtering)
+    # Transcriptome BAMs use transcript IDs as RNAME, not chromosome names
+    if [[ -n "\$gtf" && -f "\$gtf" && -n "\$re" ]]; then
+      # Extract chromosome names matching the regex from GTF col 1,
+      # then get the transcript_id values from those same lines
+      awk -v re="\$re" -F'\\t' '
+        BEGIN { OFS="\\t" }
+        \$1 ~ re {
+          # Extract transcript_id from the attributes column (col 9)
+          s=\$9
+          while (match(s, /transcript_id "[^"]+"/)) {
+            tx = substr(s, RSTART+16, RLENGTH-17)
+            print tx
+            s = substr(s, RSTART+RLENGTH)
+          }
+        }
+      ' "\$gtf" | sort -u > ${prefix}.sorf.excluded_transcript_ids.txt || true
+      # Combine FAI contigs and transcript IDs; pass to awk as a combined exclusion set
+      cat ${prefix}.sorf.excluded_contigs.txt ${prefix}.sorf.excluded_transcript_ids.txt 2>/dev/null \\\
+        | sort -u > ${prefix}.sorf.excluded_combined.txt || true
     fi
 
     # Count primary mapped reads (unfiltered baseline)
@@ -58,14 +83,33 @@ process SORF_BAM_FILTER {
       total_primary_mapped=0
     fi
 
+    # Build combined exclusion set from FAI contigs + transcript IDs (if GTF provided)
+    # Used for transcriptome BAM filtering where MT/Pt genes have transcript ID names
+    if [[ -f ${prefix}.sorf.excluded_combined.txt ]]; then
+      awk '{print \$1}' ${prefix}.sorf.excluded_combined.txt > ${prefix}.sorf.excluded_list.txt
+      use_exclude_file="${prefix}.sorf.excluded_list.txt"
+    else
+      use_exclude_file=""
+    fi
+
     # Filter: keep header lines; drop contigs matching regex; enforce read length; enforce unique mapping.
     set +e
     samtools view -h -F 0xD04 ${bam} \
-        | awk -v mode="\$mode" -v mapq="\$mapq" -v rlmin="\$rlmin" -v rlmax="\$rlmax" -v re="\$re" '
-          BEGIN{OFS="\\t"}
+        | awk -v mode="\$mode" -v mapq="\$mapq" -v rlmin="\$rlmin" -v rlmax="\$rlmax" -v re="\$re" -v excl_file="\$use_exclude_file" '
+          BEGIN {
+            OFS="\\t"
+            # Load exclusion file if provided
+            if (excl_file != "") {
+              while ((getline line < excl_file) > 0) {
+                excluded[line] = 1
+              }
+              close(excl_file)
+            }
+          }
           /^@/ {print; next}
           {
             rname=\$3
+            if (excl_file != "" && rname in excluded) next
             if (re != "" && rname ~ re) next
 
             # Read length from SEQ column
@@ -95,18 +139,19 @@ process SORF_BAM_FILTER {
             print
           }
         ' \
-      | samtools view -b -o ${prefix}.sorf.filtered.bam -
+      | samtools view -b | samtools sort -o ${prefix}.sorf.filtered.bam -
     # CRITICAL: Capture PIPESTATUS in one line before it resets (required with set -u)
     pipe_statuses=("\${PIPESTATUS[@]}")
     status_view=\${pipe_statuses[0]:-1}
     status_awk=\${pipe_statuses[1]:-1}
     status_bam=\${pipe_statuses[2]:-1}
+    status_sort=\${pipe_statuses[3]:-1}
     set -e
 
-    if [[ \$status_view -ne 0 || \$status_awk -ne 0 || \$status_bam -ne 0 ]]; then
+    if [[ \$status_view -ne 0 || \$status_awk -ne 0 || \$status_bam -ne 0 || \$status_sort -ne 0 ]]; then
       echo "WARNING: samtools/awk pipeline failed; creating empty filtered BAM (see stderr)" >&2
       set +e
-      samtools view -H ${bam} | samtools view -b -o ${prefix}.sorf.filtered.bam -
+      samtools view -H ${bam} | samtools view -b | samtools sort -o ${prefix}.sorf.filtered.bam -
       header_status=\$?
       set -e
       if [[ \$header_status -ne 0 ]]; then

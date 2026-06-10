@@ -11,7 +11,9 @@
                 "type": "string",
                 "pattern": "^\\S+$",
                 "errorMessage": "Sample name must be provided and cannot contain spaces",
-                "meta": ["id"]
+                "meta": [
+                    "id"
+                ]
             },
             "fastq_1": {
                 "type": "string",
@@ -51,37 +53,71 @@
             "strandedness": {
                 "type": "string",
                 "errorMessage": "Strandedness must be provided and be one of 'auto', 'forward', 'reverse' or 'unstranded'",
-                "enum": ["forward", "reverse", "unstranded", "auto"],
-                "meta": ["strandedness"]
+                "enum": [
+                    "forward",
+                    "reverse",
+                    "unstranded",
+                    "auto"
+                ],
+                "meta": [
+                    "strandedness"
+                ]
             },
             "type": {
                 "type": "string",
-                "errorMessage": "Sample type must be provided and be one of 'riboseq', 'rnaseq' or 'tiseq'",
-                "enum": ["riboseq", "rnaseq", "tiseq"],
-                "meta": ["sample_type"]
+                "errorMessage": "Sample type must be one of 'riboseq', 'rnaseq', 'tiseq', or 'lncrna'",
+                "enum": [
+                    "riboseq",
+                    "rnaseq",
+                    "tiseq",
+                    "lncrna"
+                ],
+                "meta": [
+                    "sample_type"
+                ]
             },
             "group": {
                 "type": "string",
                 "pattern": "^\\S+$",
                 "errorMessage": "Group name cannot contain spaces",
-                "meta": ["group"]
+                "meta": [
+                    "group"
+                ]
             }
         },
-        "required": ["sample", "strandedness", "type"],
+        "required": [
+            "sample",
+            "strandedness",
+            "type"
+        ],
         "oneOf": [
             {
-                "required": ["fastq_1"],
+                "required": [
+                    "fastq_1"
+                ],
                 "properties": {
-                    "bam": { "maxLength": 0 }
+                    "bam": {
+                        "maxLength": 0
+                    }
                 }
             },
             {
-                "required": ["bam"],
+                "required": [
+                    "bam"
+                ],
                 "properties": {
-                    "fastq_1": { "maxLength": 0 },
-                    "fastq_2": { "maxLength": 0 },
+                    "fastq_1": {
+                        "maxLength": 0
+                    },
+                    "fastq_2": {
+                        "maxLength": 0
+                    },
                     "strandedness": {
-                        "enum": ["forward", "reverse", "unstranded"],
+                        "enum": [
+                            "forward",
+                            "reverse",
+                            "unstranded"
+                        ],
                         "errorMessage": "When using BAM input, strandedness must be 'forward', 'reverse' or 'unstranded' (not 'auto')"
                     }
                 }

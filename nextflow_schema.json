@@ -1,1260 +1,1674 @@
 {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://raw.githubusercontent.com/nf-core/riboseq/master/nextflow_schema.json",
-    "title": "nf-core/riboseq pipeline parameters",
-    "description": "Analysis of ribosome profiling, or Ribo-seq (also named ribosome footprinting)",
-    "type": "object",
-    "$defs": {
-        "input_output_options": {
-            "title": "Input/output options",
-            "type": "object",
-            "fa_icon": "fas fa-terminal",
-            "description": "Define where the pipeline should find input data and save output data.",
-            "required": [
-                "input",
-                "outdir"
-            ],
-            "properties": {
-                "input": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "schema": "assets/schema_input.json",
-                    "mimetype": "text/csv",
-                    "pattern": "^\\S+\\.csv$",
-                    "description": "Path to comma-separated file containing information about the samples in the experiment.",
-                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://nf-co.re/riboseq/usage#samplesheet-input).",
-                    "fa_icon": "fas fa-file-csv"
-                },
-                "contrasts": {
-                    "type": "string",
-                    "description": "A CSV file describing sample contrasts",
-                    "help_text": "This file is used to define groups of samples from 'input' to compare.  It must contain at least the columns 'variable', 'reference' and 'target', and optionally a 'batch' column. 'variable' and 'batch' must be columns in the input sample sheet, 'reference' and 'target' are values in the column indicated by 'variable'.",
-                    "pattern": "^\\S+\\.(csv|tsv|txt)$",
-                    "format": "file-path",
-                    "mimetype": "text/csv",
-                    "fa_icon": "fas fa-adjust"
-                },
-                "outdir": {
-                    "type": "string",
-                    "format": "directory-path",
-                    "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
-                    "fa_icon": "fas fa-folder-open"
-                },
-                "email": {
-                    "type": "string",
-                    "description": "Email address for completion summary.",
-                    "fa_icon": "fas fa-envelope",
-                    "help_text": "Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits. If set in your user config file (`~/.nextflow/config`) then you don't need to specify this on the command line for every run.",
-                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$"
-                },
-                "multiqc_title": {
-                    "type": "string",
-                    "description": "MultiQC report title. Printed as page header, used for filename if not otherwise specified.",
-                    "fa_icon": "fas fa-file-signature"
-                },
-                "is_bam_input": {
-                    "type": [
-                        "boolean",
-                        "string"
-                    ],
-                    "default": "false",
-                    "enum": [
-                        true,
-                        false,
-                        "true",
-                        "false"
-                    ]
-                }
-            }
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nf-core/riboseq/master/nextflow_schema.json",
+  "title": "nf-core/riboseq pipeline parameters",
+  "description": "Analysis of ribosome profiling, or Ribo-seq (also named ribosome footprinting)",
+  "type": "object",
+  "$defs": {
+    "input_output_options": {
+      "title": "Input/output options",
+      "type": "object",
+      "fa_icon": "fas fa-terminal",
+      "description": "Define where the pipeline should find input data and save output data.",
+      "required": [
+        "input",
+        "outdir"
+      ],
+      "properties": {
+        "input": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "schema": "assets/schema_input.json",
+          "mimetype": "text/csv",
+          "pattern": "^\\S+\\.csv$",
+          "description": "Path to comma-separated file containing information about the samples in the experiment.",
+          "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://nf-co.re/riboseq/usage#samplesheet-input).",
+          "fa_icon": "fas fa-file-csv"
         },
-        "reference_genome_options": {
-            "title": "Reference genome options",
-            "type": "object",
-            "fa_icon": "fas fa-dna",
-            "description": "Reference genome related files and options required for the workflow.",
-            "properties": {
-                "genome": {
-                    "type": "string",
-                    "description": "Name of iGenomes reference.",
-                    "fa_icon": "fas fa-book",
-                    "help_text": "If using a reference genome configured in the pipeline using iGenomes (not recommended), use this parameter to give the ID for the reference. This is then used to build the full paths for all required reference genome files e.g. `--genome GRCh38`. \n\nSee the [nf-core website docs](https://nf-co.re/usage/reference_genomes) for more details."
-                },
-                "fasta": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
-                    "description": "Path to FASTA genome file.",
-                    "help_text": "This parameter is *mandatory* if `--genome` is not specified. If you don't have the appropriate alignment index available this will be generated for you automatically. Combine with `--save_reference` to save alignment index for future runs.",
-                    "fa_icon": "far fa-file-code"
-                },
-                "gtf": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "pattern": "^\\S+\\.gtf(\\.gz)?$",
-                    "description": "Path to GTF annotation file.",
-                    "fa_icon": "fas fa-code-branch",
-                    "help_text": "This parameter is *mandatory* if `--genome` is not specified."
-                },
-                "gff": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "pattern": "^\\S+\\.gff(\\.gz)?$",
-                    "fa_icon": "fas fa-code-branch",
-                    "description": "Path to GFF3 annotation file.",
-                    "help_text": "This parameter must be specified if `--genome` or `--gtf` are not specified."
-                },
-                "transcript_fasta": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
-                    "fa_icon": "far fa-file-code",
-                    "description": "Path to FASTA transcriptome file."
-                },
-                "additional_fasta": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
-                    "fa_icon": "far fa-file-code",
-                    "description": "FASTA file to concatenate to genome FASTA file e.g. containing spike-in sequences.",
-                    "help_text": "If provided, the sequences in this file will get concatenated to the existing genome FASTA file, a GTF file will be automatically created using the entire sequence as the gene, transcript, and exon features, and any alignment index will get created from the combined FASTA and GTF. It is recommended to save the reference with `--save_reference` to re-use the index for future runs so you do not need to create it again."
-                },
-                "star_index": {
-                    "type": "string",
-                    "format": "path",
-                    "exists": true,
-                    "fa_icon": "fas fa-bezier-curve",
-                    "description": "Path to directory or tar.gz archive for pre-built STAR index."
-                },
-                "salmon_index": {
-                    "type": "string",
-                    "format": "path",
-                    "exists": true,
-                    "fa_icon": "fas fa-bezier-curve",
-                    "description": "Path to directory or tar.gz archive for pre-built Salmon index."
-                },
-                "gencode": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-code-branch",
-                    "description": "Specify if your GTF annotation is in GENCODE format."
-                },
-                "gtf_extra_attributes": {
-                    "type": "string",
-                    "default": "gene_name",
-                    "fa_icon": "fas fa-plus-square",
-                    "description": "By default, the pipeline uses the `gene_name` field to obtain additional gene identifiers from the input GTF file when running Salmon.",
-                    "help_text": "This behaviour can be modified by specifying `--gtf_extra_attributes` when running the pipeline. Note that you can also specify more than one desired value, separated by a comma e.g. `--gtf_extra_attributes gene_id,...`.\n"
-                },
-                "gtf_group_features": {
-                    "type": "string",
-                    "default": "gene_id",
-                    "description": "Define the attribute type used to group features in the GTF file when running Salmon.",
-                    "fa_icon": "fas fa-layer-group"
-                },
-                "igenomes_ignore": {
-                    "type": [
-                        "boolean",
-                        "string"
-                    ],
-                    "enum": [
-                        true,
-                        false,
-                        "true",
-                        "false"
-                    ],
-                    "description": "Do not load the iGenomes reference config.",
-                    "fa_icon": "fas fa-ban",
-                    "hidden": true,
-                    "help_text": "Do not load `igenomes.config` when running the pipeline. You may choose this option if you observe clashes between custom parameters and those supplied in `igenomes.config`."
-                },
-                "igenomes_base": {
-                    "type": "string",
-                    "format": "directory-path",
-                    "description": "The base path to the igenomes reference files",
-                    "fa_icon": "fas fa-ban",
-                    "hidden": true,
-                    "default": "s3://ngi-igenomes/igenomes/"
-                },
-                "genomes": {
-                    "type": "object",
-                    "default": {},
-                    "description": "Genome references map (iGenomes)"
-                }
-            }
+        "contrasts": {
+          "type": "string",
+          "description": "A CSV file describing sample contrasts",
+          "help_text": "This file is used to define groups of samples from 'input' to compare.  It must contain at least the columns 'variable', 'reference' and 'target', and optionally a 'batch' column. 'variable' and 'batch' must be columns in the input sample sheet, 'reference' and 'target' are values in the column indicated by 'variable'.",
+          "pattern": "^\\S+\\.(csv|tsv|txt)$",
+          "format": "file-path",
+          "mimetype": "text/csv",
+          "fa_icon": "fas fa-adjust"
         },
-        "read_trimming_options": {
-            "title": "Read trimming options",
-            "type": "object",
-            "fa_icon": "fas fa-cut",
-            "description": "Options to adjust read trimming criteria.",
-            "properties": {
-                "trimmer": {
-                    "type": "string",
-                    "default": "trimgalore",
-                    "description": "Specifies the trimming tool to use - available options are 'trimgalore' and 'fastp'.",
-                    "fa_icon": "fas fa-cut",
-                    "enum": [
-                        "trimgalore",
-                        "fastp"
-                    ]
-                },
-                "extra_trimgalore_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to Trim Galore! command in addition to defaults defined by the pipeline.",
-                    "fa_icon": "fas fa-plus"
-                },
-                "extra_fastp_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to fastp command in addition to defaults defined by the pipeline.",
-                    "fa_icon": "fas fa-plus"
-                },
-                "min_trimmed_reads": {
-                    "type": "integer",
-                    "default": 10000,
-                    "fa_icon": "fas fa-hand-paper",
-                    "description": "Minimum number of trimmed reads below which samples are removed from further processing. Some downstream steps in the pipeline will fail if this threshold is too low."
-                }
-            }
+        "outdir": {
+          "type": "string",
+          "format": "directory-path",
+          "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
+          "fa_icon": "fas fa-folder-open"
         },
-        "read_filtering_options": {
-            "title": "Read filtering options",
-            "type": "object",
-            "description": "Options for filtering reads prior to alignment",
-            "default": "",
-            "properties": {
-                "extra_fqlint_args": {
-                    "type": "string",
-                    "default": "--disable-validator P001",
-                    "description": "Extra arguments to pass to the fq lint command.",
-                    "fa_icon": "far fa-check-square"
-                },
-                "skip_contaminant_filter": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-ban",
-                    "description": "Skip contaminant filtering with Bowtie/Bowtie2."
-                },
-                "contaminant_fasta": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "fa_icon": "fas fa-vial",
-                    "description": "FASTA file containing sequences for rRNA (cytoplasmic/mitochondrial), tRNA, snRNA/snoRNA and other contaminants to remove prior to alignment.",
-                    "help_text": "Provide a single FASTA file that aggregates all contaminant references you would like to screen against. Include at minimum cytoplasmic and mitochondrial rRNA plus highly abundant tRNA loci for Ribo-seq."
-                },
-                "filter_aligner": {
-                    "type": "string",
-                    "default": "bowtie",
-                    "enum": [
-                        "bowtie",
-                        "bowtie2"
-                    ],
-                    "fa_icon": "fas fa-crosshairs",
-                    "description": "Aligner to use for contaminant filtering."
-                },
-                "bowtie_index": {
-                    "type": "string",
-                    "format": "path",
-                    "exists": true,
-                    "fa_icon": "fas fa-database",
-                    "description": "Path to directory or tar.gz archive for pre-built Bowtie contaminant index.",
-                    "help_text": "The Bowtie index will be generated automatically from `--contaminant_fasta` if not provided and `--save_reference` is enabled for re-use."
-                },
-                "bowtie2_index": {
-                    "type": "string",
-                    "format": "path",
-                    "exists": true,
-                    "fa_icon": "fas fa-database",
-                    "description": "Path to directory or tar.gz archive for pre-built Bowtie2 contaminant index.",
-                    "help_text": "The Bowtie2 index will be generated automatically from `--contaminant_fasta` when `--filter_aligner bowtie2` is selected."
-                },
-                "save_contaminant_reads": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-save",
-                    "description": "Save reads classified as contaminants by Bowtie/Bowtie2."
-                }
-            },
-            "fa_icon": "fas fa-trash-alt"
+        "email": {
+          "type": "string",
+          "description": "Email address for completion summary.",
+          "fa_icon": "fas fa-envelope",
+          "help_text": "Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits. If set in your user config file (`~/.nextflow/config`) then you don't need to specify this on the command line for every run.",
+          "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$"
         },
-        "umi_options": {
-            "title": "UMI options",
-            "type": "object",
-            "description": "Options for processing reads with unique molecular identifiers",
-            "default": "",
-            "properties": {
-                "with_umi": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-barcode",
-                    "description": "Enable UMI-based read deduplication."
-                },
-                "umi_dedup_tool": {
-                    "type": "string",
-                    "default": "umitools",
-                    "description": "Specifies the tool to use for UMI deduplication - available options are 'umitools' and 'umicollapse'.",
-                    "fa_icon": "fas fa-barcode",
-                    "enum": [
-                        "umitools",
-                        "umicollapse"
-                    ]
-                },
-                "umitools_extract_method": {
-                    "type": "string",
-                    "default": "string",
-                    "fa_icon": "fas fa-barcode",
-                    "description": "UMI pattern to use. Can be either 'string' (default) or 'regex'.",
-                    "help_text": "More details can be found in the [UMI-tools documentation](https://umi-tools.readthedocs.io/en/latest/reference/extract.html#extract-method).\n"
-                },
-                "umitools_bc_pattern": {
-                    "type": "string",
-                    "fa_icon": "fas fa-barcode",
-                    "help_text": "More details can be found in the [UMI-tools documentation](https://umi-tools.readthedocs.io/en/latest/reference/extract.html#extract-method).",
-                    "description": "The UMI barcode pattern to use e.g. 'NNNNNN' indicates that the first 6 nucleotides of the read are from the UMI."
-                },
-                "umitools_bc_pattern2": {
-                    "type": "string",
-                    "fa_icon": "fas fa-barcode",
-                    "description": "The UMI barcode pattern to use if the UMI is located in read 2."
-                },
-                "umi_discard_read": {
-                    "type": "integer",
-                    "fa_icon": "fas fa-barcode",
-                    "description": "After UMI barcode extraction discard either R1 or R2 by setting this parameter to 1 or 2, respectively."
-                },
-                "umitools_umi_separator": {
-                    "type": "string",
-                    "fa_icon": "fas fa-star-half-alt",
-                    "description": "The character that separates the UMI in the read name. Most likely a colon if you skipped the extraction with UMI-tools and used other software."
-                },
-                "umitools_grouping_method": {
-                    "type": "string",
-                    "default": "directional",
-                    "fa_icon": "far fa-object-ungroup",
-                    "description": "Method to use to determine read groups by subsuming those with similar UMIs. All methods start by identifying the reads with the same mapping position, but treat similar yet nonidentical UMIs differently.",
-                    "enum": [
-                        "unique",
-                        "percentile",
-                        "cluster",
-                        "adjacency",
-                        "directional"
-                    ]
-                },
-                "umitools_dedup_stats": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-barcode",
-                    "help_text": "It can be quite time consuming generating these output stats - see [#827](https://github.com/nf-core/rnaseq/issues/827).",
-                    "description": "Generate output stats when running \"umi_tools dedup\"."
-                }
-            },
-            "fa_icon": "fas fa-barcode"
+        "multiqc_title": {
+          "type": "string",
+          "description": "MultiQC report title. Printed as page header, used for filename if not otherwise specified.",
+          "fa_icon": "fas fa-file-signature"
         },
-        "alignment_options": {
-            "title": "Alignment options",
-            "type": "object",
-            "fa_icon": "fas fa-map-signs",
-            "description": "Options to adjust parameters and filtering criteria for read alignments.",
-            "properties": {
-                "aligner": {
-                    "type": "string",
-                    "default": "star",
-                    "description": "Specifies the alignment algorithm to use - available options are currently 'star' and 'hisat2'.",
-                    "fa_icon": "fas fa-map-signs",
-                    "enum": [
-                        "star",
-                        "hisat2"
-                    ]
-                },
-                "pseudo_aligner_kmer_size": {
-                    "type": "integer",
-                    "default": 31,
-                    "description": "Kmer length passed to indexing step of pseudoaligners",
-                    "help_text": "Failure to set a good kmer size could cause issues with quantification with Kallisto or Salmon. This is mostly an issue for short reads (<50bp), where the default kmer size of 31 is an problem.",
-                    "fa_icon": "fas fa-ruler-horizontal"
-                },
-                "bam_csi_index": {
-                    "type": "boolean",
-                    "description": "Create a CSI index for BAM files instead of the traditional BAI index. This will be required for genomes with larger chromosome sizes.",
-                    "fa_icon": "fas fa-sort-alpha-down"
-                },
-                "star_ignore_sjdbgtf": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-ban",
-                    "description": "When using pre-built STAR indices do not re-extract and use splice junctions from the GTF file."
-                },
-                "salmon_quant_libtype": {
-                    "type": "string",
-                    "fa_icon": "fas fa-fast-forward",
-                    "description": " Override Salmon library type inferred based on strandedness defined in meta object.",
-                    "help_text": "See [Salmon docs](https://salmon.readthedocs.io/en/latest/library_type.html).",
-                    "enum": [
-                        "A",
-                        "IS",
-                        "ISF",
-                        "ISR",
-                        "IU",
-                        "MS",
-                        "MSF",
-                        "MSR",
-                        "MU",
-                        "OS",
-                        "OSF",
-                        "OSR",
-                        "OU",
-                        "SF",
-                        "SR",
-                        "U"
-                    ]
-                },
-                "min_mapped_reads": {
-                    "type": "number",
-                    "default": 5.0,
-                    "fa_icon": "fas fa-percentage",
-                    "description": "Minimum percentage of uniquely mapped reads below which samples are removed from further processing.",
-                    "help_text": "Some downstream steps in the pipeline will fail if this threshold is too low."
-                },
-                "seq_center": {
-                    "type": "string",
-                    "description": "Sequencing center information to be added to read group of BAM files.",
-                    "fa_icon": "fas fa-synagogue"
-                },
-                "extra_star_align_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to STAR alignment command in addition to defaults defined by the pipeline. Only available for the STAR-Salmon route.",
-                    "fa_icon": "fas fa-plus"
-                },
-                "star_out_tmpdir": {
-                    "type": "string",
-                    "description": "Base directory for STAR temporary files (passed as --outTmpDir). Use a Linux/Posix filesystem that supports FIFO (avoid NTFS/FAT mounts). A unique subdirectory is created per task.",
-                    "fa_icon": "fas fa-folder"
-                },
-                "extra_salmon_quant_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to Salmon quant command in addition to defaults defined by the pipeline.",
-                    "fa_icon": "fas fa-plus"
-                },
-                "stranded_threshold": {
-                    "type": "number",
-                    "minimum": 0.5,
-                    "maximum": 1,
-                    "default": 0.8,
-                    "description": "The fraction of stranded reads that must be assigned to a strandedness for confident assignment. Must be at least 0.5."
-                },
-                "unstranded_threshold": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.1,
-                    "description": "The difference in fraction of stranded reads assigned to 'forward' and 'reverse' below which a sample is classified as 'unstranded'. By default the forward and reverse fractions must differ by less than 0.1 for the sample to be called as unstranded."
-                }
-            }
-        },
-        "riboseq_specific_options": {
-            "title": "Riboseq-specific options",
-            "type": "object",
-            "description": "Options related to riboseq-specific analysis modules",
-            "default": "",
-            "fa_icon": "fas fa-circle",
-            "properties": {
-                "sorf_filter": {
-                    "type": "boolean",
-                    "default": true,
-                    "fa_icon": "fas fa-filter",
-                    "description": "Filter BAM files before running sORF prediction tools.",
-                    "help_text": "Applies to all sORF prediction tools. Filtering is intended to enforce unique mapping, exclude unwanted contigs (e.g. mitochondrial/chloroplast/unlocalized scaffolds), and keep a footprint length window (default 28-30)."
-                },
-                "sorf_unique_mode": {
-                    "type": "string",
-                    "default": "auto",
-                    "fa_icon": "fas fa-fingerprint",
-                    "description": "How to define uniquely-mapped reads for sORF filtering.",
-                    "help_text": "Supported modes: auto (prefer NH tag when present; otherwise use MAPQ threshold), nh (require NH==1), mapq (require MAPQ>=sorf_unique_mapq).",
-                    "enum": [
-                        "auto",
-                        "nh",
-                        "mapq"
-                    ]
-                },
-                "sorf_unique_mapq": {
-                    "type": "integer",
-                    "default": 60,
-                    "minimum": 0,
-                    "maximum": 255,
-                    "fa_icon": "fas fa-tachometer-alt",
-                    "description": "MAPQ threshold used when sorf_unique_mode is 'mapq' (or in 'auto' mode when NH is not available)."
-                },
-                "sorf_read_len_min": {
-                    "type": [
-                        "integer",
-                        "string"
-                    ],
-                    "default": 28,
-                    "minimum": 0,
-                    "fa_icon": "fas fa-ruler-horizontal",
-                    "description": "Minimum read length to keep (inclusive) when filtering for sORF prediction.",
-                    "pattern": "^[0-9]+$"
-                },
-                "sorf_read_len_max": {
-                    "type": [
-                        "integer",
-                        "string"
-                    ],
-                    "default": 30,
-                    "minimum": 0,
-                    "fa_icon": "fas fa-ruler-horizontal",
-                    "description": "Maximum read length to keep (inclusive) when filtering for sORF prediction.",
-                    "pattern": "^[0-9]+$"
-                },
-                "sorf_exclude_contigs_regex": {
-                    "type": "string",
-                    "default": "^(chr)?(M|MT|Mt|chrM|chrMT|chrMt|ChrM|ChrMT|ChrMt)$|^(chr)?(C|CP|Pt|chrC|chrCP|chrPt|ChrC|ChrCP|ChrPt)$|^chrUn_.*|.*_random$|.*_alt$|.*_fix$",
-                    "fa_icon": "fas fa-ban",
-                    "description": "Regex of reference contig names to exclude before sORF prediction.",
-                    "help_text": "Default covers common Gencode/UCSC-style mitochondrial contigs (chrM/MT) and Ensembl Plants-style organelle contigs (Mt/Pt), plus typical unlocalized scaffolds (chrUn_*) and alt/random/fix contigs. You may need to customize this for your reference genome. Set to an empty string to disable contig-name exclusion."
-                },
-                "sorf_predict_pooled": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-layer-group",
-                    "description": "Run pooled (all-samples) sORF prediction in addition to per-sample prediction.",
-                    "help_text": "Disabled by default for performance. This only affects sORF prediction steps (QC can remain per-sample)."
-                },
-                "merge_replicates": {
-                    "type": [
-                        "boolean",
-                        "string"
-                    ],
-                    "enum": [
-                        true,
-                        false,
-                        "true",
-                        "false"
-                    ],
-                    "default": false,
-                    "fa_icon": "fas fa-compress-arrows-alt",
-                    "description": "Merge BAMs from biological/technical replicates sharing the same 'group' field before ORF calling.",
-                    "help_text": "When enabled, samples sharing the same 'group' value in the samplesheet are merged (samtools merge) after SORF_BAM_FILTER. The merged BAM (id: '{group}_merged') runs through ALL ORF prediction tools (Ribo-TISH, Ribotricer, RiboCode, RiboseQC, ORFquant) in addition to the individual replicates. This improves reproducibility and helps filter random ORF calls. The 'group' column must be added to the samplesheet CSV."
-                },
-                "pathogen_fasta": {
-                    "type": "string",
-                    "default": null,
-                    "fa_icon": "fas fa-virus",
-                    "description": "Pathogen genome FASTA file, used as annotation for pathogen-specific ORF prediction.",
-                    "help_text": "Provide the pathogen (e.g., virus) FASTA genome to enable pathogen-specific ORF prediction. Must be used together with --pathogen_gtf and --pathogen_contig_pattern."
-                },
-                "pathogen_gtf": {
-                    "type": "string",
-                    "default": null,
-                    "fa_icon": "fas fa-file-alt",
-                    "description": "Pathogen annotation GTF file for ORF quantification and prediction.",
-                    "help_text": "Provide the pathogen GTF annotation file. Required when --pathogen_contig_pattern is set."
-                },
-                "pathogen_contig_pattern": {
-                    "type": "string",
-                    "default": null,
-                    "fa_icon": "fas fa-filter",
-                    "description": "Regex pattern to identify pathogen contigs in the combined BAM (e.g. '^NC_045512').",
-                    "help_text": "Setting this parameter activates dual-genome analysis. After alignment to the combined host+pathogen reference, reads on contigs matching this pattern are split into pathogen-specific BAMs for separate downstream analysis. The pathogen genome should be included in the reference via --additional_fasta."
-                },
-                "skip_pathogen_analysis": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-forward",
-                    "description": "Skip all pathogen-specific downstream analysis (ORF prediction, TE analysis).",
-                    "help_text": "When set, the BAM splitting step is still performed, but pathogen BAMs are not processed further. Useful when only splitting is needed."
-                },
-                "extra_ribotish_quality_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to the ribotish quality command in addition to defaults defined by the pipeline."
-                },
-                "extra_ribotish_predict_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to the ribotish predict command in addition to defaults defined by the pipeline."
-                },
-                "extra_ribotricer_prepareorfs_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to the ribotricer prepare-orfs command in addition to defaults defined by the pipeline."
-                },
-                "extra_ribotricer_detectorfs_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to the ribotricer detect-orfs command in addition to defaults defined by the pipeline."
-                },
-                "extra_ribocode_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to RiboCode_onestep in addition to defaults defined by the pipeline."
-                },
-                "ribocode_maxForks": {
-                    "type": "integer",
-                    "default": 1,
-                    "description": "Maximum number of RiboCode ORF-detection tasks to run concurrently. Keep at 1 for memory-constrained HPC nodes."
-                },
-                "ribocode_memory": {
-                    "type": "string",
-                    "default": "36.GB",
-                    "description": "Memory request for each RiboCode ORF-detection task. Increase if a single RiboCode job is killed for exceeding memory."
-                },
-                "ribotricer_phase_score_cutoff": {
-                    "type": ["number", "string"],
-                    "description": "Phase score cutoff for Ribotricer's metagene periodicity detection. When not set, uses Ribotricer's default (3/7 \u2248 0.429). Set to a lower value (e.g. 0.1) for plant or low-depth samples where canonical CDS coverage is sparse."
-                },
-                "extra_anota2seq_run_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to anota2seq in addition to defaults defined by the pipeline."
-                },
-                "skip_unify_orf_predictions": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-fast-forward",
-                    "description": "Skip unified ORF predictions across tools."
-                },
-                "unify_orf_predictions_prefix": {
-                    "type": "string",
-                    "default": "unified_orfs",
-                    "fa_icon": "fas fa-file-signature",
-                    "description": "Output prefix for unified ORF predictions (base name only)."
-                },
-                "unify_orf_min_len": {
-                    "type": [
-                        "integer",
-                        "string"
-                    ],
-                    "pattern": "^[0-9]+$",
-                    "default": 6,
-                    "minimum": 1,
-                    "fa_icon": "fas fa-ruler",
-                    "description": "Minimum ORF length (amino acids) for unified predictions."
-                },
-                "unify_orf_frame_merge_min_overlap": {
-                    "type": [
-                        "number",
-                        "string"
-                    ],
-                    "pattern": "^[0-9]+(\\.[0-9]+)?$",
-                    "default": 0.9,
-                    "minimum": 0.0,
-                    "maximum": 1.0,
-                    "fa_icon": "fas fa-compress-arrows-alt",
-                    "description": "Minimum overlap fraction of shorter ORF for single-exon frame-aware merging (0.0-1.0). Multi-exon ORFs are never frame-merged."
-                },
-                "unify_orf_no_frame_merge": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-ban",
-                    "description": "Disable frame-aware merging; only use exact coordinate matches."
-                },
-                "unify_orf_seq_cluster": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-object-group",
-                    "description": "Enable Stage 3 sequence-similarity clustering (UniRef90-inspired, disabled by default)."
-                },
-                "extra_unify_orf_predictions_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to unify_orf_predictions.py."
-                },
-                "skip_orf_classification": {
-                    "type": "boolean",
-                    "default": false,
-                    "fa_icon": "fas fa-fast-forward",
-                    "description": "Skip ORF classification step."
-                },
-                "orf_classify_mode": {
-                    "type": "string",
-                    "default": "orf_type",
-                    "fa_icon": "fas fa-tags",
-                    "description": "ORF classification mode.",
-                    "enum": [
-                        "gencode",
-                        "orfquant",
-                        "orf_type"
-                    ]
-                },
-                "orf_classify_output_dir": {
-                    "type": "string",
-                    "default": "orf_classification",
-                    "fa_icon": "fas fa-folder-open",
-                    "description": "Output directory name for ORF classification results (relative to results)."
-                },
-                "orf_classify_ensembl_dir": {
-                    "type": "string",
-                    "format": "directory-path",
-                    "exists": true,
-                    "fa_icon": "fas fa-folder-open",
-                    "description": "Ensembl annotation directory for gencode classification mode."
-                },
-                "gencode_orf_mapper_container": {
-                    "type": "string",
-                    "default": null,
-                    "fa_icon": "fas fa-box",
-                    "description": "Custom gencode-orf-mapper container image path (Singularity .sif or Docker image)."
-                },
-                "extra_orf_classify_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to classify_orfs_wrapper.py."
-                }
-            }
-        },
-        "optional_outputs": {
-            "title": "Optional outputs",
-            "type": "object",
-            "description": "Additional output files produces as intermediates that can be saved",
-            "default": "",
-            "properties": {
-                "save_merged_fastq": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-save",
-                    "description": "Save FastQ files after merging re-sequenced libraries in the results directory."
-                },
-                "save_umi_intermeds": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-save",
-                    "description": "If this option is specified, intermediate FastQ and BAM files produced by UMI-tools are also saved in the results directory."
-                },
-                "save_reference": {
-                    "type": [
-                        "boolean",
-                        "string"
-                    ],
-                    "enum": [
-                        true,
-                        false,
-                        "true",
-                        "false"
-                    ],
-                    "default": false,
-                    "description": "If generated by the pipeline save the STAR index in the results directory.",
-                    "help_text": "If an alignment index is generated by the pipeline use this parameter to save it to your results folder. These can then be used for future pipeline runs, reducing processing times.",
-                    "fa_icon": "fas fa-save"
-                },
-                "save_trimmed": {
-                    "type": "boolean",
-                    "description": "Save the trimmed FastQ files in the results directory.",
-                    "help_text": "By default, trimmed FastQ files will not be saved to the results directory. Specify this flag (or set to true in your config file) to copy these files to the results directory when complete.",
-                    "fa_icon": "fas fa-save"
-                },
-                "save_align_intermeds": {
-                    "type": "boolean",
-                    "description": "Save the intermediate BAM files from the alignment step.",
-                    "help_text": "By default, intermediate BAM files will not be saved. The final BAM files created after the appropriate filtering step are always saved to limit storage usage. Set this parameter to also save other intermediate BAM files.",
-                    "fa_icon": "fas fa-save",
-                    "default": true
-                },
-                "save_unaligned": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-save",
-                    "description": "Where possible, save unaligned reads from either STAR, HISAT2 or Salmon to the results directory.",
-                    "help_text": "This may either be in the form of FastQ or BAM files depending on the options available for that particular tool."
-                }
-            }
-        },
-        "process_skipping_options": {
-            "title": "Process skipping options",
-            "type": "object",
-            "fa_icon": "fas fa-fast-forward",
-            "description": "Options to skip various steps within the workflow.",
-            "properties": {
-                "skip_gtf_filter": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-forward",
-                    "description": "Skip filtering of GTF for valid scaffolds and/ or transcript IDs.",
-                    "help_text": "If you're confident on the validity of the GTF with respect to the genome fasta file, or wish to disregard failures thriggered by the filtering module, activate this option."
-                },
-                "skip_gtf_transcript_filter": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-forward",
-                    "description": "Skip the 'transcript_id' checking component of the GTF filtering script used in the pipeline."
-                },
-                "skip_umi_extract": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-compress-alt",
-                    "description": "Skip the UMI extraction from the read in case the UMIs have been moved to the headers in advance of the pipeline run."
-                },
-                "skip_linting": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-fast-forward",
-                    "description": "Skip linting checks during FASTQ preprocessing and filtering."
-                },
-                "skip_trimming": {
-                    "type": "boolean",
-                    "description": "Skip the adapter trimming step.",
-                    "help_text": "Use this if your input FastQ files have already been trimmed outside of the workflow or if you're very confident that there is no adapter contamination in your data.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_alignment": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-fast-forward",
-                    "description": "Skip all of the alignment-based processes within the pipeline."
-                },
-                "skip_markduplicates": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-fast-forward",
-                    "description": "Skip picard MarkDuplicates step."
-                },
-                "skip_fastqc": {
-                    "type": "boolean",
-                    "description": "Skip FastQC.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_multiqc": {
-                    "type": "boolean",
-                    "description": "Skip MultiQC.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_qc": {
-                    "type": "boolean",
-                    "fa_icon": "fas fa-fast-forward",
-                    "description": "Skip all QC steps except for MultiQC."
-                },
-                "skip_ribotish": {
-                    "type": "boolean",
-                    "description": "Skip Ribo-TISH.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_ribotricer": {
-                    "type": "boolean",
-                    "description": "Skip Ribotricer.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_ribocode": {
-                    "type": "boolean",
-                    "description": "Skip RiboCode ORF detection.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_riboseqc": {
-                    "type": "boolean",
-                    "description": "Skip RiboseQC quality control analysis.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_orf_qc": {
-                    "type": ["boolean", "string"],
-                    "default": false,
-                    "enum": [true, false, "true", "false"],
-                    "description": "Skip the ORF QC module that harmonizes metrics across all prediction tools.",
-                    "fa_icon": "fas fa-clipboard-check"
-                },
-                "orf_qc_min_consensus_tools": {
-                    "type": ["integer", "string"],
-                    "default": 2,
-                    "description": "Minimum number of tools required for a consensus ORF.",
-                    "fa_icon": "fas fa-handshake"
-                },
-                "orf_qc_confidence_weights": {
-                    "type": "string",
-                    "default": "0.30,0.30,0.20,0.15,0.05",
-                    "description": "Comma-separated weights for OCS components.",
-                    "fa_icon": "fas fa-balance-scale"
-                },
-                "orf_qc_periodicity_min_f0": {
-                    "type": ["number", "string"],
-                    "default": 0.6,
-                    "description": "Minimum frame-0 proportion for periodic classification.",
-                    "fa_icon": "fas fa-chart-bar"
-                },
-                "orf_qc_offset_max_delta": {
-                    "type": ["integer", "string"],
-                    "default": 1,
-                    "description": "Maximum nucleotide difference allowed for P-site offset consensus.",
-                    "fa_icon": "fas fa-ruler"
-                },
-                "orf_qc_report_format": {
-                    "type": "string",
-                    "default": "html",
-                    "enum": ["html", "json", "both"],
-                    "description": "Output format for the ORF QC report.",
-                    "fa_icon": "fas fa-file-alt"
-                },
-                "orf_qc_container": {
-                    "type": "string",
-                    "description": "Path to custom ORF QC Singularity container.",
-                    "fa_icon": "fas fa-box"
-                },
-                "extra_riboseqc_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to RiboseQC analysis.",
-                    "fa_icon": "fas fa-plus"
-                },
-                "skip_orfquant": {
-                    "type": "boolean",
-                    "description": "Skip ORFquant ORF detection and quantification. Note: ORFquant requires RiboseQC to be enabled.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "orfquant_psite_correction": {
-                    "type": [
-                        "boolean",
-                        "string"
-                    ],
-                    "enum": [
-                        true,
-                        false,
-                        "true",
-                        "false"
-                    ],
-                    "default": true,
-                    "description": "Use corrected P-site offsets for ORFquant. Extracts offsets from RiboseQC P_sites_calcs where max_coverage is TRUE. This can improve ORFquant accuracy.",
-                    "fa_icon": "fas fa-crosshairs",
-                    "help_text": "When enabled, P-site offsets are extracted from RiboseQC results (rows with max_coverage=TRUE) and used to regenerate the for_ORFquant file. This ensures more accurate P-site positioning for ORF detection."
-                },
-                "extra_orfquant_args": {
-                    "type": "string",
-                    "description": "Extra arguments to pass to ORFquant (e.g., 'plot_results=TRUE' to generate plots).",
-                    "fa_icon": "fas fa-plus"
-                },
-                "run_prefilter_qc": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Run QC analysis on unfiltered BAMs (with MT reads) for comparison with postfilter results. Increases runtime and storage requirements.",
-                    "fa_icon": "fas fa-filter",
-                    "help_text": "By default, only postfilter QC (MT-removed BAMs) is performed. Enable this to also run prefilter QC for comparison purposes."
-                },
-                "skip_ribowaltz": {
-                    "type": "boolean",
-                    "description": "Skip riboWaltz P-site offset calculation and QC analysis.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_joint_qc_report": {
-                    "type": "boolean",
-                    "description": "Skip the joint Ribo-seq QC report that integrates metrics from riboWaltz, RiboseQC, Ribo-TISH, and Ribotricer.",
-                    "fa_icon": "fas fa-clipboard-check"
-                },
-                "ribowaltz_read_lengths": {
-                    "type": [
-                        "array",
-                        "string"
-                    ],
-                    "default": [
-                        28,
-                        29,
-                        30
-                    ],
-                    "items": {
-                        "type": "integer"
-                    },
-                    "description": "List of read lengths to analyze with riboWaltz.",
-                    "fa_icon": "fas fa-ruler"
-                },
-                "skip_price": {
-                    "type": [
-                        "boolean",
-                        "string"
-                    ],
-                    "enum": [
-                        true,
-                        false,
-                        "true",
-                        "false"
-                    ],
-                    "description": "Skip GEDI PRICE ORF detection pipeline.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "skip_te_analysis": {
-                    "type": "boolean",
-                    "description": "Skip translational efficiency (TE) analysis with DESeq2 deltaTE.",
-                    "fa_icon": "fas fa-fast-forward"
-                },
-                "te_lfc_threshold": {
-                    "type": "number",
-                    "default": 0.2630344,
-                    "description": "Log2 fold change threshold for TE classification.",
-                    "fa_icon": "fas fa-sliders-h"
-                },
-                "rna_lfc_threshold": {
-                    "type": "number",
-                    "default": 0,
-                    "description": "Log2 fold change threshold for total RNA changes.",
-                    "fa_icon": "fas fa-sliders-h"
-                },
-                "ribo_lfc_threshold": {
-                    "type": "number",
-                    "default": 0,
-                    "description": "Log2 fold change threshold for translated mRNA changes.",
-                    "fa_icon": "fas fa-sliders-h"
-                },
-                "skip_rpbp": {
-                    "type": [
-                        "boolean",
-                        "string"
-                    ],
-                    "default": "false",
-                    "enum": [
-                        true,
-                        false,
-                        "true",
-                        "false"
-                    ],
-                    "description": "Skip RPBP"
-                }
-            }
-        },
-        "institutional_config_options": {
-            "title": "Institutional config options",
-            "type": "object",
-            "fa_icon": "fas fa-university",
-            "description": "Parameters used to describe centralised config profiles. These should not be edited.",
-            "help_text": "The centralised nf-core configuration profiles use a handful of pipeline parameters to describe themselves. This information is then printed to the Nextflow log when you run a pipeline. You should not need to change these values when you run a pipeline.",
-            "properties": {
-                "custom_config_version": {
-                    "type": "string",
-                    "description": "Git commit id for Institutional configs.",
-                    "default": "master",
-                    "hidden": true,
-                    "fa_icon": "fas fa-users-cog"
-                },
-                "custom_config_base": {
-                    "type": "string",
-                    "description": "Base directory for Institutional configs.",
-                    "default": "https://raw.githubusercontent.com/nf-core/configs/master",
-                    "hidden": true,
-                    "help_text": "If you're running offline, Nextflow will not be able to fetch the institutional config files from the internet. If you don't need them, then this is not a problem. If you do need them, you should download the files from the repo and tell Nextflow where to find them with this parameter.",
-                    "fa_icon": "fas fa-users-cog"
-                },
-                "config_profile_name": {
-                    "type": "string",
-                    "description": "Institutional config name.",
-                    "hidden": true,
-                    "fa_icon": "fas fa-users-cog"
-                },
-                "config_profile_description": {
-                    "type": "string",
-                    "description": "Institutional config description.",
-                    "hidden": true,
-                    "fa_icon": "fas fa-users-cog"
-                },
-                "config_profile_contact": {
-                    "type": "string",
-                    "description": "Institutional config contact information.",
-                    "hidden": true,
-                    "fa_icon": "fas fa-users-cog"
-                },
-                "config_profile_url": {
-                    "type": "string",
-                    "description": "Institutional config URL link.",
-                    "hidden": true,
-                    "fa_icon": "fas fa-users-cog"
-                },
-                "test_data_base": {
-                    "type": "string",
-                    "default": "https://raw.githubusercontent.com/nf-core/test-datasets/riboseq/testdata/",
-                    "description": "Base path / URL for data used in the test profiles",
-                    "help_text": "Warning: The `-profile test` samplesheet file itself contains remote paths. Setting this parameter does not alter the contents of that file.",
-                    "hidden": true
-                }
-            }
-        },
-        "generic_options": {
-            "title": "Generic options",
-            "type": "object",
-            "fa_icon": "fas fa-file-import",
-            "description": "Less common options for the pipeline, typically set in a config file.",
-            "help_text": "These options are common to all nf-core pipelines and allow you to customise some of the core preferences for how the pipeline runs.\n\nTypically these options would be set in a Nextflow config file loaded for all pipeline runs, such as `~/.nextflow/config`.",
-            "properties": {
-                "version": {
-                    "type": "boolean",
-                    "description": "Display version and exit.",
-                    "fa_icon": "fas fa-question-circle",
-                    "hidden": true
-                },
-                "publish_dir_mode": {
-                    "type": "string",
-                    "default": "copy",
-                    "description": "Method used to save pipeline results to output directory.",
-                    "help_text": "The Nextflow `publishDir` option specifies which intermediate files should be saved to the output directory. This option tells the pipeline what method should be used to move these files. See [Nextflow docs](https://www.nextflow.io/docs/latest/process.html#publishdir) for details.",
-                    "fa_icon": "fas fa-copy",
-                    "enum": [
-                        "symlink",
-                        "rellink",
-                        "link",
-                        "copy",
-                        "copyNoFollow",
-                        "move"
-                    ],
-                    "hidden": true
-                },
-                "email_on_fail": {
-                    "type": "string",
-                    "description": "Email address for completion summary, only when pipeline fails.",
-                    "fa_icon": "fas fa-exclamation-triangle",
-                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
-                    "help_text": "An email address to send a summary email to when the pipeline is completed - ONLY sent if the pipeline does not exit successfully.",
-                    "hidden": true
-                },
-                "plaintext_email": {
-                    "type": "boolean",
-                    "description": "Send plain-text email instead of HTML.",
-                    "fa_icon": "fas fa-remove-format",
-                    "hidden": true
-                },
-                "max_multiqc_email_size": {
-                    "type": "string",
-                    "description": "File size limit when attaching MultiQC reports to summary emails.",
-                    "default": "25.MB",
-                    "fa_icon": "fas fa-file-upload",
-                    "hidden": true
-                },
-                "monochrome_logs": {
-                    "type": "boolean",
-                    "description": "Do not use coloured log outputs.",
-                    "fa_icon": "fas fa-palette",
-                    "hidden": true
-                },
-                "hook_url": {
-                    "type": "string",
-                    "description": "Incoming hook URL for messaging service",
-                    "fa_icon": "fas fa-people-group",
-                    "help_text": "Incoming hook URL for messaging service. Currently, MS Teams and Slack are supported.",
-                    "hidden": true
-                },
-                "multiqc_config": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "description": "Custom config file to supply to MultiQC.",
-                    "fa_icon": "fas fa-cog",
-                    "hidden": true
-                },
-                "multiqc_logo": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "description": "Custom logo file to supply to MultiQC. File name must also be set in the MultiQC config file",
-                    "fa_icon": "fas fa-image",
-                    "hidden": true
-                },
-                "multiqc_methods_description": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "mimetype": "text/plain",
-                    "description": "Custom MultiQC yaml file containing HTML including a methods description.",
-                    "fa_icon": "fas fa-cog"
-                },
-                "validate_params": {
-                    "type": "boolean",
-                    "description": "Boolean whether to validate parameters against the schema at runtime",
-                    "default": true,
-                    "fa_icon": "fas fa-check-square",
-                    "hidden": true
-                },
-                "pipelines_testdata_base_path": {
-                    "type": "string",
-                    "fa_icon": "far fa-check-circle",
-                    "description": "Base URL or local path to location of pipeline test dataset files",
-                    "default": "https://raw.githubusercontent.com/nf-core/test-datasets/",
-                    "hidden": true
-                },
-                "trace_report_suffix": {
-                    "type": "string",
-                    "fa_icon": "far calendar",
-                    "description": "Suffix to add to the trace report filename. Default is the date and time in the format yyyy-MM-dd_HH-mm-ss.",
-                    "hidden": true
-                }
-            }
-        },
-        "resource_options": {
-            "title": "Resource options",
-            "type": "object",
-            "description": "Resource allocation parameters",
-            "properties": {
-                "max_memory": {
-                    "type": "string",
-                    "default": "150.GB",
-                    "description": "Maximum memory"
-                },
-                "max_cpus": {
-                    "type": "integer",
-                    "default": 42,
-                    "description": "Maximum CPUs"
-                },
-                "max_time": {
-                    "type": "string",
-                    "default": "48.h",
-                    "description": "Maximum time"
-                }
-            }
-        },
-        "container_options": {
-            "title": "Container options",
-            "type": "object",
-            "description": "Container image paths",
-            "properties": {
-                "orfquant_container": {
-                    "type": "string",
-                    "default": null
-                },
-                "unify_orf_container": {
-                    "type": "string",
-                    "default": null
-                },
-                "gencode_orf_mapper_container": {
-                    "type": "string",
-                    "default": null
-                },
-                "ribowaltz_container": {
-                    "type": "string",
-                    "default": null
-                }
-            }
-        },
-        "orf_classification_options": {
-            "title": "ORF classification options",
-            "type": "object",
-            "properties": {
-                "gencode_classify_impl": {
-                    "type": "string",
-                    "default": "original",
-                    "enum": [
-                        "original",
-                        "fast",
-                        "indexed_fast"
-                    ]
-                }
-            }
+        "is_bam_input": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": "false",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
         }
+      }
     },
-    "allOf": [
-        {
-            "$ref": "#/$defs/input_output_options"
+    "reference_genome_options": {
+      "title": "Reference genome options",
+      "type": "object",
+      "fa_icon": "fas fa-dna",
+      "description": "Reference genome related files and options required for the workflow.",
+      "properties": {
+        "genome": {
+          "type": "string",
+          "description": "Name of iGenomes reference.",
+          "fa_icon": "fas fa-book",
+          "help_text": "If using a reference genome configured in the pipeline using iGenomes (not recommended), use this parameter to give the ID for the reference. This is then used to build the full paths for all required reference genome files e.g. `--genome GRCh38`. \n\nSee the [nf-core website docs](https://nf-co.re/usage/reference_genomes) for more details."
         },
-        {
-            "$ref": "#/$defs/reference_genome_options"
+        "fasta": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
+          "description": "Path to FASTA genome file.",
+          "help_text": "This parameter is *mandatory* if `--genome` is not specified. If you don't have the appropriate alignment index available this will be generated for you automatically. Combine with `--save_reference` to save alignment index for future runs.",
+          "fa_icon": "far fa-file-code"
         },
-        {
-            "$ref": "#/$defs/read_trimming_options"
+        "gtf": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "pattern": "^\\S+\\.gtf(\\.gz)?$",
+          "description": "Path to GTF annotation file.",
+          "fa_icon": "fas fa-code-branch",
+          "help_text": "This parameter is *mandatory* if `--genome` is not specified."
         },
-        {
-            "$ref": "#/$defs/read_filtering_options"
+        "gff": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "pattern": "^\\S+\\.gff(\\.gz)?$",
+          "fa_icon": "fas fa-code-branch",
+          "description": "Path to GFF3 annotation file.",
+          "help_text": "This parameter must be specified if `--genome` or `--gtf` are not specified."
         },
-        {
-            "$ref": "#/$defs/umi_options"
+        "transcript_fasta": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
+          "fa_icon": "far fa-file-code",
+          "description": "Path to FASTA transcriptome file."
         },
-        {
-            "$ref": "#/$defs/alignment_options"
+        "additional_fasta": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
+          "fa_icon": "far fa-file-code",
+          "description": "FASTA file to concatenate to genome FASTA file e.g. containing spike-in sequences.",
+          "help_text": "If provided, the sequences in this file will get concatenated to the existing genome FASTA file, a GTF file will be automatically created using the entire sequence as the gene, transcript, and exon features, and any alignment index will get created from the combined FASTA and GTF. It is recommended to save the reference with `--save_reference` to re-use the index for future runs so you do not need to create it again."
         },
-        {
-            "$ref": "#/$defs/riboseq_specific_options"
+        "star_index": {
+          "type": "string",
+          "format": "path",
+          "exists": true,
+          "fa_icon": "fas fa-bezier-curve",
+          "description": "Path to directory or tar.gz archive for pre-built STAR index."
         },
-        {
-            "$ref": "#/$defs/optional_outputs"
+        "salmon_index": {
+          "type": "string",
+          "format": "path",
+          "exists": true,
+          "fa_icon": "fas fa-bezier-curve",
+          "description": "Path to directory or tar.gz archive for pre-built Salmon index."
         },
-        {
-            "$ref": "#/$defs/process_skipping_options"
+        "gencode": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-code-branch",
+          "description": "Specify if your GTF annotation is in GENCODE format.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
         },
-        {
-            "$ref": "#/$defs/institutional_config_options"
+        "gtf_extra_attributes": {
+          "type": "string",
+          "default": "gene_name",
+          "fa_icon": "fas fa-plus-square",
+          "description": "By default, the pipeline uses the `gene_name` field to obtain additional gene identifiers from the input GTF file when running Salmon.",
+          "help_text": "This behaviour can be modified by specifying `--gtf_extra_attributes` when running the pipeline. Note that you can also specify more than one desired value, separated by a comma e.g. `--gtf_extra_attributes gene_id,...`.\n"
         },
-        {
-            "$ref": "#/$defs/generic_options"
+        "gtf_group_features": {
+          "type": "string",
+          "default": "gene_id",
+          "description": "Define the attribute type used to group features in the GTF file when running Salmon.",
+          "fa_icon": "fas fa-layer-group"
+        },
+        "igenomes_ignore": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "description": "Do not load the iGenomes reference config.",
+          "fa_icon": "fas fa-ban",
+          "hidden": true,
+          "help_text": "Do not load `igenomes.config` when running the pipeline. You may choose this option if you observe clashes between custom parameters and those supplied in `igenomes.config`."
+        },
+        "igenomes_base": {
+          "type": "string",
+          "format": "directory-path",
+          "description": "The base path to the igenomes reference files",
+          "fa_icon": "fas fa-ban",
+          "hidden": true,
+          "default": "s3://ngi-igenomes/igenomes/"
+        },
+        "genomes": {
+          "type": "object",
+          "default": {},
+          "description": "Genome references map (iGenomes)"
         }
-    ]
+      }
+    },
+    "read_trimming_options": {
+      "title": "Read trimming options",
+      "type": "object",
+      "fa_icon": "fas fa-cut",
+      "description": "Options to adjust read trimming criteria.",
+      "properties": {
+        "trimmer": {
+          "type": "string",
+          "default": "trimgalore",
+          "description": "Specifies the trimming tool to use - available options are 'trimgalore' and 'fastp'.",
+          "fa_icon": "fas fa-cut",
+          "enum": [
+            "trimgalore",
+            "fastp"
+          ]
+        },
+        "extra_trimgalore_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to Trim Galore! command in addition to defaults defined by the pipeline.",
+          "fa_icon": "fas fa-plus"
+        },
+        "extra_fastp_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to fastp command in addition to defaults defined by the pipeline.",
+          "fa_icon": "fas fa-plus"
+        },
+        "min_trimmed_reads": {
+          "type": "integer",
+          "default": 10000,
+          "fa_icon": "fas fa-hand-paper",
+          "description": "Minimum number of trimmed reads below which samples are removed from further processing. Some downstream steps in the pipeline will fail if this threshold is too low."
+        }
+      }
+    },
+    "read_filtering_options": {
+      "title": "Read filtering options",
+      "type": "object",
+      "description": "Options for filtering reads prior to alignment",
+      "default": "",
+      "properties": {
+        "extra_fqlint_args": {
+          "type": "string",
+          "default": "--disable-validator P001",
+          "description": "Extra arguments to pass to the fq lint command.",
+          "fa_icon": "far fa-check-square"
+        },
+        "skip_contaminant_filter": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-ban",
+          "description": "Skip contaminant filtering with Bowtie/Bowtie2.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "contaminant_fasta": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "fa_icon": "fas fa-vial",
+          "description": "FASTA file containing sequences for rRNA (cytoplasmic/mitochondrial), tRNA, snRNA/snoRNA and other contaminants to remove prior to alignment.",
+          "help_text": "Provide a single FASTA file that aggregates all contaminant references you would like to screen against. Include at minimum cytoplasmic and mitochondrial rRNA plus highly abundant tRNA loci for Ribo-seq."
+        },
+        "filter_aligner": {
+          "type": "string",
+          "default": "bowtie",
+          "enum": [
+            "bowtie",
+            "bowtie2"
+          ],
+          "fa_icon": "fas fa-crosshairs",
+          "description": "Aligner to use for contaminant filtering."
+        },
+        "bowtie_index": {
+          "type": "string",
+          "format": "path",
+          "exists": true,
+          "fa_icon": "fas fa-database",
+          "description": "Path to directory or tar.gz archive for pre-built Bowtie contaminant index.",
+          "help_text": "The Bowtie index will be generated automatically from `--contaminant_fasta` if not provided and `--save_reference` is enabled for re-use."
+        },
+        "bowtie2_index": {
+          "type": "string",
+          "format": "path",
+          "exists": true,
+          "fa_icon": "fas fa-database",
+          "description": "Path to directory or tar.gz archive for pre-built Bowtie2 contaminant index.",
+          "help_text": "The Bowtie2 index will be generated automatically from `--contaminant_fasta` when `--filter_aligner bowtie2` is selected."
+        },
+        "save_contaminant_reads": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-save",
+          "description": "Save reads classified as contaminants by Bowtie/Bowtie2.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        }
+      },
+      "fa_icon": "fas fa-trash-alt"
+    },
+    "umi_options": {
+      "title": "UMI options",
+      "type": "object",
+      "description": "Options for processing reads with unique molecular identifiers",
+      "default": "",
+      "properties": {
+        "with_umi": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-barcode",
+          "description": "Enable UMI-based read deduplication.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "umi_dedup_tool": {
+          "type": "string",
+          "default": "umitools",
+          "description": "Specifies the tool to use for UMI deduplication - available options are 'umitools' and 'umicollapse'.",
+          "fa_icon": "fas fa-barcode",
+          "enum": [
+            "umitools",
+            "umicollapse"
+          ]
+        },
+        "umitools_extract_method": {
+          "type": "string",
+          "default": "string",
+          "fa_icon": "fas fa-barcode",
+          "description": "UMI pattern to use. Can be either 'string' (default) or 'regex'.",
+          "help_text": "More details can be found in the [UMI-tools documentation](https://umi-tools.readthedocs.io/en/latest/reference/extract.html#extract-method).\n"
+        },
+        "umitools_bc_pattern": {
+          "type": "string",
+          "fa_icon": "fas fa-barcode",
+          "help_text": "More details can be found in the [UMI-tools documentation](https://umi-tools.readthedocs.io/en/latest/reference/extract.html#extract-method).",
+          "description": "The UMI barcode pattern to use e.g. 'NNNNNN' indicates that the first 6 nucleotides of the read are from the UMI."
+        },
+        "umitools_bc_pattern2": {
+          "type": "string",
+          "fa_icon": "fas fa-barcode",
+          "description": "The UMI barcode pattern to use if the UMI is located in read 2."
+        },
+        "umi_discard_read": {
+          "type": "integer",
+          "fa_icon": "fas fa-barcode",
+          "description": "After UMI barcode extraction discard either R1 or R2 by setting this parameter to 1 or 2, respectively."
+        },
+        "umitools_umi_separator": {
+          "type": "string",
+          "fa_icon": "fas fa-star-half-alt",
+          "description": "The character that separates the UMI in the read name. Most likely a colon if you skipped the extraction with UMI-tools and used other software."
+        },
+        "umitools_grouping_method": {
+          "type": "string",
+          "default": "directional",
+          "fa_icon": "far fa-object-ungroup",
+          "description": "Method to use to determine read groups by subsuming those with similar UMIs. All methods start by identifying the reads with the same mapping position, but treat similar yet nonidentical UMIs differently.",
+          "enum": [
+            "unique",
+            "percentile",
+            "cluster",
+            "adjacency",
+            "directional"
+          ]
+        },
+        "umitools_dedup_stats": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-barcode",
+          "help_text": "It can be quite time consuming generating these output stats - see [#827](https://github.com/nf-core/rnaseq/issues/827).",
+          "description": "Generate output stats when running \"umi_tools dedup\".",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        }
+      },
+      "fa_icon": "fas fa-barcode"
+    },
+    "alignment_options": {
+      "title": "Alignment options",
+      "type": "object",
+      "fa_icon": "fas fa-map-signs",
+      "description": "Options to adjust parameters and filtering criteria for read alignments.",
+      "properties": {
+        "aligner": {
+          "type": "string",
+          "default": "star",
+          "description": "Specifies the alignment algorithm to use - available options are currently 'star' and 'hisat2'.",
+          "fa_icon": "fas fa-map-signs",
+          "enum": [
+            "star",
+            "hisat2"
+          ]
+        },
+        "pseudo_aligner_kmer_size": {
+          "type": "integer",
+          "default": 31,
+          "description": "Kmer length passed to indexing step of pseudoaligners",
+          "help_text": "Failure to set a good kmer size could cause issues with quantification with Kallisto or Salmon. This is mostly an issue for short reads (<50bp), where the default kmer size of 31 is an problem.",
+          "fa_icon": "fas fa-ruler-horizontal"
+        },
+        "bam_csi_index": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Create a CSI index for BAM files instead of the traditional BAI index. This will be required for genomes with larger chromosome sizes.",
+          "fa_icon": "fas fa-sort-alpha-down",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "star_ignore_sjdbgtf": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-ban",
+          "description": "When using pre-built STAR indices do not re-extract and use splice junctions from the GTF file.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "salmon_quant_libtype": {
+          "type": "string",
+          "fa_icon": "fas fa-fast-forward",
+          "description": " Override Salmon library type inferred based on strandedness defined in meta object.",
+          "help_text": "See [Salmon docs](https://salmon.readthedocs.io/en/latest/library_type.html).",
+          "enum": [
+            "A",
+            "IS",
+            "ISF",
+            "ISR",
+            "IU",
+            "MS",
+            "MSF",
+            "MSR",
+            "MU",
+            "OS",
+            "OSF",
+            "OSR",
+            "OU",
+            "SF",
+            "SR",
+            "U"
+          ]
+        },
+        "min_mapped_reads": {
+          "type": "number",
+          "default": 5.0,
+          "fa_icon": "fas fa-percentage",
+          "description": "Minimum percentage of uniquely mapped reads below which samples are removed from further processing.",
+          "help_text": "Some downstream steps in the pipeline will fail if this threshold is too low."
+        },
+        "seq_center": {
+          "type": "string",
+          "description": "Sequencing center information to be added to read group of BAM files.",
+          "fa_icon": "fas fa-synagogue"
+        },
+        "extra_star_align_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to STAR alignment command in addition to defaults defined by the pipeline. Only available for the STAR-Salmon route.",
+          "fa_icon": "fas fa-plus"
+        },
+        "star_out_tmpdir": {
+          "type": "string",
+          "description": "Base directory for STAR temporary files (passed as --outTmpDir). Use a Linux/Posix filesystem that supports FIFO (avoid NTFS/FAT mounts). A unique subdirectory is created per task.",
+          "fa_icon": "fas fa-folder"
+        },
+        "extra_salmon_quant_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to Salmon quant command in addition to defaults defined by the pipeline.",
+          "fa_icon": "fas fa-plus"
+        },
+        "stranded_threshold": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 1,
+          "default": 0.8,
+          "description": "The fraction of stranded reads that must be assigned to a strandedness for confident assignment. Must be at least 0.5."
+        },
+        "unstranded_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "The difference in fraction of stranded reads assigned to 'forward' and 'reverse' below which a sample is classified as 'unstranded'. By default the forward and reverse fractions must differ by less than 0.1 for the sample to be called as unstranded."
+        }
+      }
+    },
+    "riboseq_specific_options": {
+      "title": "Riboseq-specific options",
+      "type": "object",
+      "description": "Options related to riboseq-specific analysis modules",
+      "default": "",
+      "fa_icon": "fas fa-circle",
+      "properties": {
+        "sorf_filter": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": true,
+          "fa_icon": "fas fa-filter",
+          "description": "Filter BAM files before running sORF prediction tools.",
+          "help_text": "Applies to all sORF prediction tools. Filtering is intended to enforce unique mapping, exclude unwanted contigs (e.g. mitochondrial/chloroplast/unlocalized scaffolds), and keep a footprint length window (default 28-30).",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "sorf_unique_mode": {
+          "type": "string",
+          "default": "auto",
+          "fa_icon": "fas fa-fingerprint",
+          "description": "How to define uniquely-mapped reads for sORF filtering.",
+          "help_text": "Supported modes: auto (prefer NH tag when present; otherwise use MAPQ threshold), nh (require NH==1), mapq (require MAPQ>=sorf_unique_mapq).",
+          "enum": [
+            "auto",
+            "nh",
+            "mapq"
+          ]
+        },
+        "sorf_unique_mapq": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 0,
+          "maximum": 255,
+          "fa_icon": "fas fa-tachometer-alt",
+          "description": "MAPQ threshold used when sorf_unique_mode is 'mapq' (or in 'auto' mode when NH is not available)."
+        },
+        "sorf_read_len_min": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "default": 28,
+          "minimum": 0,
+          "fa_icon": "fas fa-ruler-horizontal",
+          "description": "Minimum read length to keep (inclusive) when filtering for sORF prediction.",
+          "pattern": "^[0-9]+$"
+        },
+        "sorf_read_len_max": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "default": 30,
+          "minimum": 0,
+          "fa_icon": "fas fa-ruler-horizontal",
+          "description": "Maximum read length to keep (inclusive) when filtering for sORF prediction.",
+          "pattern": "^[0-9]+$"
+        },
+        "sorf_exclude_contigs_regex": {
+          "type": "string",
+          "default": "^(chr)?(M|MT|Mt|chrM|chrMT|chrMt|ChrM|ChrMT|ChrMt)$|^(chr)?(C|CP|Pt|chrC|chrCP|chrPt|ChrC|ChrCP|ChrPt)$|^chrUn_.*|.*_random$|.*_alt$|.*_fix$",
+          "fa_icon": "fas fa-ban",
+          "description": "Regex of reference contig names to exclude before sORF prediction.",
+          "help_text": "Default covers common Gencode/UCSC-style mitochondrial contigs (chrM/MT) and Ensembl Plants-style organelle contigs (Mt/Pt), plus typical unlocalized scaffolds (chrUn_*) and alt/random/fix contigs. You may need to customize this for your reference genome. Set to an empty string to disable contig-name exclusion."
+        },
+        "sorf_predict_pooled": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-layer-group",
+          "description": "Run pooled (all-samples) sORF prediction in addition to per-sample prediction.",
+          "help_text": "Disabled by default for performance. This only affects sORF prediction steps (QC can remain per-sample).",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "merge_replicates": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-compress-arrows-alt",
+          "description": "Merge BAMs from biological/technical replicates sharing the same 'group' field before ORF calling.",
+          "help_text": "When enabled, samples sharing the same 'group' value in the samplesheet are merged (samtools merge) after SORF_BAM_FILTER. The merged BAM (id: '{group}_merged') runs through ALL ORF prediction tools (Ribo-TISH, Ribotricer, RiboCode, RiboseQC, ORFquant) in addition to the individual replicates. This improves reproducibility and helps filter random ORF calls. The 'group' column must be added to the samplesheet CSV."
+        },
+        "pathogen_fasta": {
+          "type": "string",
+          "default": null,
+          "fa_icon": "fas fa-virus",
+          "description": "Pathogen genome FASTA file, used as annotation for pathogen-specific ORF prediction.",
+          "help_text": "Provide the pathogen (e.g., virus) FASTA genome to enable pathogen-specific ORF prediction. Must be used together with --pathogen_gtf and --pathogen_contig_pattern."
+        },
+        "pathogen_gtf": {
+          "type": "string",
+          "default": null,
+          "fa_icon": "fas fa-file-alt",
+          "description": "Pathogen annotation GTF file for ORF quantification and prediction.",
+          "help_text": "Provide the pathogen GTF annotation file. Required when --pathogen_contig_pattern is set."
+        },
+        "pathogen_contig_pattern": {
+          "type": "string",
+          "default": null,
+          "fa_icon": "fas fa-filter",
+          "description": "Regex pattern to identify pathogen contigs in the combined BAM (e.g. '^NC_045512').",
+          "help_text": "Setting this parameter activates dual-genome analysis. After alignment to the combined host+pathogen reference, reads on contigs matching this pattern are split into pathogen-specific BAMs for separate downstream analysis. The pathogen genome should be included in the reference via --additional_fasta."
+        },
+        "skip_pathogen_analysis": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-forward",
+          "description": "Skip all pathogen-specific downstream analysis (ORF prediction, TE analysis).",
+          "help_text": "When set, the BAM splitting step is still performed, but pathogen BAMs are not processed further. Useful when only splitting is needed.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "extra_ribotish_quality_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to the ribotish quality command in addition to defaults defined by the pipeline."
+        },
+        "extra_ribotish_predict_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to the ribotish predict command in addition to defaults defined by the pipeline."
+        },
+        "extra_ribotricer_prepareorfs_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to the ribotricer prepare-orfs command in addition to defaults defined by the pipeline."
+        },
+        "extra_ribotricer_detectorfs_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to the ribotricer detect-orfs command in addition to defaults defined by the pipeline."
+        },
+        "extra_ribocode_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to RiboCode_onestep in addition to defaults defined by the pipeline."
+        },
+        "ribocode_maxForks": {
+          "type": "integer",
+          "default": 1,
+          "description": "Maximum number of RiboCode ORF-detection tasks to run concurrently. Keep at 1 for memory-constrained HPC nodes."
+        },
+        "ribocode_memory": {
+          "type": "string",
+          "default": "36.GB",
+          "description": "Memory request for each RiboCode ORF-detection task. Increase if a single RiboCode job is killed for exceeding memory."
+        },
+        "ribotricer_phase_score_cutoff": {
+          "type": [
+            "number",
+            "string"
+          ],
+          "description": "Phase score cutoff for Ribotricer's metagene periodicity detection. When not set, uses Ribotricer's default (3/7 \u2248 0.429). Set to a lower value (e.g. 0.1) for plant or low-depth samples where canonical CDS coverage is sparse."
+        },
+        "extra_anota2seq_run_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to anota2seq in addition to defaults defined by the pipeline."
+        },
+        "skip_unify_orf_predictions": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-fast-forward",
+          "description": "Skip unified ORF predictions across tools.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "unify_orf_predictions_prefix": {
+          "type": "string",
+          "default": "unified_orfs",
+          "fa_icon": "fas fa-file-signature",
+          "description": "Output prefix for unified ORF predictions (base name only)."
+        },
+        "unify_orf_min_len": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "pattern": "^[0-9]+$",
+          "default": 6,
+          "minimum": 1,
+          "fa_icon": "fas fa-ruler",
+          "description": "Minimum ORF length (amino acids) for unified predictions."
+        },
+        "unify_orf_frame_merge_min_overlap": {
+          "type": [
+            "number",
+            "string"
+          ],
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "default": 0.9,
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "fa_icon": "fas fa-compress-arrows-alt",
+          "description": "Minimum overlap fraction of shorter ORF for single-exon frame-aware merging (0.0-1.0). Multi-exon ORFs are never frame-merged."
+        },
+        "unify_orf_no_frame_merge": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-ban",
+          "description": "Disable frame-aware merging; only use exact coordinate matches.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "unify_orf_seq_cluster": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-object-group",
+          "description": "Enable Stage 3 sequence-similarity clustering (UniRef90-inspired, disabled by default).",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "extra_unify_orf_predictions_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to unify_orf_predictions.py."
+        },
+        "skip_orf_classification": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-fast-forward",
+          "description": "Skip ORF classification step.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "orf_classify_mode": {
+          "type": "string",
+          "default": "orf_type",
+          "fa_icon": "fas fa-tags",
+          "description": "ORF classification mode.",
+          "enum": [
+            "gencode",
+            "orfquant",
+            "orf_type"
+          ]
+        },
+        "orf_classify_output_dir": {
+          "type": "string",
+          "default": "orf_classification",
+          "fa_icon": "fas fa-folder-open",
+          "description": "Output directory name for ORF classification results (relative to results)."
+        },
+        "orf_classify_ensembl_dir": {
+          "type": "string",
+          "format": "directory-path",
+          "exists": true,
+          "fa_icon": "fas fa-folder-open",
+          "description": "Ensembl annotation directory for gencode classification mode."
+        },
+        "gencode_orf_mapper_container": {
+          "type": "string",
+          "default": null,
+          "fa_icon": "fas fa-box",
+          "description": "Custom gencode-orf-mapper container image path (Singularity .sif or Docker image)."
+        },
+        "extra_orf_classify_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to classify_orfs_wrapper.py."
+        }
+      }
+    },
+    "optional_outputs": {
+      "title": "Optional outputs",
+      "type": "object",
+      "description": "Additional output files produces as intermediates that can be saved",
+      "default": "",
+      "properties": {
+        "save_merged_fastq": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-save",
+          "description": "Save FastQ files after merging re-sequenced libraries in the results directory.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "save_umi_intermeds": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-save",
+          "description": "If this option is specified, intermediate FastQ and BAM files produced by UMI-tools are also saved in the results directory.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "save_reference": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "default": false,
+          "description": "If generated by the pipeline save the STAR index in the results directory.",
+          "help_text": "If an alignment index is generated by the pipeline use this parameter to save it to your results folder. These can then be used for future pipeline runs, reducing processing times.",
+          "fa_icon": "fas fa-save"
+        },
+        "save_trimmed": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Save the trimmed FastQ files in the results directory.",
+          "help_text": "By default, trimmed FastQ files will not be saved to the results directory. Specify this flag (or set to true in your config file) to copy these files to the results directory when complete.",
+          "fa_icon": "fas fa-save",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "save_align_intermeds": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Save the intermediate BAM files from the alignment step.",
+          "help_text": "By default, intermediate BAM files will not be saved. The final BAM files created after the appropriate filtering step are always saved to limit storage usage. Set this parameter to also save other intermediate BAM files.",
+          "fa_icon": "fas fa-save",
+          "default": true,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "save_unaligned": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-save",
+          "description": "Where possible, save unaligned reads from either STAR, HISAT2 or Salmon to the results directory.",
+          "help_text": "This may either be in the form of FastQ or BAM files depending on the options available for that particular tool.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        }
+      }
+    },
+    "process_skipping_options": {
+      "title": "Process skipping options",
+      "type": "object",
+      "fa_icon": "fas fa-fast-forward",
+      "description": "Options to skip various steps within the workflow.",
+      "properties": {
+        "skip_gtf_filter": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-forward",
+          "description": "Skip filtering of GTF for valid scaffolds and/ or transcript IDs.",
+          "help_text": "If you're confident on the validity of the GTF with respect to the genome fasta file, or wish to disregard failures thriggered by the filtering module, activate this option.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_gtf_transcript_filter": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-forward",
+          "description": "Skip the 'transcript_id' checking component of the GTF filtering script used in the pipeline.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_umi_extract": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-compress-alt",
+          "description": "Skip the UMI extraction from the read in case the UMIs have been moved to the headers in advance of the pipeline run.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_linting": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-fast-forward",
+          "description": "Skip linting checks during FASTQ preprocessing and filtering.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_trimming": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip the adapter trimming step.",
+          "help_text": "Use this if your input FastQ files have already been trimmed outside of the workflow or if you're very confident that there is no adapter contamination in your data.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_alignment": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-fast-forward",
+          "description": "Skip all of the alignment-based processes within the pipeline.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_markduplicates": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-fast-forward",
+          "description": "Skip picard MarkDuplicates step.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_fastqc": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip FastQC.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_multiqc": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip MultiQC.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_qc": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "fa_icon": "fas fa-fast-forward",
+          "description": "Skip all QC steps except for MultiQC.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_ribotish": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip Ribo-TISH.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_ribotricer": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip Ribotricer.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_ribocode": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip RiboCode ORF detection.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_riboseqc": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip RiboseQC quality control analysis.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_orf_qc": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "description": "Skip the ORF QC module that harmonizes metrics across all prediction tools.",
+          "fa_icon": "fas fa-clipboard-check"
+        },
+        "orf_qc_min_consensus_tools": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "default": 2,
+          "description": "Minimum number of tools required for a consensus ORF.",
+          "fa_icon": "fas fa-handshake"
+        },
+        "orf_qc_confidence_weights": {
+          "type": "string",
+          "default": "0.30,0.30,0.20,0.15,0.05",
+          "description": "Comma-separated weights for OCS components.",
+          "fa_icon": "fas fa-balance-scale"
+        },
+        "orf_qc_periodicity_min_f0": {
+          "type": [
+            "number",
+            "string"
+          ],
+          "default": 0.6,
+          "description": "Minimum frame-0 proportion for periodic classification.",
+          "fa_icon": "fas fa-chart-bar"
+        },
+        "orf_qc_offset_max_delta": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "default": 1,
+          "description": "Maximum nucleotide difference allowed for P-site offset consensus.",
+          "fa_icon": "fas fa-ruler"
+        },
+        "orf_qc_report_format": {
+          "type": "string",
+          "default": "html",
+          "enum": [
+            "html",
+            "json",
+            "both"
+          ],
+          "description": "Output format for the ORF QC report.",
+          "fa_icon": "fas fa-file-alt"
+        },
+        "orf_qc_container": {
+          "type": "string",
+          "description": "Path to custom ORF QC Singularity container.",
+          "fa_icon": "fas fa-box"
+        },
+        "extra_riboseqc_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to RiboseQC analysis.",
+          "fa_icon": "fas fa-plus"
+        },
+        "skip_orfquant": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip ORFquant ORF detection and quantification. Note: ORFquant requires RiboseQC to be enabled.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "orfquant_psite_correction": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "default": true,
+          "description": "Use corrected P-site offsets for ORFquant. Extracts offsets from RiboseQC P_sites_calcs where max_coverage is TRUE. This can improve ORFquant accuracy.",
+          "fa_icon": "fas fa-crosshairs",
+          "help_text": "When enabled, P-site offsets are extracted from RiboseQC results (rows with max_coverage=TRUE) and used to regenerate the for_ORFquant file. This ensures more accurate P-site positioning for ORF detection."
+        },
+        "extra_orfquant_args": {
+          "type": "string",
+          "description": "Extra arguments to pass to ORFquant (e.g., 'plot_results=TRUE' to generate plots).",
+          "fa_icon": "fas fa-plus"
+        },
+        "run_prefilter_qc": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "description": "Run QC analysis on unfiltered BAMs (with MT reads) for comparison with postfilter results. Increases runtime and storage requirements.",
+          "fa_icon": "fas fa-filter",
+          "help_text": "By default, only postfilter QC (MT-removed BAMs) is performed. Enable this to also run prefilter QC for comparison purposes.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_ribowaltz": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip riboWaltz P-site offset calculation and QC analysis.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_joint_qc_report": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip the joint Ribo-seq QC report that integrates metrics from riboWaltz, RiboseQC, Ribo-TISH, and Ribotricer.",
+          "fa_icon": "fas fa-clipboard-check",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "ribowaltz_read_lengths": {
+          "type": [
+            "array",
+            "string"
+          ],
+          "default": [
+            28,
+            29,
+            30
+          ],
+          "items": {
+            "type": "integer"
+          },
+          "description": "List of read lengths to analyze with riboWaltz.",
+          "fa_icon": "fas fa-ruler"
+        },
+        "skip_price": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "description": "Skip GEDI PRICE ORF detection pipeline.",
+          "fa_icon": "fas fa-fast-forward"
+        },
+        "skip_te_analysis": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Skip translational efficiency (TE) analysis with DESeq2 deltaTE.",
+          "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "te_lfc_threshold": {
+          "type": "number",
+          "default": 0.2630344,
+          "description": "Log2 fold change threshold for TE classification.",
+          "fa_icon": "fas fa-sliders-h"
+        },
+        "rna_lfc_threshold": {
+          "type": "number",
+          "default": 0,
+          "description": "Log2 fold change threshold for total RNA changes.",
+          "fa_icon": "fas fa-sliders-h"
+        },
+        "ribo_lfc_threshold": {
+          "type": "number",
+          "default": 0,
+          "description": "Log2 fold change threshold for translated mRNA changes.",
+          "fa_icon": "fas fa-sliders-h"
+        },
+        "skip_rpbp": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": "false",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "description": "Skip RPBP"
+        }
+      }
+    },
+    "institutional_config_options": {
+      "title": "Institutional config options",
+      "type": "object",
+      "fa_icon": "fas fa-university",
+      "description": "Parameters used to describe centralised config profiles. These should not be edited.",
+      "help_text": "The centralised nf-core configuration profiles use a handful of pipeline parameters to describe themselves. This information is then printed to the Nextflow log when you run a pipeline. You should not need to change these values when you run a pipeline.",
+      "properties": {
+        "custom_config_version": {
+          "type": "string",
+          "description": "Git commit id for Institutional configs.",
+          "default": "master",
+          "hidden": true,
+          "fa_icon": "fas fa-users-cog"
+        },
+        "custom_config_base": {
+          "type": "string",
+          "description": "Base directory for Institutional configs.",
+          "default": "https://raw.githubusercontent.com/nf-core/configs/master",
+          "hidden": true,
+          "help_text": "If you're running offline, Nextflow will not be able to fetch the institutional config files from the internet. If you don't need them, then this is not a problem. If you do need them, you should download the files from the repo and tell Nextflow where to find them with this parameter.",
+          "fa_icon": "fas fa-users-cog"
+        },
+        "config_profile_name": {
+          "type": "string",
+          "description": "Institutional config name.",
+          "hidden": true,
+          "fa_icon": "fas fa-users-cog"
+        },
+        "config_profile_description": {
+          "type": "string",
+          "description": "Institutional config description.",
+          "hidden": true,
+          "fa_icon": "fas fa-users-cog"
+        },
+        "config_profile_contact": {
+          "type": "string",
+          "description": "Institutional config contact information.",
+          "hidden": true,
+          "fa_icon": "fas fa-users-cog"
+        },
+        "config_profile_url": {
+          "type": "string",
+          "description": "Institutional config URL link.",
+          "hidden": true,
+          "fa_icon": "fas fa-users-cog"
+        },
+        "test_data_base": {
+          "type": "string",
+          "default": "https://raw.githubusercontent.com/nf-core/test-datasets/riboseq/testdata/",
+          "description": "Base path / URL for data used in the test profiles",
+          "help_text": "Warning: The `-profile test` samplesheet file itself contains remote paths. Setting this parameter does not alter the contents of that file.",
+          "hidden": true
+        }
+      }
+    },
+    "generic_options": {
+      "title": "Generic options",
+      "type": "object",
+      "fa_icon": "fas fa-file-import",
+      "description": "Less common options for the pipeline, typically set in a config file.",
+      "help_text": "These options are common to all nf-core pipelines and allow you to customise some of the core preferences for how the pipeline runs.\n\nTypically these options would be set in a Nextflow config file loaded for all pipeline runs, such as `~/.nextflow/config`.",
+      "properties": {
+        "version": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Display version and exit.",
+          "fa_icon": "fas fa-question-circle",
+          "hidden": true,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "publish_dir_mode": {
+          "type": "string",
+          "default": "copy",
+          "description": "Method used to save pipeline results to output directory.",
+          "help_text": "The Nextflow `publishDir` option specifies which intermediate files should be saved to the output directory. This option tells the pipeline what method should be used to move these files. See [Nextflow docs](https://www.nextflow.io/docs/latest/process.html#publishdir) for details.",
+          "fa_icon": "fas fa-copy",
+          "enum": [
+            "symlink",
+            "rellink",
+            "link",
+            "copy",
+            "copyNoFollow",
+            "move"
+          ],
+          "hidden": true
+        },
+        "email_on_fail": {
+          "type": "string",
+          "description": "Email address for completion summary, only when pipeline fails.",
+          "fa_icon": "fas fa-exclamation-triangle",
+          "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
+          "help_text": "An email address to send a summary email to when the pipeline is completed - ONLY sent if the pipeline does not exit successfully.",
+          "hidden": true
+        },
+        "plaintext_email": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Send plain-text email instead of HTML.",
+          "fa_icon": "fas fa-remove-format",
+          "hidden": true,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "max_multiqc_email_size": {
+          "type": "string",
+          "description": "File size limit when attaching MultiQC reports to summary emails.",
+          "default": "25.MB",
+          "fa_icon": "fas fa-file-upload",
+          "hidden": true
+        },
+        "monochrome_logs": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Do not use coloured log outputs.",
+          "fa_icon": "fas fa-palette",
+          "hidden": true,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "hook_url": {
+          "type": "string",
+          "description": "Incoming hook URL for messaging service",
+          "fa_icon": "fas fa-people-group",
+          "help_text": "Incoming hook URL for messaging service. Currently, MS Teams and Slack are supported.",
+          "hidden": true
+        },
+        "multiqc_config": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "description": "Custom config file to supply to MultiQC.",
+          "fa_icon": "fas fa-cog",
+          "hidden": true
+        },
+        "multiqc_logo": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "description": "Custom logo file to supply to MultiQC. File name must also be set in the MultiQC config file",
+          "fa_icon": "fas fa-image",
+          "hidden": true
+        },
+        "multiqc_methods_description": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/plain",
+          "description": "Custom MultiQC yaml file containing HTML including a methods description.",
+          "fa_icon": "fas fa-cog"
+        },
+        "validate_params": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "Boolean whether to validate parameters against the schema at runtime",
+          "default": true,
+          "fa_icon": "fas fa-check-square",
+          "hidden": true,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "pipelines_testdata_base_path": {
+          "type": "string",
+          "fa_icon": "far fa-check-circle",
+          "description": "Base URL or local path to location of pipeline test dataset files",
+          "default": "https://raw.githubusercontent.com/nf-core/test-datasets/",
+          "hidden": true
+        },
+        "trace_report_suffix": {
+          "type": "string",
+          "fa_icon": "far calendar",
+          "description": "Suffix to add to the trace report filename. Default is the date and time in the format yyyy-MM-dd_HH-mm-ss.",
+          "hidden": true
+        }
+      }
+    },
+    "resource_options": {
+      "title": "Resource options",
+      "type": "object",
+      "description": "Resource allocation parameters",
+      "properties": {
+        "max_memory": {
+          "type": "string",
+          "default": "150.GB",
+          "description": "Maximum memory"
+        },
+        "max_cpus": {
+          "type": "integer",
+          "default": 42,
+          "description": "Maximum CPUs"
+        },
+        "max_time": {
+          "type": "string",
+          "default": "48.h",
+          "description": "Maximum time"
+        }
+      }
+    },
+    "container_options": {
+      "title": "Container options",
+      "type": "object",
+      "description": "Container image paths",
+      "properties": {
+        "orfquant_container": {
+          "type": "string",
+          "default": null
+        },
+        "unify_orf_container": {
+          "type": "string",
+          "default": null
+        },
+        "gencode_orf_mapper_container": {
+          "type": "string",
+          "default": null
+        },
+        "ribowaltz_container": {
+          "type": "string",
+          "default": null
+        },
+        "deseq2_container": {
+          "type": "string",
+          "default": null,
+          "fa_icon": "fas fa-chart-bar",
+          "description": "Path to DESeq2 container for TE analysis"
+        },
+        "price_container": {
+          "type": "string",
+          "default": null,
+          "fa_icon": "fas fa-dna",
+          "description": "Path to PRICE/GEDI container for ORF prediction"
+        }
+      }
+    },
+    "orf_classification_options": {
+      "title": "ORF classification options",
+      "type": "object",
+      "properties": {
+        "gencode_classify_impl": {
+          "type": "string",
+          "default": "original",
+          "enum": [
+            "original",
+            "fast",
+            "indexed_fast"
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "#/$defs/input_output_options"
+    },
+    {
+      "$ref": "#/$defs/reference_genome_options"
+    },
+    {
+      "$ref": "#/$defs/read_trimming_options"
+    },
+    {
+      "$ref": "#/$defs/read_filtering_options"
+    },
+    {
+      "$ref": "#/$defs/umi_options"
+    },
+    {
+      "$ref": "#/$defs/alignment_options"
+    },
+    {
+      "$ref": "#/$defs/riboseq_specific_options"
+    },
+    {
+      "$ref": "#/$defs/optional_outputs"
+    },
+    {
+      "$ref": "#/$defs/process_skipping_options"
+    },
+    {
+      "$ref": "#/$defs/institutional_config_options"
+    },
+    {
+      "$ref": "#/$defs/generic_options"
+    }
+  ]
 }

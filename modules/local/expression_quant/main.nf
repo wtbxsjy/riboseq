@@ -1,5 +1,5 @@
 process EXPRESSION_QUANT {
-    tag "$prefix"
+    tag "expression_quant"
     label 'process_medium'
 
     conda "${moduleDir}/environment.yml"
@@ -11,8 +11,8 @@ process EXPRESSION_QUANT {
     path unified_meta                               // unified ORF metadata
     path unified_bed                                // unified ORF BED
     path orf_confidence                             // ORF confidence TSV (from ORF_QC)
-    tuple val(sample_list), path(psites_bedgraph)   // all P-site bedgraphs from RiboseQC
-    tuple val(sample_list_cov), path(coverage_bedgraph) // all coverage bedgraphs
+    path psites_bedgraph                            // all P-site bedgraphs from RiboseQC (collected list)
+    path coverage_bedgraph                          // all coverage bedgraphs (collected list)
 
     output:
     path "*_expression_summary.tsv"                 , emit: expression

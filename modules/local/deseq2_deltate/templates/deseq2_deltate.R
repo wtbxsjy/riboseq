@@ -395,7 +395,7 @@ if (!is.null(opt\$batch_col) && opt\$batch_col %in% colnames(sample_sheet)) {
 # Identify seq types
 seq_type_values <- unique(as.character(sample_sheet[[opt\$seq_type_col]]))
 ribo_type <- grep("ribo|rp|fp", seq_type_values, ignore.case = TRUE, value = TRUE)[1]
-rna_type <- grep("rna|mrna|total", seq_type_values, ignore.case = TRUE, value = TRUE)[1]
+rna_type  <- grep("rna|mrna|total|lncrna", seq_type_values, ignore.case = TRUE, value = TRUE)[1]
 
 if (is.na(ribo_type) || is.na(rna_type)) {
     stop(paste("Cannot identify Ribo-seq/RNA-seq from seq_type column. Values:", paste(seq_type_values, collapse = ", ")))

@@ -822,7 +822,19 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
 
     if 'ribowaltz' in containers:
         nf_cmd_parts.append(f"--ribowaltz_container {containers['ribowaltz']}")
-    
+
+    if 'deseq2' in containers:
+        nf_cmd_parts.append(f"--deseq2_container {containers['deseq2']}")
+
+    if 'price' in containers:
+        nf_cmd_parts.append(f"--price_container {containers['price']}")
+
+    if 'orf_qc' in containers:
+        nf_cmd_parts.append(f"--orf_qc_container {containers['orf_qc']}")
+
+    if 'expression_quant' in containers:
+        nf_cmd_parts.append(f"--expression_quant_container {containers['expression_quant']}")
+
     def prefer_uncompressed(path_obj):
         path_obj = Path(path_obj)
         if path_obj.suffix == '.gz':

@@ -31,6 +31,7 @@ include { RIBOWALTZ                                         } from '../../module
 // Local subworkflow: TE analysis (RNA-seq + Ribo-seq integration)
 include { TE_ANALYSIS                                       } from '../../subworkflows/local/te_analysis'
 include { TE_ANALYSIS as TE_ANALYSIS_PATHOGEN              } from '../../subworkflows/local/te_analysis'
+include { TE_ANALYSIS as TE_ANALYSIS_LNCRNA               } from '../../subworkflows/local/te_analysis'
 // Local module: PRICE ORF detection (GEDI platform)
 include { PRICE                                             } from '../../modules/local/price/main'
 include { GTF2BED as GTF2BED_PATHOGEN                        } from '../../modules/local/gtf2bed'
@@ -356,6 +357,8 @@ workflow RIBOSEQ {
                 return [ meta, bam ]
             rnaseq: meta.sample_type == 'rnaseq'
                 return [ meta, bam ]
+            lncrna: meta.sample_type == 'lncrna'
+                return [ meta, bam ]
         }
         .set{
             ch_genome_bam_by_type
@@ -365,7 +368,11 @@ workflow RIBOSEQ {
 
     // Prepare channels for TE analysis (RNA-seq + Ribo-seq BAMs)
     ch_rnaseq_bam_bai = ch_genome_bam_by_type.rnaseq.join(ch_host_bam_index)
+    ch_lncrna_bam_bai = ch_genome_bam_by_type.lncrna.join(ch_host_bam_index)
     ch_te_bams = Channel.empty()
+    ch_lncrna_te_bams = Channel.empty()
+    // Detect lncRNA samples for conditional TE_ANALYSIS_LNCRNA guard
+    has_lncrna_samples = file(params.input, checkIfExists: true).readLines().any { it.split(',')[4]?.trim() == 'lncrna' }
 
     //
     // Pathogen BAM routing (dual-genome mode)
@@ -420,7 +427,7 @@ workflow RIBOSEQ {
             params.sorf_read_len_min,
             params.sorf_read_len_max,
             params.sorf_exclude_contigs_regex,
-            []    // No GTF — genome contig regex directly matches chromosome names
+            ''    // No GTF
         )
         ch_versions = ch_versions.mix(SORF_BAM_FILTER.out.versions)
         ch_multiqc_files = ch_multiqc_files.mix(SORF_BAM_FILTER.out.stats)
@@ -455,8 +462,8 @@ workflow RIBOSEQ {
                 params.sorf_unique_mapq,
                 params.sorf_read_len_min,
                 params.sorf_read_len_max,
-                ''   // No contig exclusion — pathogen BAM is already pathogen-only
-                []    // No GTF needed
+                '',
+                ''
             )
             ch_versions = ch_versions.mix(SORF_BAM_FILTER_PATHOGEN.out.versions)
 
@@ -533,6 +540,11 @@ workflow RIBOSEQ {
                 [ te_meta, bam, bai ]
             }
         ch_te_bams = ch_rnaseq_bam_bai.mix(ch_riboseq_te_bams)
+
+        // lncRNA TE BAMs: mix lncRNA-seq + Ribo-seq for separate TE analysis
+        if (has_lncrna_samples) {
+            ch_lncrna_te_bams = ch_lncrna_bam_bai.mix(ch_riboseq_te_bams)
+        }
 
         // Pathogen TE BAMs: assemble from pathogen BAM channels (dual-genome mode)
         if (params.pathogen_contig_pattern && !params.skip_pathogen_analysis) {
@@ -1309,6 +1321,22 @@ workflow RIBOSEQ {
             )
         } else {
             log.warn "TE analysis requires unified ORF BED annotation. Run with --skip_unify_orf_predictions=false."
+        }
+
+        // lncRNA TE analysis: compare Ribo-seq vs lncRNA-seq (separate from RNA-seq)
+        if (ch_unified_bed_for_te && has_lncrna_samples) {
+            TE_ANALYSIS_LNCRNA(
+                ch_lncrna_te_bams,
+                ch_unified_bed_for_te,
+                ch_contrasts,
+                ch_gtf
+            )
+            ch_versions = ch_versions.mix(TE_ANALYSIS_LNCRNA.out.versions)
+
+            ch_multiqc_files = ch_multiqc_files.mix(
+                TE_ANALYSIS_LNCRNA.out.te_results.map { meta, f -> f },
+                TE_ANALYSIS_LNCRNA.out.te_genes.map { meta, f -> f }
+            )
         }
 
         // Pathogen TE analysis (dual-genome mode)

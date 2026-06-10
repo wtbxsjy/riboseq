@@ -43,8 +43,9 @@ process DESEQ2_DELTATE {
 
     script:
     // Expose pre-filter params to R template
-    def prefilter_min_nonzero_val = params.te_prefilter_min_nonzero ?: 2
-    def prefilter_min_frac_val    = params.te_prefilter_min_frac ?: 0.2
+    // Use explicit String casting to ensure template rendering works across all NF versions
+    prefilter_min_nonzero_val = "${params.te_prefilter_min_nonzero ?: 2}"
+    prefilter_min_frac_val    = "${params.te_prefilter_min_frac ?: 0.2}"
     template 'deseq2_deltate.R'
 
     stub:
