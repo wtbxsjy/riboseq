@@ -33,7 +33,8 @@ process EXPRESSION_QUANT {
 
     # Install dependencies to /tmp (Singularity has read-only /usr/local/lib)
     pip install --quiet --target=/tmp/pylib pandas numpy 2>/dev/null
-    export PYTHONPATH="/tmp/pylib:\${PYTHONPATH}"
+    PYTHONPATH="/tmp/pylib\${PYTHONPATH:+:\$PYTHONPATH}"
+    export PYTHONPATH
 
     echo "=== ORF Expression Quantification ==="
     echo "Prefix: ${prefix}"
