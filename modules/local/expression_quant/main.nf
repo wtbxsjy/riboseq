@@ -31,6 +31,11 @@ process EXPRESSION_QUANT {
     #!/bin/bash
     set -euo pipefail
 
+    # Install dependencies to /tmp (Singularity has read-only /usr/local/lib)
+    apt-get update -qq && apt-get install -y -qq libstdc++6 2>/dev/null || true
+    pip install --quiet --target=/tmp/pylib pandas numpy 2>/dev/null
+    export PYTHONPATH="/tmp/pylib:\${PYTHONPATH:-}"
+
     echo "=== ORF Expression Quantification ==="
     echo "Prefix: ${prefix}"
     echo "Min OCS: ${min_ocs}"
@@ -41,15 +46,6 @@ process EXPRESSION_QUANT {
     n_samples=\$(wc -l < sample_list.txt || echo 0)
     echo "Samples with P-site data: \$n_samples"
 
-    # Check ORF confidence file validity
-    orf_conf_arg=""
-    if [ -f "${orf_confidence}" ] && [ -s "${orf_confidence}" ]; then
-        orf_conf_arg="--orf-confidence ${orf_confidence}"
-        echo "Using ORF confidence file: ${orf_confidence}"
-    else
-        echo "WARNING: ORF confidence file missing or empty. Quantifying without OCS filter."
-    fi
-
     if [ "\$n_samples" -eq 0 ]; then
         echo "WARNING: No P-site bedgraph files found. Creating placeholder output."
         echo -e "orf_id\\tchrom\\tstart\\tend\\tstrand\\ttotal_reads\\tn_expressed_samples" > "${prefix}_expression_summary.tsv"
@@ -59,7 +55,7 @@ process EXPRESSION_QUANT {
         echo "--- Phase 1: P-site expression quantification ---"
         quantify_orf_expression.py \\
             --orf-meta ${unified_meta} \\
-            \${orf_conf_arg} \\
+            --orf-confidence ${orf_confidence} \\
             --psites-dir . \\
             --sample-pattern "*_P_sites_plus.bedgraph" \\
             --output "${prefix}_expression_summary.tsv" \\

@@ -52,7 +52,7 @@ process ORFQUANT_RUN {
     export R_LIBS_USER="\${_local_rlibs}\${R_LIBS_USER:+:\${R_LIBS_USER}}"
 
     # Write R script - ORFquant should be pre-installed in custom container
-    cat > run_orfquant.R <<RSCRIPTEOF
+    cat > run_orfquant.R <'RSCRIPTEOF'
 install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
     work <- file.path(getwd(), "orfquant_src")
     dir.create(work, showWarnings = FALSE, recursive = TRUE)
@@ -98,6 +98,27 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
 }
 
 library(ORFquant)
+
+	# Patch load_annotation for non-model organisms (forge_BSgenome=FALSE)
+	unlockBinding("load_annotation", asNamespace("ORFquant"))
+	patched_load_annotation <- function(path) {
+	    GTF_annotation <- get(load(path))
+	    if (is(GTF_annotation\$genome, "FaFile")) {
+	        genome_sequence <- GTF_annotation\$genome
+	    } else {
+	        genome_pkg <- GTF_annotation\$genome_package
+	        if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
+	            library(genome_pkg, character.only = TRUE)
+	            genome_sequence <- get(genome_pkg)
+	        } else {
+	            genome_sequence <- NULL
+	        }
+	    }
+	    GTF_annotation <<- GTF_annotation
+	    genome_seq <<- genome_sequence
+	}
+	assign("load_annotation", patched_load_annotation, envir = asNamespace("ORFquant"))
+	lockBinding("load_annotation", asNamespace("ORFquant"))
 
 # Run ORFquant with error handling for low-quality samples
 cat("Running ORFquant on sample ${prefix}...\\n")
