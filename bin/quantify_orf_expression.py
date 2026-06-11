@@ -2,7 +2,8 @@
 """
 从 RiboseQC P-site bedgraph 为每个 unified ORF 提取 per-sample 表达量 (reads + pN)。
 
-不依赖 gencode 或 AMP 特定格式 —— 接受标准的 unified ORF metadata 作为输入。
+优化版：预加载所有 bedgraph 到内存，用 pandas in-memory query 替代 awk 子进程，
+显著提升查询性能（从 O(N×S) 子进程调用 → O(N×S) DataFrame 切片）。
 
 用法:
   quantify_orf_expression.py \
@@ -17,11 +18,9 @@
 
 import argparse
 import os
-import subprocess
 import sys
 import time
-from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -56,6 +55,8 @@ class ORFExpressionQuantifier:
         self.orf_df = None
         self.samples = []
         self.confidence_df = None
+        # 预加载的 bedgraph 缓存: {sample: {strand: DataFrame}}
+        self.bedgraph_cache = {}
 
     # ── Loading ──────────────────────────────────────────────────────────
 
@@ -91,7 +92,6 @@ class ORFExpressionQuantifier:
         if self.orf_confidence_path is None or not self.orf_confidence_path.exists():
             print("未提供 OCS 文件, 跳过置信度过滤")
             return
-            return
 
         print(f"加载 ORF confidence: {self.orf_confidence_path}")
         self.confidence_df = pd.read_csv(self.orf_confidence_path, sep="\t")
@@ -113,9 +113,7 @@ class ORFExpressionQuantifier:
         self.orf_df = self.orf_df[self.orf_df["ocs"] >= self.min_ocs]
         print(f"  OCS >= {self.min_ocs}: {before} → {self.orf_df.shape[0]} ORFs")
 
-        # 限制数量
         if self.max_orfs > 0 and self.orf_df.shape[0] > self.max_orfs:
-            # 按 OCS 降序取 top N
             self.orf_df = self.orf_df.sort_values("ocs", ascending=False).head(
                 self.max_orfs
             )
@@ -126,12 +124,10 @@ class ORFExpressionQuantifier:
         pattern = self.sample_pattern
         files = sorted(self.psites_dir.glob(pattern))
         if not files:
-            # 尝试不带 _plus 后缀
             files = sorted(self.psites_dir.glob("*_P_sites_plus.bedgraph"))
 
         for f in files:
             name = f.name
-            # 从 "Ribo_11_P_sites_plus.bedgraph" → "Ribo_11"
             for suffix in ["_P_sites_plus.bedgraph", "_P_sites_minus.bedgraph"]:
                 if name.endswith(suffix):
                     name = name[: -len(suffix)]
@@ -141,49 +137,51 @@ class ORFExpressionQuantifier:
 
         print(f"发现 {len(self.samples)} 个样本: {', '.join(self.samples[:10])}...")
 
-    # ── Bedgraph query ───────────────────────────────────────────────────
+    # ── Bedgraph pre-loading ─────────────────────────────────────────────
+
+    def preload_bedgraphs(self):
+        """将所有 bedgraph 文件预加载到内存 DataFrame 中，按 (sample, strand) 索引。"""
+        print("预加载 bedgraph 文件到内存...")
+        t0 = time.time()
+        total_rows = 0
+
+        for sample in self.samples:
+            for strand in ["plus", "minus"]:
+                bg_file = self.psites_dir / f"{sample}_P_sites_{strand}.bedgraph"
+                if not bg_file.exists():
+                    continue
+                try:
+                    df = pd.read_csv(
+                        bg_file,
+                        sep="\t",
+                        header=None,
+                        names=["chrom", "start", "end", "value"],
+                        dtype={"chrom": str, "start": int, "end": int, "value": float},
+                    )
+                    # 按 chrom 索引以加速查询
+                    df = df.sort_values(["chrom", "start"])
+                    self.bedgraph_cache[(sample, strand)] = df
+                    total_rows += len(df)
+                except Exception as e:
+                    print(f"  WARNING: 加载 {bg_file} 失败: {e}")
+
+        elapsed = time.time() - t0
+        print(f"  加载了 {len(self.bedgraph_cache)} 个 bedgraph 文件 "
+              f"({total_rows:,} 行), 耗时 {elapsed:.1f}s")
+
+    # ── In-memory bedgraph query ─────────────────────────────────────────
 
     @staticmethod
-    def query_bedgraph_region(bedgraph_file, chrom, start, end):
-        """用 awk 快速查询 bedgraph 中指定区间的行。"""
-        if not Path(bedgraph_file).exists():
+    def query_bedgraph_region_inmem(df, chrom, start, end):
+        """在预加载的 DataFrame 中查询指定区间的行 (in-memory, 无子进程)。"""
+        if df is None or len(df) == 0:
             return None
-
-        try:
-            cmd = [
-                "awk",
-                "-F\\t",
-                f'$1=="{chrom}" && $2<{end} && $3>{start} {{print $0}}',
-                str(bedgraph_file),
-            ]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10
-            )
-            if result.returncode != 0 or not result.stdout.strip():
-                return None
-
-            lines = result.stdout.strip().split("\n")
-            data = []
-            for line in lines:
-                if not line:
-                    continue
-                parts = line.split("\t")
-                try:
-                    data.append(
-                        [parts[0], int(parts[1]), int(parts[2]), float(parts[3])]
-                    )
-                except (ValueError, IndexError):
-                    pass
-
-            if data:
-                return pd.DataFrame(
-                    data, columns=["chrom", "start", "end", "value"]
-                )
+        # boolean index: chrom match AND interval overlap
+        mask = (df["chrom"] == chrom) & (df["start"] < end) & (df["end"] > start)
+        result = df.loc[mask]
+        if len(result) == 0:
             return None
-        except subprocess.TimeoutExpired:
-            return None
-        except Exception:
-            return None
+        return result
 
     @staticmethod
     def calculate_pn(values):
@@ -194,34 +192,25 @@ class ORFExpressionQuantifier:
         return round(float(pn), 4)
 
     def query_orf_single_sample(self, orf_row, sample):
-        """查询单个 ORF 在单个样本中的 P-site 数据。"""
+        """查询单个 ORF 在单个样本中的 P-site 数据 (in-memory)。"""
         chrom = orf_row["chrom"]
         start = orf_row["start"]
         end = orf_row["end"]
         strand = orf_row["strand"]
 
-        # 选择 bedgraph 文件
-        if strand == "+":
-            bg_file = self.psites_dir / f"{sample}_P_sites_plus.bedgraph"
-        else:
-            bg_file = self.psites_dir / f"{sample}_P_sites_minus.bedgraph"
+        cache_key = (sample, "plus" if strand == "+" else "minus")
+        df = self.bedgraph_cache.get(cache_key)
 
-        if not bg_file.exists():
+        if df is None:
             return {"reads": 0, "mean_cov": 0.0, "max_cov": 0, "pN": 0.0}
 
-        df = self.query_bedgraph_region(bg_file, chrom, start, end)
-        if df is None or len(df) == 0:
+        result = self.query_bedgraph_region_inmem(df, chrom, start, end)
+        if result is None or len(result) == 0:
             return {"reads": 0, "mean_cov": 0.0, "max_cov": 0, "pN": 0.0}
 
-        values = df["value"].values
-        total_reads = int(np.sum(values))
-
-        # 对于 P-site bedgraph, value 是 P-site count
-        # 需要计算: total P-sites in ORF region
-        # bedgraph 记录的是 "每个区间的 P-site 数量"
-        # 区间长度 × value 的总和
+        values = result["value"].values
         total_psites = int(
-            np.sum((df["end"].values - df["start"].values) * values)
+            np.sum((result["end"].values - result["start"].values) * values)
         )
 
         return {
@@ -280,7 +269,10 @@ class ORFExpressionQuantifier:
             print("ERROR: 没有 ORF 需要处理 (过滤太严格?)")
             return None
 
-        # 2. 处理
+        # 2. 预加载 bedgraph 到内存
+        self.preload_bedgraphs()
+
+        # 3. 处理 (用 ThreadPoolExecutor — bedgraphs 在共享内存中)
         n_orfs = self.orf_df.shape[0]
         print(f"\n开始提取 {n_orfs} 个 ORF 的 P-site 表达量...")
         print(f"  使用 {self.workers} 个 worker, {len(self.samples)} 个样本")
@@ -288,8 +280,15 @@ class ORFExpressionQuantifier:
         results = []
         rows = [row for _, row in self.orf_df.iterrows()]
 
-        with ProcessPoolExecutor(max_workers=self.workers) as exe:
-            futures = {exe.submit(self.process_single_orf, row): i for i, row in enumerate(rows)}
+        with ThreadPoolExecutor(max_workers=self.workers) as exe:
+            futures = {
+                exe.submit(self.process_single_orf, row): i
+                for i, row in enumerate(rows)
+            }
+            completed = 0
+            last_report = 0
+            checkpoint = max(1, min(20000, n_orfs // 5))
+
             for fut in as_completed(futures):
                 try:
                     res = fut.result()
@@ -298,17 +297,21 @@ class ORFExpressionQuantifier:
                     idx = futures[fut]
                     print(f"  ERROR ORF idx={idx}: {e}")
 
-        # 3. 保存
+                completed += 1
+                if completed - last_report >= checkpoint:
+                    pct = 100.0 * completed / n_orfs
+                    elapsed = time.time() - t0
+                    rate = completed / max(elapsed, 1)
+                    eta = (n_orfs - completed) / max(rate, 0.001)
+                    print(f"  进度: {completed:,}/{n_orfs:,} ({pct:.0f}%) "
+                          f"速率: {rate:.0f} ORF/s ETA: {eta:.0f}s")
+                    last_report = completed
+
+        # 4. 保存
         result_df = pd.DataFrame(results)
 
-        # 确保列顺序一致
-        static_cols = [
-            "orf_id", "chrom", "start", "end", "strand",
-        ]
-        extra_cols = []
-        for c in ["gene_id", "ocs", "tier"]:
-            if c in result_df.columns:
-                extra_cols.append(c)
+        static_cols = ["orf_id", "chrom", "start", "end", "strand"]
+        extra_cols = [c for c in ["gene_id", "ocs", "tier"] if c in result_df.columns]
         sample_cols = []
         for s in self.samples:
             sample_cols.append(f"{s}_reads")
@@ -330,32 +333,24 @@ class ORFExpressionQuantifier:
         return result_df
 
 
-# ── CLI ───────────────────────────────────────────────────────────────────
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="从 RiboseQC P-site bedgraph 提取 per-ORF 表达量"
     )
-    parser.add_argument(
-        "--orf-meta", required=True, help="Unified ORF metadata TSV"
-    )
+    parser.add_argument("--orf-meta", required=True, help="Unified ORF metadata TSV")
     parser.add_argument(
         "--psites-dir", required=True, help="RiboseQC P-site bedgraph 目录"
     )
     parser.add_argument(
         "--sample-pattern",
         default="*_P_sites_plus.bedgraph",
-        help="样本匹配 glob 模式 (默认: *_P_sites_plus.bedgraph)",
+        help="样本匹配 glob 模式",
     )
     parser.add_argument(
         "--orf-confidence", default=None, help="ORF confidence TSV (可选)"
     )
     parser.add_argument(
-        "--min-ocs",
-        type=float,
-        default=0.0,
-        help="最低 OCS 阈值 (默认 0.0)",
+        "--min-ocs", type=float, default=0.0, help="最低 OCS 阈值 (默认 0.0)"
     )
     parser.add_argument(
         "--max-orfs",
@@ -367,13 +362,9 @@ def main():
         "--workers", type=int, default=4, help="并行 worker 数 (默认 4)"
     )
     parser.add_argument(
-        "--chrom-prefix",
-        default="",
-        help="染色体名前缀 (如 'chr', 空字符串表示不添加)",
+        "--chrom-prefix", default="", help="染色体名前缀"
     )
-    parser.add_argument(
-        "--output", required=True, help="输出文件路径"
-    )
+    parser.add_argument("--output", required=True, help="输出文件路径")
     args = parser.parse_args()
 
     quantifier = ORFExpressionQuantifier(
@@ -395,7 +386,6 @@ def main():
         result_df.to_csv(output_path, sep="\t", index=False)
         print(f"\n保存结果至: {output_path}")
 
-        # 打印统计
         print("\n=== 表达量摘要 ===")
         print(f"ORF 总数: {len(result_df)}")
         for s in quantifier.samples[:5]:
@@ -404,7 +394,6 @@ def main():
                 nonzero = (result_df[col] > 0).sum()
                 total = result_df[col].sum()
                 print(f"  {s}: {nonzero} non-zero, total={total:,} reads")
-
     else:
         print("WARNING: 没有输出结果")
         sys.exit(1)
