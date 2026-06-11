@@ -52,7 +52,7 @@ process ORFQUANT_RUN {
     export R_LIBS_USER="\${_local_rlibs}\${R_LIBS_USER:+:\${R_LIBS_USER}}"
 
     # Write R script - ORFquant should be pre-installed in custom container
-    cat > run_orfquant.R <'RSCRIPTEOF'
+    cat > run_orfquant.R <<'RSCRIPTEOF'
 install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
     work <- file.path(getwd(), "orfquant_src")
     dir.create(work, showWarnings = FALSE, recursive = TRUE)
