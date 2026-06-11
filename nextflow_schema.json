@@ -830,6 +830,34 @@
         "extra_orf_classify_args": {
           "type": "string",
           "description": "Extra arguments to pass to classify_orfs_wrapper.py."
+        },
+        "ribotish_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "description": "Fail pipeline if ribotish produces empty results"
+        },
+        "ribotricer_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ],
+          "description": "Fail pipeline if ribotricer produces empty results"
         }
       }
     },
@@ -1358,6 +1386,96 @@
             "false"
           ],
           "description": "Skip RPBP"
+        },
+        "ribotish_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-exclamation-triangle",
+          "description": "Fail pipeline if Ribo-TISH produces no ORF predictions for a sample.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "ribotricer_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-exclamation-triangle",
+          "description": "Fail pipeline if Ribotricer produces no ORF predictions for a sample.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "orfquant_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-exclamation-triangle",
+          "description": "Fail pipeline if ORFquant produces no ORF predictions for a sample.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "ribocode_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-exclamation-triangle",
+          "description": "Fail pipeline if RiboCode produces no ORF predictions for a sample.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "price_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-exclamation-triangle",
+          "description": "Fail pipeline if PRICE produces no ORF predictions for a sample.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "rpbp_fail_on_empty": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-exclamation-triangle",
+          "description": "Fail pipeline if RPBP produces no ORF predictions for a sample.",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
         }
       }
     },
