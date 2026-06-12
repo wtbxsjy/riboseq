@@ -37,7 +37,7 @@ process EXPRESSION_QUANT {
 
     # Expression stats already computed during UNIFY_ORF_PREDICTIONS
     # This process only reformats and optionally applies OCS filtering.
-    format_expression_output.py \\
+    python3 format_expression_output.py \\
         --expression-summary ${expression_summary} \\
         --expression-rpkm-tpm ${expression_rpkm_tpm} \\
         ${orf_conf_opt} \\
