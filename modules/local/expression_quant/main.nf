@@ -27,6 +27,10 @@ process EXPRESSION_QUANT {
     def min_ocs = params.expression_quant_min_ocs ?: 0.0
     def max_orfs = params.expression_quant_max_orfs ?: 0
     def workers = params.expression_quant_workers ?: 4
+    // ORF confidence may not be available (e.g. ORF_QC hasn't completed yet)
+    // Handle both empty-list (channel ifEmpty) and NO_FILE placeholder cases
+    def _orf_conf = orf_confidence instanceof List ? (orf_confidence.isEmpty() ? null : orf_confidence[0]) : (orf_confidence.name != 'NO_FILE' ? orf_confidence : null)
+    def orf_conf_opt = _orf_conf ? "--orf-confidence ${_orf_conf}" : ''
     """
     #!/bin/bash
     set -euo pipefail
@@ -58,9 +62,6 @@ process EXPRESSION_QUANT {
     else
         # Phase 1: P-site expression quantification
         echo "--- Phase 1: P-site expression quantification ---"
-        # ORF confidence may not be available (e.g. ORF_QC hasn't completed yet)
-        def orf_conf_file = orf_confidence instanceof List ? (orf_confidence.isEmpty() ? null : orf_confidence[0]) : (orf_confidence.name != 'NO_FILE' ? orf_confidence : null)
-        def orf_conf_opt = orf_conf_file ? "--orf-confidence ${orf_conf_file}" : ''
         quantify_orf_expression.py \\
             --orf-meta ${unified_meta} \\
             ${orf_conf_opt} \\
