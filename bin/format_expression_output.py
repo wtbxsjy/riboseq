@@ -6,14 +6,30 @@ Reads expression_summary.tsv and expression_rpkm_tpm.tsv produced by
 unify_orf_predictions.py, optionally applies OCS confidence filtering,
 and writes final expression output files.
 
-Replaces the awk-based quantify_orf_expression.py + calc_orf_rpkm_tpm.py
-with a sub-second pandas read/filter/write pass.
+Uses only Python stdlib (zero external dependencies) so it runs instantly
+in any Python 3.7+ container without pip install overhead.
 """
 import argparse
+import csv
 import sys
 from pathlib import Path
 
-import pandas as pd
+
+def read_tsv_columns(path):
+    """Read a TSV file and return (column_names, list_of_dicts)."""
+    with open(path, 'r') as f:
+        reader = csv.DictReader(f, delimiter='\t')
+        rows = list(reader)
+    return reader.fieldnames, rows
+
+
+def write_tsv(path, fieldnames, rows):
+    """Write a list of dicts as a TSV file."""
+    with open(path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter='\t',
+                                extrasaction='ignore')
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def main():
@@ -50,36 +66,39 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load UNIFY pre-computed expression files
-    summary = pd.read_csv(args.expression_summary, sep='\t')
-    rpkm_tpm = pd.read_csv(args.expression_rpkm_tpm, sep='\t')
+    # Load UNIFY pre-computed expression files (stdlib csv, zero-cost)
+    summary_cols, summary_rows = read_tsv_columns(args.expression_summary)
+    rpkm_cols, rpkm_rows = read_tsv_columns(args.expression_rpkm_tpm)
 
-    print(f"Loaded {len(summary)} ORFs from expression summary")
-    print(f"Loaded {len(rpkm_tpm)} ORFs from RPKM/TPM")
+    print(f"Loaded {len(summary_rows)} ORFs from expression summary")
+    print(f"Loaded {len(rpkm_rows)} ORFs from RPKM/TPM")
 
     # Optional OCS filtering
     if args.orf_confidence and Path(args.orf_confidence).exists():
-        conf = pd.read_csv(args.orf_confidence, sep='\t')
-        if 'orf_id' in conf.columns and 'ocs' in conf.columns:
+        ocs_cols, ocs_rows = read_tsv_columns(args.orf_confidence)
+        if 'orf_id' in ocs_cols and 'ocs' in ocs_cols:
+            # Filter by min_ocs
             if args.min_ocs > 0:
-                conf = conf[conf['ocs'] >= args.min_ocs]
+                ocs_rows = [r for r in ocs_rows if float(r.get('ocs', 0)) >= args.min_ocs]
+            # Sort by OCS descending and take top N
+            ocs_rows.sort(key=lambda r: float(r.get('ocs', 0)), reverse=True)
             if args.max_orfs > 0:
-                conf = conf.nlargest(args.max_orfs, 'ocs')
-            keep_ids = set(conf['orf_id'])
-            summary = summary[summary['orf_id'].isin(keep_ids)]
-            rpkm_tpm = rpkm_tpm[rpkm_tpm['orf_id'].isin(keep_ids)]
-            print(f"After OCS filter: {len(summary)} ORFs (min_ocs={args.min_ocs}, max_orfs={args.max_orfs})")
+                ocs_rows = ocs_rows[:args.max_orfs]
+            keep_ids = {r['orf_id'] for r in ocs_rows}
+            summary_rows = [r for r in summary_rows if r['orf_id'] in keep_ids]
+            rpkm_rows = [r for r in rpkm_rows if r['orf_id'] in keep_ids]
+            print(f"After OCS filter: {len(summary_rows)} ORFs "
+                  f"(min_ocs={args.min_ocs}, max_orfs={args.max_orfs})")
         else:
             print("Warning: OCS file missing 'orf_id' or 'ocs' column, skipping filter")
-    else:
-        if args.orf_confidence:
-            print(f"Note: OCS file not found ({args.orf_confidence}), skipping confidence filter")
+    elif args.orf_confidence:
+        print(f"Note: OCS file not found ({args.orf_confidence}), skipping confidence filter")
 
     # Write filtered outputs
-    summary.to_csv(args.output_summary, sep='\t', index=False)
-    rpkm_tpm.to_csv(args.output_rpkm_tpm, sep='\t', index=False)
-    print(f"Wrote {len(summary)} rows to {args.output_summary}")
-    print(f"Wrote {len(rpkm_tpm)} rows to {args.output_rpkm_tpm}")
+    write_tsv(args.output_summary, summary_cols, summary_rows)
+    write_tsv(args.output_rpkm_tpm, rpkm_cols, rpkm_rows)
+    print(f"Wrote {len(summary_rows)} rows to {args.output_summary}")
+    print(f"Wrote {len(rpkm_rows)} rows to {args.output_rpkm_tpm}")
 
 
 if __name__ == "__main__":
