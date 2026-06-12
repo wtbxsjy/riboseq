@@ -11,6 +11,7 @@ process EXPRESSION_QUANT {
     path expression_summary    // from UNIFY (pre-computed per-sample P-site expression)
     path expression_rpkm_tpm   // from UNIFY (pre-computed per-sample RPKM/TPM)
     path orf_confidence        // ORF confidence TSV from ORF_QC (optional)
+    path format_script         // format_expression_output.py from bin/
 
     output:
     path "*_expression_summary.tsv"                 , emit: expression
@@ -37,14 +38,14 @@ process EXPRESSION_QUANT {
 
     # Expression stats already computed during UNIFY_ORF_PREDICTIONS
     # This process only reformats and optionally applies OCS filtering.
-    python3 format_expression_output.py \\
+    python3 ${format_script} \\
         --expression-summary ${expression_summary} \\
         --expression-rpkm-tpm ${expression_rpkm_tpm} \\
-        ${orf_conf_opt} \\
         --min-ocs ${min_ocs} \\
         --max-orfs ${max_orfs} \\
         --output-summary "${prefix}_expression_summary.tsv" \\
-        --output-rpkm-tpm "${prefix}_expression_rpkm_tpm.tsv"
+        --output-rpkm-tpm "${prefix}_expression_rpkm_tpm.tsv" \\
+        ${orf_conf_opt}
 
     echo "--- Done ---"
     ls -lh ${prefix}_*

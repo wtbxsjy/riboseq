@@ -1424,7 +1424,8 @@ workflow RIBOSEQ {
             EXPRESSION_QUANT(
                 ch_unify_expression_summary.first(),
                 ch_unify_expression_rpkm_tpm.first(),
-                ch_orf_conf.first()
+                ch_orf_conf.first(),
+                file("${workflow.projectDir}/bin/format_expression_output.py")
             )
             ch_versions = ch_versions.mix(EXPRESSION_QUANT.out.versions)
 
