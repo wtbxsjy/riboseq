@@ -58,9 +58,12 @@ process EXPRESSION_QUANT {
     else
         # Phase 1: P-site expression quantification
         echo "--- Phase 1: P-site expression quantification ---"
+        # ORF confidence may not be available (e.g. ORF_QC hasn't completed yet)
+        def orf_conf_file = orf_confidence instanceof List ? (orf_confidence.isEmpty() ? null : orf_confidence[0]) : (orf_confidence.name != 'NO_FILE' ? orf_confidence : null)
+        def orf_conf_opt = orf_conf_file ? "--orf-confidence ${orf_conf_file}" : ''
         quantify_orf_expression.py \\
             --orf-meta ${unified_meta} \\
-            --orf-confidence ${orf_confidence} \\
+            ${orf_conf_opt} \\
             --psites-dir . \\
             --sample-pattern "*_P_sites_plus.bedgraph" \\
             --output "${prefix}_expression_summary.tsv" \\
