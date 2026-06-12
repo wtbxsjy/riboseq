@@ -1481,8 +1481,16 @@ workflow RIBOSEQ {
                 .flatten()
                 .collectFile(name: 'name_replacement.txt', newLine: true)
 
+        // Filter out any non-path values (e.g. PoisonPill) that may propagate
+        // from skipped/empty channels in Nextflow 26.x.
+        // See: https://github.com/nextflow-io/nextflow/issues/5738
+        ch_multiqc_files
+            .filter { it instanceof java.nio.file.Path || it instanceof CharSequence }
+            .collect()
+            .set { ch_multiqc_files_collected }
+
         MULTIQC (
-            ch_multiqc_files.collect(),
+            ch_multiqc_files_collected,
             ch_multiqc_config.toList(),
             ch_multiqc_custom_config.toList(),
             ch_multiqc_logo.toList(),
