@@ -1010,6 +1010,8 @@ workflow RIBOSEQ {
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
             ch_unify_bed      = UNIFY_ORF_PREDICTIONS.out.bed
             ch_unify_gtf      = UNIFY_ORF_PREDICTIONS.out.gtf
+            ch_unify_expression_summary  = UNIFY_ORF_PREDICTIONS.out.expression_summary
+            ch_unify_expression_rpkm_tpm = UNIFY_ORF_PREDICTIONS.out.expression_rpkm_tpm
         }
     }
 
@@ -1408,7 +1410,9 @@ workflow RIBOSEQ {
 
     //
     // ORF Expression Quantification: per-ORF per-sample P-site reads/pN + RPKM/TPM
-    // Runs after ORF_QC (needs confidence scores). Queries RiboseQC bedgraphs.
+    //
+    // Expression stats are pre-computed during UNIFY_ORF_PREDICTIONS (streaming pass).
+    // This process is a lightweight reformatter that optionally applies OCS filtering.
     //
     if (!params.skip_expression_quant) {
         // ORF confidence: from ORF_QC if available, otherwise placeholder
@@ -1416,20 +1420,11 @@ workflow RIBOSEQ {
             ORF_QC.out.confidence.map { meta, f -> f }.collect().ifEmpty([]) :
             Channel.value([])
 
-        if (ch_unify_metadata && ch_unify_bed) {
-            // Collect P-site + coverage bedgraphs from postfilter RiboseQC
-            ch_psites_bg = RIBOSEQC_POSTFILTER.out.psites_bedgraph
-                .map { meta, f -> f }.collect().ifEmpty([])
-
-            ch_coverage_bg = RIBOSEQC_POSTFILTER.out.coverage
-                .map { meta, f -> f }.collect().ifEmpty([])
-
+        if (ch_unify_expression_summary && ch_unify_expression_rpkm_tpm) {
             EXPRESSION_QUANT(
-                ch_unify_metadata.first(),
-                ch_unify_bed.first(),
-                ch_orf_conf.first(),
-                ch_psites_bg,
-                ch_coverage_bg
+                ch_unify_expression_summary.first(),
+                ch_unify_expression_rpkm_tpm.first(),
+                ch_orf_conf.first()
             )
             ch_versions = ch_versions.mix(EXPRESSION_QUANT.out.versions)
 
@@ -1439,7 +1434,7 @@ workflow RIBOSEQ {
                 EXPRESSION_QUANT.out.rpkm_tpm
             )
         } else {
-            log.warn "EXPRESSION_QUANT requires unified ORFs — skipping."
+            log.warn "EXPRESSION_QUANT requires unified ORF expression data — skipping."
         }
     }
 

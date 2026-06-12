@@ -26,6 +26,8 @@ process UNIFY_ORF_PREDICTIONS {
     path "*.bed.gz"      , emit: bed
     path "*.gtf.gz"      , emit: gtf
     path "*.stats.txt"   , emit: stats
+    path "*_expression_summary.tsv"    , emit: expression_summary
+    path "*_expression_rpkm_tpm.tsv"   , emit: expression_rpkm_tpm
     path "versions.yml"          , emit: versions
 
     when:
@@ -256,6 +258,8 @@ process UNIFY_ORF_PREDICTIONS {
     gzip -f ${prefix}.bed
     touch ${prefix}.gtf
     gzip -f ${prefix}.gtf
+    touch ${prefix}_expression_summary.tsv
+    touch ${prefix}_expression_rpkm_tpm.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
