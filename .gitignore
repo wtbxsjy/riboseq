@@ -11,9 +11,7 @@ null/
 # Tests & local test outputs
 testing/
 testing*
-test_data/
 test_results/
-test_data*
 report_test_*.html
 .nf-test.log
 nf-test
@@ -34,6 +32,12 @@ orfquant_results.*
 
 # shinyapp
 apps/
+
+# Codegraph index
+.codegraph/
+
+# Migration plan (work-in-progress doc)
+docs/snakemake-migration-plan.md
 
 # tutorial
 tutorial_outputs/
