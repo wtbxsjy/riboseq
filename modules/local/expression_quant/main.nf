@@ -31,8 +31,13 @@ process EXPRESSION_QUANT {
     #!/bin/bash
     set -euo pipefail
 
-    # Install dependencies to /tmp (Singularity has read-only /usr/local/lib)
-    apt-get update -qq && apt-get install -y -qq libstdc++6 2>/dev/null || true
+    # Provide libstdc++.so.6 (missing from stripped Singularity python:3.11 image)
+    # The Galaxy depot Singularity image lacks apt-get, so we download + extract the .deb manually
+    _libstdc_dir="\$(mktemp -d)"
+    wget -q "http://deb.debian.org/debian/pool/main/g/gcc-12/libstdc++6_12.2.0-14+deb12u1_amd64.deb" -O "\$_libstdc_dir/libstdc6.deb"
+    (cd "\$_libstdc_dir" && ar x libstdc6.deb && tar -xf data.tar.xz -C "\$_libstdc_dir")
+    export LD_LIBRARY_PATH="\$_libstdc_dir/usr/lib/x86_64-linux-gnu:\${LD_LIBRARY_PATH:-}"
+    # Install Python deps to /tmp (Singularity has read-only /usr/local/lib)
     pip install --quiet --target=/tmp/pylib pandas numpy 2>/dev/null
     export PYTHONPATH="/tmp/pylib:\${PYTHONPATH:-}"
 
