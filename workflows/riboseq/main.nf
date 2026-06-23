@@ -1039,8 +1039,10 @@ workflow RIBOSEQ {
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
             ch_unify_bed      = UNIFY_ORF_PREDICTIONS.out.bed
             ch_unify_gtf      = UNIFY_ORF_PREDICTIONS.out.gtf
-            // Pre-join for ORF_QC into a value channel before channels are consumed by CLASSIFY
-            ch_orf_qc_unified_pre = ch_unify_bed.join(ch_unify_metadata, failOnMismatch: false).first()
+            // Pre-capture for ORF_QC before channels are consumed by CLASSIFY.
+            // .collect() captures items into a value channel independent of downstream consumption.
+            ch_orf_qc_unified_bed_cap  = ch_unify_bed.collect()
+            ch_orf_qc_unified_meta_cap = ch_unify_metadata.collect()
             ch_unify_expression_summary  = UNIFY_ORF_PREDICTIONS.out.expression_summary
             ch_unify_expression_rpkm_tpm = UNIFY_ORF_PREDICTIONS.out.expression_rpkm_tpm
         }
@@ -1418,6 +1420,14 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
+        // Combine pre-captured bed + metadata into tuple expected by ORF_QC
+        ch_orf_qc_unified_pre = ch_orf_qc_unified_bed_cap
+            .combine(ch_orf_qc_unified_meta_cap)
+            .map { bed_list, meta_list ->
+                def bed_item = bed_list.isEmpty() ? [null, []] : bed_list[0]
+                def meta_item = meta_list.isEmpty() ? [null, []] : meta_list[0]
+                [ bed_item[0], bed_item[1], meta_item[1] ]
+            }
         ORF_QC(
             ch_orf_qc_unified_pre,
             ch_orf_qc_ribocode.ifEmpty([]),

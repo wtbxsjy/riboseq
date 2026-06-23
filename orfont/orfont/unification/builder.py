@@ -85,75 +85,84 @@ def _extract_orfont_sequences(con, fasta_path):
     fasta = Fasta(fasta_path)
     logger.info("  FASTA contigs: %d", len(fasta.keys()))
 
-    rows = con.execute("""
-        SELECT orf_id, chrom, strand, blocks
-        FROM unified_orfs
-    """).fetchall()
-
-    updates = []
+    total = con.execute("SELECT COUNT(*) FROM unified_orfs").fetchone()[0]
+    batch_size = 50000
+    updated = 0
     skipped_chrom = set()
-    for orf_id, chrom, strand, blocks_json in rows:
-        try:
-            blocks = json.loads(blocks_json)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if not blocks:
-            continue
 
-        # Extract per-block sequences
-        parts = []
-        try:
-            for bs, be in blocks:
-                try:
-                    seq = str(fasta[chrom][bs:be])
-                    parts.append(seq)
-                except KeyError:
-                    # Try alternate chromosome naming
-                    alt_chrom = chrom[3:] if chrom.startswith('chr') else 'chr' + chrom
-                    if alt_chrom not in skipped_chrom:
-                        try:
-                            seq = str(fasta[alt_chrom][bs:be])
-                            parts.append(seq)
-                        except KeyError:
-                            skipped_chrom.add(chrom)
+    for offset in range(0, total, batch_size):
+        rows = con.execute("""
+            SELECT orf_id, chrom, strand, blocks
+            FROM unified_orfs
+            ORDER BY orf_id
+            LIMIT ? OFFSET ?
+        """, [batch_size, offset]).fetchall()
+
+        batch_updates = []
+        for orf_id, chrom, strand, blocks_json in rows:
+            try:
+                blocks = json.loads(blocks_json)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not blocks:
+                continue
+
+            # Extract per-block sequences
+            parts = []
+            try:
+                for bs, be in blocks:
+                    try:
+                        seq = str(fasta[chrom][bs:be])
+                        parts.append(seq)
+                    except KeyError:
+                        # Try alternate chromosome naming
+                        alt_chrom = chrom[3:] if chrom.startswith('chr') else 'chr' + chrom
+                        if alt_chrom not in skipped_chrom:
+                            try:
+                                seq = str(fasta[alt_chrom][bs:be])
+                                parts.append(seq)
+                            except KeyError:
+                                skipped_chrom.add(chrom)
+                                break
+                        else:
                             break
-                    else:
-                        break
-        except Exception:
-            continue
+            except Exception:
+                continue
 
-        if not parts:
-            continue
+            if not parts:
+                continue
 
-        nt_seq = ''.join(parts)
-        if strand == '-':
-            nt_seq = str(Seq(nt_seq).reverse_complement())
+            nt_seq = ''.join(parts)
+            if strand == '-':
+                nt_seq = str(Seq(nt_seq).reverse_complement())
 
-        start_codon = nt_seq[:3].upper() if len(nt_seq) >= 3 else ''
-        updates.append((orf_id, nt_seq, start_codon))
+            start_codon = nt_seq[:3].upper() if len(nt_seq) >= 3 else ''
+            batch_updates.append((orf_id, nt_seq, start_codon))
 
-    if not updates:
+        if batch_updates:
+            df = pd.DataFrame(batch_updates, columns=['orf_id', 'sequence', 'start_codon'])
+            con.register('_seq_updates', df)
+            con.execute("""
+                UPDATE unified_orfs u
+                SET sequence = s.sequence, start_codon = s.start_codon
+                FROM _seq_updates s
+                WHERE u.orf_id = s.orf_id
+            """)
+            con.unregister('_seq_updates')
+            updated += len(batch_updates)
+            pct = 100 * (offset + len(rows)) / max(total, 1)
+            logger.info("  batch %dk: updated %d ORFs (%.1f%%)",
+                        offset // 1000, len(batch_updates), pct)
+
+    if not updated:
         logger.warning("Could not extract any sequences (check chromosome naming)")
         return 0
 
-    # Batch update via temporary table
     logger.info(
-        "  Updating %d / %d ORFs (%.1f%%), %d chroms not found...",
-        len(updates), len(rows),
-        100 * len(updates) / max(len(rows), 1),
-        len(skipped_chrom),
+        "Sequences extracted for %d / %d ORFs (%.1f%%), %d chroms not found",
+        updated, total, 100 * updated / max(total, 1), len(skipped_chrom),
     )
-    df = pd.DataFrame(updates, columns=['orf_id', 'sequence', 'start_codon'])
-    con.register('_seq_updates', df)
-    con.execute("""
-        UPDATE unified_orfs u
-        SET sequence = s.sequence, start_codon = s.start_codon
-        FROM _seq_updates s
-        WHERE u.orf_id = s.orf_id
-    """)
-    con.unregister('_seq_updates')
-
-    return len(updates)
+    return updated
 
 
 def _write_outputs(con, output_prefix):
