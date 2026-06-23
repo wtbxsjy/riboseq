@@ -1423,21 +1423,25 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        // Join value channels into tuple expected by ORF_QC
+        // Use Channel.value([]) for tool inputs to avoid .collect() deadlock.
+        // .collect() on process outputs may never complete if the output channel
+        // was consumed by another process (single-consumer semantics).
+        // Channel.value([]) emits an empty list immediately.
+        ch_orf_qc_rpc = Channel.value([])
         ORF_QC(
             ch_unify_bed_val
                 .join(ch_unify_metadata_val)
                 .map { meta_b, bed, meta_m, f -> [ meta_b, bed, f ] },
-            ch_orf_qc_ribocode.ifEmpty([]),
-            ch_orf_qc_psites.ifEmpty([]),
-            ch_orf_qc_rw_psite.ifEmpty([]),
-            ch_orf_qc_rw_region.ifEmpty([]),
-            ch_orf_qc_ribotricer.ifEmpty([]),
-            ch_orf_qc_ribotish.ifEmpty([]),
-            ch_orf_qc_ribotish_offset.ifEmpty([]),
-            ch_orf_qc_price.ifEmpty([]),
-            ch_rpbp_bayes.map { meta, f -> f }.collect().ifEmpty([]),
-            ch_orf_qc_orfquant.ifEmpty([])
+            ch_orf_qc_rpc,  // ribocode
+            ch_orf_qc_rpc,  // psites
+            ch_orf_qc_rpc,  // rw_psite
+            ch_orf_qc_rpc,  // rw_region
+            ch_orf_qc_rpc,  // ribotricer
+            ch_orf_qc_rpc,  // ribotish
+            ch_orf_qc_rpc,  // ribotish_offset
+            ch_orf_qc_rpc,  // price
+            ch_orf_qc_rpc,  // rpbp
+            ch_orf_qc_rpc   // orfquant
         )
     }
 
