@@ -48,6 +48,8 @@ def get_connection(read_only: bool = False) -> duckdb.DuckDBPyConnection:
             _local.con = duckdb.connect(':memory:')
         _local.con.execute(f"SET memory_limit = '{_MEMORY_LIMIT}'")
         _local.con.execute(f"SET threads = {_THREADS}")
+        _local.con.execute("SET max_temp_directory_size = '100GiB'")
+        _local.con.execute("SET preserve_insertion_order = false")
         _local.con.execute("INSTALL parquet; LOAD parquet")
     return _local.con
 

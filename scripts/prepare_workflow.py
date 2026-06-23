@@ -171,6 +171,16 @@ Examples:
                         choices=['human', 'mouse', 'rice', 'maize', 'wheat', 'soybean', 'arabidopsis'],
                         help='Species name (default: human). Choices: human, mouse, rice, maize, wheat, soybean')
 
+    # Reference file overrides (for dual-genome combined references)
+    parser.add_argument('--fasta', default=None,
+                        help='Override path to genome FASTA (e.g., combined host+pathogen genome). '
+                             'Overrides auto-detection from reference directory.')
+    parser.add_argument('--gtf', default=None,
+                        help='Override path to annotation GTF (e.g., combined host+pathogen annotation). '
+                             'Overrides auto-detection from reference directory.')
+    parser.add_argument('--transcript-fasta', default=None,
+                        help='Override path to transcript FASTA. Overrides auto-detection.')
+
     # ORF classification Ensembl annotation
     parser.add_argument('--orf-classify-ensembl-dir', default=None,
                         help='Existing Ensembl annotation directory for ORF classification')
@@ -212,7 +222,29 @@ Examples:
     parser.add_argument('--sorf-unique-mode', default=None,
                         choices=['auto', 'nh', 'mapq'],
                         help='Mode for unique-mapping filter: auto (detect NH tag), nh, or mapq (default: auto)')
-    
+    parser.add_argument('--sorf-read-len-min', type=int, default=None,
+                        help='Minimum read length for sORF BAM filter (default: 28)')
+    parser.add_argument('--sorf-read-len-max', type=int, default=None,
+                        help='Maximum read length for sORF BAM filter (default: 30)')
+    parser.add_argument('--ribowaltz-read-lengths', default=None,
+                        help='Comma-separated read lengths for riboWaltz P-site analysis '
+                             '(e.g. "28,29,30,31,32,33"). Default: 28,29,30')
+
+    # Pathogen dual-genome analysis
+    parser.add_argument('--pathogen-fasta', default=None,
+                        help='Path to pathogen genome FASTA for dual-genome ORF prediction')
+    parser.add_argument('--pathogen-gtf', default=None,
+                        help='Path to pathogen annotation GTF for dual-genome ORF prediction')
+    parser.add_argument('--pathogen-contig-pattern', default=None,
+                        help='Regex pattern to identify pathogen contigs (e.g. ^NC_045512 for SARS-CoV-2)')
+    parser.add_argument('--skip-pathogen-analysis', action='store_true', default=False,
+                        help='Skip pathogen-specific downstream analysis (default: False)')
+
+    # ORF tool error handling
+    parser.add_argument('--fail-on-empty', action='store_true', default=False,
+                        help='Enable fail_on_empty for all ORF prediction tools (ribotish, ribotricer, orfquant, '
+                             'rpbp, price, ribocode). Pipeline terminates if any tool produces empty results.')
+
     # QC options
     parser.add_argument('--skip-collect-qc-stats', action='store_true', default=False,
                         help='Skip the COLLECT_QC_STATS step that aggregates per-sample QC metrics')
@@ -228,6 +260,8 @@ Examples:
                         help='Path to gencode-orf-mapper container for GENCODE ORF classification')
     parser.add_argument('--ribowaltz-container', default=None,
                         help='Path to riboWaltz container for P-site analysis')
+    parser.add_argument('--price-container', default=None,
+                        help='Path to GEDI/PRICE container for TIS prediction')
     
     # Pipeline options
     parser.add_argument('--run-prefilter-qc', action='store_true',
@@ -610,7 +644,7 @@ def prepare_orf_classify_ensembl_dir(workdir, args, dry_run=False):
 def setup_container_directory(workdir, container_dir, orfquant_container=None,
                               rpbp_container=None, unify_orf_container=None,
                               gencode_orf_mapper_container=None, ribowaltz_container=None,
-                              dry_run=False):
+                              price_container=None, dry_run=False):
     """Setup container directory by copying specified images into workdir"""
     logger.info("\n" + "=" * 60)
     logger.info("Setting up container directory")
@@ -692,6 +726,18 @@ def setup_container_directory(workdir, container_dir, orfquant_container=None,
                     shutil.copy2(rw_path, link_path)
                     logger.info(f"✓ Copied riboWaltz container: {rw_path.name}")
             linked_containers['ribowaltz'] = link_path
+
+    if price_container:
+        price_path = Path(price_container).resolve()
+        if price_path.exists():
+            link_path = target_dir / 'price.sif'
+            if dry_run:
+                logger.info(f"[DRY RUN] Would copy PRICE/GEDI: {price_path} -> {link_path}")
+            else:
+                if not link_path.exists():
+                    shutil.copy2(price_path, link_path)
+                    logger.info(f"✓ Copied PRICE/GEDI container: {price_path.name}")
+            linked_containers['price'] = link_path
 
     # Backward-compatible: copy all containers from container_dir
     if container_dir:
@@ -845,28 +891,42 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
 
     # Add reference files if provided
     # Use species-specific file naming: {species}.genome.fa, {species}.gtf, {species}.transcripts.fa
+    # Overrides (--fasta/--gtf/--transcript-fasta) take precedence over auto-detected files
     contaminant_provided = False
-    if references:
-        if 'genome_fasta' in references and references['genome_fasta']:
-            fasta_path = prefer_uncompressed(references['genome_fasta'][0])
-            nf_cmd_parts.append(f"--fasta {fasta_path}")
-        if 'gtf' in references and references['gtf']:
-            gtf_path = prefer_uncompressed(references['gtf'][0])
-            nf_cmd_parts.append(f"--gtf {gtf_path}")
-        if 'transcripts' in references and references['transcripts']:
-            transcript_path = prefer_uncompressed(references['transcripts'][0])
-            nf_cmd_parts.append(f"--transcript_fasta {transcript_path}")
-        if 'contaminant' in references and references['contaminant']:
-            # Prefer *_final_contamination.fasta from prepare_reference_db_v2.2.py
-            contam_files = references['contaminant']
-            # Sort to prioritize *_final_contamination.fasta
-            final_contam = [f for f in contam_files if 'final_contamination' in str(f)]
-            if final_contam:
-                contam_path = prefer_uncompressed(final_contam[0])
-            else:
-                contam_path = prefer_uncompressed(contam_files[0])
-            nf_cmd_parts.append(f"--contaminant_fasta {contam_path}")
-            contaminant_provided = True
+
+    # --- Genome FASTA ---
+    if args.fasta:
+        nf_cmd_parts.append(f"--fasta {Path(args.fasta).resolve()}")
+    elif references and 'genome_fasta' in references and references['genome_fasta']:
+        fasta_path = prefer_uncompressed(references['genome_fasta'][0])
+        nf_cmd_parts.append(f"--fasta {fasta_path}")
+
+    # --- Annotation GTF ---
+    if args.gtf:
+        nf_cmd_parts.append(f"--gtf {Path(args.gtf).resolve()}")
+    elif references and 'gtf' in references and references['gtf']:
+        gtf_path = prefer_uncompressed(references['gtf'][0])
+        nf_cmd_parts.append(f"--gtf {gtf_path}")
+
+    # --- Transcript FASTA ---
+    if args.transcript_fasta:
+        nf_cmd_parts.append(f"--transcript_fasta {Path(args.transcript_fasta).resolve()}")
+    elif references and 'transcripts' in references and references['transcripts']:
+        transcript_path = prefer_uncompressed(references['transcripts'][0])
+        nf_cmd_parts.append(f"--transcript_fasta {transcript_path}")
+
+    # --- Contaminant FASTA ---
+    if references and 'contaminant' in references and references['contaminant']:
+        # Prefer *_final_contamination.fasta from prepare_reference_db_v2.2.py
+        contam_files = references['contaminant']
+        # Sort to prioritize *_final_contamination.fasta
+        final_contam = [f for f in contam_files if 'final_contamination' in str(f)]
+        if final_contam:
+            contam_path = prefer_uncompressed(final_contam[0])
+        else:
+            contam_path = prefer_uncompressed(contam_files[0])
+        nf_cmd_parts.append(f"--contaminant_fasta {contam_path}")
+        contaminant_provided = True
     
     # Skip contaminant filter if no contaminant FASTA provided
     if not contaminant_provided:
@@ -893,6 +953,12 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
     # sORF unique mapping mode (only set when explicitly provided)
     if getattr(args, 'sorf_unique_mode', None) is not None:
         nf_cmd_parts.append(f"--sorf_unique_mode {args.sorf_unique_mode}")
+    if getattr(args, 'sorf_read_len_min', None) is not None:
+        nf_cmd_parts.append(f"--sorf_read_len_min {args.sorf_read_len_min}")
+    if getattr(args, 'sorf_read_len_max', None) is not None:
+        nf_cmd_parts.append(f"--sorf_read_len_max {args.sorf_read_len_max}")
+    if getattr(args, 'ribowaltz_read_lengths', None) is not None:
+        nf_cmd_parts.append(f"--ribowaltz_read_lengths [{args.ribowaltz_read_lengths}]")
 
     # Skip collect QC stats
     if getattr(args, 'skip_collect_qc_stats', False):
@@ -905,6 +971,28 @@ def generate_nextflow_script(workdir, args, sample_sheet, containers,
         else:
             nf_cmd_parts.append("--orfquant_psite_correction false")
     
+    # Pathogen dual-genome analysis
+    if args.pathogen_fasta:
+        nf_cmd_parts.append(f"--pathogen_fasta {args.pathogen_fasta}")
+    if args.pathogen_gtf:
+        nf_cmd_parts.append(f"--pathogen_gtf {args.pathogen_gtf}")
+    if args.pathogen_contig_pattern:
+        # Quote the regex pattern in single quotes to protect from shell expansion
+        nf_cmd_parts.append(f"--pathogen_contig_pattern '{args.pathogen_contig_pattern}'")
+    if args.skip_pathogen_analysis:
+        nf_cmd_parts.append("--skip_pathogen_analysis true")
+
+    # ORF tool error handling: fail if any ORF tool produces empty results
+    if args.fail_on_empty:
+        nf_cmd_parts.extend([
+            "--ribotish_fail_on_empty true",
+            "--ribotricer_fail_on_empty true",
+            "--orfquant_fail_on_empty true",
+            "--rpbp_fail_on_empty true",
+            "--price_fail_on_empty true",
+            "--ribocode_fail_on_empty true",
+        ])
+
     # ORF unification and classification options (default: run, so no need to set false)
     # Note: orf_classify_mode is deprecated; all three classifiers now run simultaneously.
     nf_cmd_parts.extend([
@@ -1181,6 +1269,7 @@ def main():
         args.unify_orf_container,
         args.gencode_orf_mapper_container,
         args.ribowaltz_container,
+        args.price_container,
         args.dry_run
     )
     

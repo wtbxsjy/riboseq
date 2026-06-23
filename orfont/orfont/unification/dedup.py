@@ -123,6 +123,154 @@ def translate_aa_sequences(con=None):
 
 
 # ---------------------------------------------------------------------------
+# Frame-aware merge (Phase 2) — sweep-line clustering on single-exon ORFs
+# ---------------------------------------------------------------------------
+
+def dedup_frame_aware(con, min_overlap_fraction=0.9):
+    """Merge single-exon ORFs that are frame-compatible with >= threshold overlap.
+
+    Implements the same logic as merge_frame_compatible_orfs() from the
+    original script:
+      - Only single-exon ORFs participate (multi-exon pass through unchanged)
+      - ORFs must share chrom, strand, and frame (start % 3)
+      - Overlap >= min_overlap_fraction of the shorter ORF
+      - Transitive closure: A overlaps B, B overlaps C → A, B, C merged
+      - Longest ORF in each merged cluster becomes representative
+
+    Operates directly on the unified_orfs DuckDB table.  Multi-exon ORFs
+    are untouched; merged single-exon ORFs have their tools/samples/n_tools/
+    n_samples merged into the representative, and the shorter ORFs are deleted.
+    """
+    logger.info("Frame-aware merge: fetching single-exon ORFs from unified_orfs...")
+
+    rows = con.execute("""
+        SELECT orf_id, chrom, strand, genomic_start, genomic_end, length_nt,
+               tools, samples, n_tools, n_samples
+        FROM unified_orfs
+        WHERE json_array_length(blocks::json) = 1
+        ORDER BY chrom, strand, genomic_start % 3, genomic_start
+    """).fetchall()
+
+    if not rows:
+        logger.info("Frame-aware merge: no single-exon ORFs to merge")
+        total = con.execute("SELECT COUNT(*) FROM unified_orfs").fetchone()[0]
+        return total
+
+    # Sweep-line clustering within (chrom, strand, frame) groups
+    used = set()
+    merges = []       # list of (representative_orf_id, [merged_orf_ids])
+
+    for i, row_i in enumerate(rows):
+        if i in used:
+            continue
+        orf_id, chrom, strand, start_i, end_i, len_i, tools_i, samples_i, n_tools_i, n_samples_i = row_i
+        frame_i = start_i % 3
+
+        cluster = [(orf_id, len_i, start_i, end_i, tools_i, samples_i)]
+        max_end = end_i
+        used.add(i)
+
+        for j in range(i + 1, len(rows)):
+            if j in used:
+                continue
+            row_j = rows[j]
+            chrom_j, strand_j, start_j, end_j = row_j[1], row_j[2], row_j[3], row_j[4]
+            frame_j = start_j % 3
+
+            # Different group → stop
+            if chrom_j != chrom or strand_j != strand or frame_j != frame_i:
+                break
+            # Early exit: starts beyond furthest end of cluster
+            if start_j > max_end:
+                break
+
+            # Compute overlap fraction relative to shorter ORF
+            overlap_start = max(start_i, start_j)
+            overlap_end = min(max_end, end_j)
+
+            if overlap_start >= overlap_end:
+                continue
+
+            shorter_len = min(end_i - start_i, end_j - start_j)
+            overlap_bp = overlap_end - overlap_start
+            if overlap_bp / shorter_len >= min_overlap_fraction:
+                orf_id_j, len_j, tools_j, samples_j = row_j[0], row_j[4], row_j[6], row_j[7]
+                cluster.append((orf_id_j, len_j, start_j, end_j, tools_j, samples_j))
+                max_end = max(max_end, end_j)
+                used.add(j)
+
+        if len(cluster) > 1:
+            # Find representative (longest)
+            rep = max(cluster, key=lambda x: x[1])
+            merged_ids = [x[0] for x in cluster if x[0] != rep[0]]
+            merges.append((rep[0], merged_ids, rep[4], rep[5], cluster))
+
+    logger.info(
+        "Frame-aware merge: %d single-exon ORFs → %d merge groups saving %d ORFs",
+        len(rows), len(merges), sum(len(m[1]) for m in merges),
+    )
+
+    if not merges:
+        total = con.execute("SELECT COUNT(*) FROM unified_orfs").fetchone()[0]
+        return total
+
+    # Build updates: merge tools/samples into representatives
+    update_values = []
+    for rep_id, merged_ids, _, _, cluster in merges:
+        all_tools = set()
+        all_samples = set()
+        for _, _, _, _, tools_str, samples_str in cluster:
+            for t in tools_str.split(','):
+                if t.strip():
+                    all_tools.add(t.strip())
+            for s in samples_str.split(','):
+                if s.strip():
+                    all_samples.add(s.strip())
+        merged_tools = ','.join(sorted(all_tools))
+        merged_samples = ','.join(sorted(all_samples))
+        update_values.append((rep_id, merged_tools, merged_samples,
+                              len(all_tools), len(all_samples)))
+
+    # Apply updates via temp table for efficiency
+    import pandas as pd
+    df_updates = pd.DataFrame(
+        update_values,
+        columns=['orf_id', 'tools', 'samples', 'n_tools', 'n_samples'],
+    )
+    con.register('_frame_merge_updates', df_updates)
+    con.execute("""
+        UPDATE unified_orfs u
+        SET
+            tools = fm.tools,
+            samples = fm.samples,
+            n_tools = fm.n_tools,
+            n_samples = fm.n_samples
+        FROM _frame_merge_updates fm
+        WHERE u.orf_id = fm.orf_id
+    """)
+    con.unregister('_frame_merge_updates')
+
+    # Delete merged-away ORFs
+    all_merged_ids = []
+    for _, merged_ids, _, _, _ in merges:
+        all_merged_ids.extend(merged_ids)
+
+    if all_merged_ids:
+        placeholders = ','.join(['?'] * len(all_merged_ids))
+        con.execute(
+            f"DELETE FROM unified_orfs WHERE orf_id IN ({placeholders})",
+            all_merged_ids,
+        )
+
+    total = con.execute("SELECT COUNT(*) FROM unified_orfs").fetchone()[0]
+    logger.info(
+        "Frame-aware merge complete: %d ORFs after merge (removed %d)",
+        total, len(all_merged_ids),
+    )
+    return total
+
+
+# ---------------------------------------------------------------------------
 # Statistics queries
 # ---------------------------------------------------------------------------
 

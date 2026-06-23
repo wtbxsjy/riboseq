@@ -145,6 +145,17 @@ workflow RIBOSEQ {
     ch_qc_rtr_bam_summary = Channel.empty()
     ch_qc_rw_region       = Channel.empty()
 
+    // Pre-collected clones for ORF_QC (avoids single-consumer channel deadlock)
+    ch_orf_qc_rw_psite    = Channel.empty()
+    ch_orf_qc_rw_region   = Channel.empty()
+    ch_orf_qc_ribotish    = Channel.empty()
+    ch_orf_qc_ribotish_offset = Channel.empty()
+    ch_orf_qc_ribotricer  = Channel.empty()
+    ch_orf_qc_ribocode    = Channel.empty()
+    ch_orf_qc_price       = Channel.empty()
+    ch_orf_qc_psites      = Channel.empty()
+    ch_orf_qc_orfquant    = Channel.empty()
+
     //
     // BAM INPUT MODE: Skip preprocessing and alignment
     //
@@ -604,6 +615,8 @@ workflow RIBOSEQ {
             .map { meta, bam, bai -> [ meta.id, meta, bam, bai ] }
         ch_offset_for_ribotish = RIBOTISH_QUALITY_RIBOSEQ.out.offset
             .map { meta, offset -> [ meta.id, offset ] }
+        // Pre-collect clone for ORF_QC
+        ch_orf_qc_ribotish_offset = RIBOTISH_QUALITY_RIBOSEQ.out.offset.map { meta, f -> f }.collect()
         
         ribotish_postfilter_inputs = ch_bams_for_ribotish
             .join(ch_offset_for_ribotish, by: 0)
@@ -623,6 +636,8 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOTISH_PREDICT_POSTFILTER.out.versions)
         ch_ribotish_predictions = RIBOTISH_PREDICT_POSTFILTER.out.predictions
+        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY)
+        ch_orf_qc_ribotish = RIBOTISH_PREDICT_POSTFILTER.out.predictions.map { meta, f -> f }.collect()
         ch_qc_ribotish_all = RIBOTISH_PREDICT_POSTFILTER.out.all.map { meta, f -> f }
 
         if (params.sorf_predict_pooled) {
@@ -665,6 +680,8 @@ workflow RIBOSEQ {
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_POSTFILTER.out.versions)
         ch_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs
         ch_qc_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs.map { meta, f -> f }
+        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY + COLLECT_QC_STATS)
+        ch_orf_qc_ribotricer = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs.map { meta, f -> f }.collect()
         ch_qc_rtr_bam_summary = RIBOTRICER_DETECTORFS_POSTFILTER.out.bam_summary
     }
 
@@ -782,6 +799,8 @@ workflow RIBOSEQ {
              ch_versions = ch_versions.mix(RIBOCODE.out.versions)
              ch_ribocode_gtf = RIBOCODE.out.gtf
              ch_qc_ribocode_txt = RIBOCODE.out.collapsed.map { meta, f -> f }
+            // Pre-collect clone for ORF_QC (channel consumed later by COLLECT_QC_STATS)
+            ch_orf_qc_ribocode = RIBOCODE.out.collapsed.map { meta, f -> f }.collect()
         }
     } else if (!params.skip_ribocode && is_bam_input) {
         log.warn "RiboCode requires transcriptome BAM which is not available in BAM input mode. Skipping RiboCode."
@@ -801,6 +820,8 @@ workflow RIBOSEQ {
         ch_price_gtf = PRICE.out.orfs_tsv
         // Fall back to GTF if TSV is empty (stub mode)
         ch_price_gtf = ch_price_gtf.ifEmpty( PRICE.out.gtf )
+        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY)
+        ch_orf_qc_price = ch_price_gtf.map { meta, f -> f }.collect()
     }
 
     //
@@ -819,6 +840,9 @@ workflow RIBOSEQ {
         ch_versions = ch_versions.mix(RIBOWALTZ.out.versions)
         ch_ribowaltz_psite = RIBOWALTZ.out.psite_offset
         ch_qc_rw_region = RIBOWALTZ.out.region_distribution
+        // Pre-collect clones for ORF_QC (channels can only be consumed once)
+        ch_orf_qc_rw_psite = RIBOWALTZ.out.psite_offset.map { meta, f -> f }.collect()
+        ch_orf_qc_rw_region = RIBOWALTZ.out.region_distribution.map { meta, f -> f }.collect()
         // Feed QC outputs to MultiQC-compatible collection
         ch_multiqc_files = ch_multiqc_files.mix(
             RIBOWALTZ.out.psite_offset.map { meta, f -> f },
@@ -860,6 +884,8 @@ workflow RIBOSEQ {
         ch_riboseqc_annotation = RIBOSEQC_POSTFILTER.out.annotation
         ch_riboseqc_orfquant   = RIBOSEQC_POSTFILTER.out.orfquant
         ch_qc_psites_calcs     = RIBOSEQC_POSTFILTER.out.psites_calcs.map { meta, f -> f }
+        // Pre-collect clone for ORF_QC (channel consumed later by COLLECT_QC_STATS)
+        ch_orf_qc_psites = RIBOSEQC_POSTFILTER.out.psites_calcs.map { meta, f -> f }.collect()
     }
 
     //
@@ -878,6 +904,8 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(ORFQUANT.out.versions)
         ch_orfquant_gtf = ORFQUANT.out.gtf
+        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY)
+        ch_orf_qc_orfquant = ORFQUANT.out.gtf.map { meta, f -> f }.collect()
         ch_qc_orfquant_results = ORFQUANT.out.results.map { meta, f -> f }
     } else if (!params.skip_orfquant && params.skip_riboseqc) {
         log.warn "ORFquant requires RiboseQC output. Skipping ORFquant because RiboseQC is skipped."
@@ -1392,16 +1420,16 @@ workflow RIBOSEQ {
         if (ch_orf_qc_unified) {
             ORF_QC(
                 ch_orf_qc_unified,
-                ch_qc_ribocode_txt.collect().ifEmpty([]),
-                ch_qc_psites_calcs.collect().ifEmpty([]),
-                ch_ribowaltz_psite.map { meta, f -> f }.collect().ifEmpty([]),
-                ch_qc_rw_region.map { meta, f -> f }.collect().ifEmpty([]),
-                ch_qc_ribotricer_orfs.collect().ifEmpty([]),
-                ch_ribotish_predictions.map { meta, f -> f }.collect().ifEmpty([]),
-                ch_offset_for_ribotish.map { meta, f -> f }.collect().ifEmpty([]),
-                ch_price_gtf.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_orf_qc_ribocode.ifEmpty([]),
+                ch_orf_qc_psites.ifEmpty([]),
+                ch_orf_qc_rw_psite.ifEmpty([]),
+                ch_orf_qc_rw_region.ifEmpty([]),
+                ch_orf_qc_ribotricer.ifEmpty([]),
+                ch_orf_qc_ribotish.ifEmpty([]),
+                ch_orf_qc_ribotish_offset.ifEmpty([]),
+                ch_orf_qc_price.ifEmpty([]),
                 ch_rpbp_bayes.map { meta, f -> f }.collect().ifEmpty([]),
-                ch_orfquant_gtf.map { meta, f -> f }.collect().ifEmpty([])
+                ch_orf_qc_orfquant.ifEmpty([])
             )
         } else {
             log.warn "ORF QC module enabled but no unified ORFs available — skipping."

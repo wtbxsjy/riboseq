@@ -16,8 +16,7 @@ import logging
 import time
 
 from orfont.core.scripts_bridge import (
-    _ensure_scripts_on_path, _scripts_dir,
-    call_unify_orf_predictions,
+    _ensure_scripts_on_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,10 +42,16 @@ def _blocks_to_bed12(blocks_json, start):
     block_sizes = []
     block_starts = []
     for b_start, b_end in blocks:
-        block_sizes.append(str(b_end - b_start))
-        block_starts.append(str(b_start - start))
+        size = b_end - b_start
+        if size > 0:  # skip zero-length blocks (causes bedtools errors)
+            block_sizes.append(str(size))
+            block_starts.append(str(b_start - start))
+
+    if not block_sizes:
+        return 1, "100", "0"
+
     return (
-        len(blocks),
+        len(block_sizes),
         ",".join(block_sizes) + ",",
         ",".join(block_starts) + ",",
     )
@@ -216,26 +221,16 @@ def unify(ribotish_files=None, ribotricer_files=None, ribocode_files=None,
     os.makedirs(output_dir, exist_ok=True)
     output_prefix = os.path.join(output_dir, prefix)
 
-    # Determine if frame merge / seq cluster is needed
-    needs_original = frame_merge or seq_cluster or bedgraph_dir
-
-    if needs_original:
-        logger.info("Frame-merge/seq-cluster/bedgraph requested — using original path")
-        return _unify_original(
-            ribotish_files, ribotricer_files, ribocode_files, orfquant_files,
-            gtf_path, fasta_path, output_dir, prefix,
-            frame_merge, frame_merge_min_overlap, seq_cluster,
-            bedgraph_dir, sample_list, min_len, extra_args,
-        )
-
     return _unify_optimized(
         ribotish_files, ribotricer_files, ribocode_files, orfquant_files,
-        gtf_path, fasta_path, output_prefix, min_len,
+        price_files, gtf_path, fasta_path, output_prefix,
+        min_len, frame_merge, frame_merge_min_overlap,
     )
 
 
 def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
-                     orfquant_files, gtf_path, fasta_path, output_prefix, min_len):
+                     orfquant_files, price_files, gtf_path, fasta_path, output_prefix,
+                     min_len, frame_merge=True, frame_merge_min_overlap=0.9):
     """Optimized path: pandas bulk insert → DuckDB SQL dedup → output."""
     from orfont.core.db import get_connection, init_schema, reset_connection
     from orfont.core.models import ORFCandidate, GTFIndex
@@ -318,8 +313,25 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
     logger.info("Running SQL exact-match dedup...")
     t_dedup = time.perf_counter()
     n_unified = dedup_exact(con)
-    logger.info("Dedup: %d unified ORFs in %.1fs",
+    logger.info("Exact dedup: %d unified ORFs in %.1fs",
                 n_unified, time.perf_counter() - t_dedup)
+
+    # 6b. SQL frame-aware merge (single-exon ORFs only)
+    if frame_merge:
+        from orfont.unification.dedup import dedup_frame_aware
+        logger.info(
+            "Running SQL frame-aware merge (min_overlap=%.2f)...",
+            frame_merge_min_overlap,
+        )
+        t_frame = time.perf_counter()
+        n_merged = dedup_frame_aware(
+            con, min_overlap_fraction=frame_merge_min_overlap)
+        logger.info(
+            "Frame-merge: %d → %d ORFs in %.1fs (removed %d)",
+            n_unified, n_merged, time.perf_counter() - t_frame,
+            n_unified - n_merged,
+        )
+        n_unified = n_merged
 
     # 7. Backfill gene names from gtf_genes table
     annotate_gene_names(con)
@@ -384,7 +396,7 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
 # ---------------------------------------------------------------------------
 
 def _unify_original(ribotish_files, ribotricer_files, ribocode_files,
-                    orfquant_files, gtf_path, fasta_path,
+                    orfquant_files, price_files, gtf_path, fasta_path,
                     output_dir, prefix, frame_merge, frame_merge_min_overlap,
                     seq_cluster, bedgraph_dir, sample_list, min_len, extra_args):
     """Original path via bridge — calls unify_orf_predictions.main() directly."""
@@ -402,6 +414,8 @@ def _unify_original(ribotish_files, ribotricer_files, ribocode_files,
         argv.extend(['--ribocode', f])
     for f in (orfquant_files or []):
         argv.extend(['--orfquant', f])
+    for f in (price_files or []):
+        argv.extend(['--price', f])
 
     if not frame_merge:
         argv.append('--no-frame-merge')

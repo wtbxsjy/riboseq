@@ -127,20 +127,6 @@ def _run_orfont_unify(args):
     # Resolve --min_len / --min-len (NF uses --min_len)
     min_len = parsed.min_len if parsed.min_len is not None else (parsed.min_len_alt or 6)
 
-    # Features not yet ported to optimized path → fall back to original
-    needs_original = (
-        not parsed.no_frame_merge  # frame-merge requested
-        or parsed.seq_cluster
-        or parsed.bedgraph_dir
-        or parsed.per_tool_output
-    )
-
-    if needs_original:
-        logger.info("Requested features require original path — falling back")
-        from orfont.core.scripts_bridge import call_unify_orf_predictions
-        call_unify_orf_predictions(args)
-        return 0
-
     from orfont.unification.builder import unify
 
     # Determine output_dir and prefix from --output
@@ -158,9 +144,10 @@ def _run_orfont_unify(args):
         fasta_path=parsed.fasta,
         output_dir=output_dir,
         prefix=prefix,
-        frame_merge=False,
-        seq_cluster=False,
-        bedgraph_dir=None,
+        frame_merge=not parsed.no_frame_merge,
+        frame_merge_min_overlap=parsed.frame_merge_min_overlap,
+        seq_cluster=parsed.seq_cluster,
+        bedgraph_dir=parsed.bedgraph_dir,
         sample_list=parsed.sample_list,
         min_len=min_len,
     )
