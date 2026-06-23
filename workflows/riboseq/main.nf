@@ -146,6 +146,8 @@ workflow RIBOSEQ {
     ch_qc_rw_region       = Channel.empty()
 
     // Pre-collected clones for ORF_QC (avoids single-consumer channel deadlock)
+    ch_unify_bed_val       = Channel.empty()
+    ch_unify_metadata_val  = Channel.empty()
     ch_orf_qc_unified_pre  = Channel.empty()
     ch_orf_qc_rw_psite    = Channel.empty()
     ch_orf_qc_rw_region   = Channel.empty()
@@ -1039,10 +1041,11 @@ workflow RIBOSEQ {
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
             ch_unify_bed      = UNIFY_ORF_PREDICTIONS.out.bed
             ch_unify_gtf      = UNIFY_ORF_PREDICTIONS.out.gtf
-            // Pre-capture for ORF_QC before channels are consumed by CLASSIFY.
-            // .collect() captures items into a value channel independent of downstream consumption.
-            ch_orf_qc_unified_bed_cap  = ch_unify_bed.collect()
-            ch_orf_qc_unified_meta_cap = ch_unify_metadata.collect()
+            // Pre-capture unified bed+metadata as value channels for ORF_QC.
+            // .first() creates a value channel that stores the first (only) emission,
+            // making it independent of downstream CLASSIFY consumption.
+            ch_unify_bed_val = ch_unify_bed.first()
+            ch_unify_metadata_val = ch_unify_metadata.first()
             ch_unify_expression_summary  = UNIFY_ORF_PREDICTIONS.out.expression_summary
             ch_unify_expression_rpkm_tpm = UNIFY_ORF_PREDICTIONS.out.expression_rpkm_tpm
         }
@@ -1420,16 +1423,11 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        // Combine pre-captured bed + metadata into tuple expected by ORF_QC
-        ch_orf_qc_unified_pre = ch_orf_qc_unified_bed_cap
-            .combine(ch_orf_qc_unified_meta_cap)
-            .map { bed_list, meta_list ->
-                def bed_item = bed_list.isEmpty() ? [null, []] : bed_list[0]
-                def meta_item = meta_list.isEmpty() ? [null, []] : meta_list[0]
-                [ bed_item[0], bed_item[1], meta_item[1] ]
-            }
+        // Join value channels into tuple expected by ORF_QC
         ORF_QC(
-            ch_orf_qc_unified_pre,
+            ch_unify_bed_val
+                .join(ch_unify_metadata_val)
+                .map { meta_b, bed, meta_m, f -> [ meta_b, bed, f ] },
             ch_orf_qc_ribocode.ifEmpty([]),
             ch_orf_qc_psites.ifEmpty([]),
             ch_orf_qc_rw_psite.ifEmpty([]),
