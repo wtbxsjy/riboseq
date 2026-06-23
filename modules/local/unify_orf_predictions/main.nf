@@ -64,25 +64,16 @@ process UNIFY_ORF_PREDICTIONS {
     """
     set -uo pipefail
 
-    # Setup user-local Python package directory to avoid permission issues.
-    # MUST be set BEFORE any pip install --user call, otherwise pip tries to
-    # write to ~/.local which is read-only under singularity --no-home.
-    # Previously this was only set in the else branch, causing duckdb install
-    # to fail when Bio+pyfaidx were already available in the container.
-    export PYTHONUSERBASE="\$PWD/.pylibs"
-    export PATH="\$PYTHONUSERBASE/bin:\$PATH"
-    export PYTHONPATH="\$PYTHONUSERBASE/lib/python3.9/site-packages:\${PYTHONPATH:-}"
-    export PIP_NO_CACHE_DIR=1
-    mkdir -p "\$PYTHONUSERBASE"
-
-    # Redirect HOME to a writable location so DuckDB can create ~/.duckdb for
-    # extensions (e.g. parquet). Required under singularity --no-home.
-    export HOME="\$PWD"
-
     # Check if dependencies are already available (custom container)
     if python3 -c "import Bio; import pyfaidx" 2>/dev/null; then
         echo "Dependencies already available in container"
     else
+        # Setup user-local Python package directory to avoid permission issues
+        export PYTHONUSERBASE="\$PWD/.pylibs"
+        export PATH="\$PYTHONUSERBASE/bin:\$PATH"
+        export PYTHONPATH="\$PYTHONUSERBASE/lib/python3.9/site-packages:\${PYTHONPATH:-}"
+        export PIP_NO_CACHE_DIR=1
+        mkdir -p "\$PYTHONUSERBASE"
 
         echo "Installing Python dependencies..."
         pip install --user --no-cache-dir --no-warn-script-location pyfaidx biopython 2>&1 || {
