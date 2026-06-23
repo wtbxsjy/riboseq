@@ -146,6 +146,7 @@ workflow RIBOSEQ {
     ch_qc_rw_region       = Channel.empty()
 
     // Pre-collected clones for ORF_QC (avoids single-consumer channel deadlock)
+    ch_orf_qc_unified_pre  = Channel.empty()
     ch_orf_qc_rw_psite    = Channel.empty()
     ch_orf_qc_rw_region   = Channel.empty()
     ch_orf_qc_ribotish    = Channel.empty()
@@ -1038,6 +1039,8 @@ workflow RIBOSEQ {
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
             ch_unify_bed      = UNIFY_ORF_PREDICTIONS.out.bed
             ch_unify_gtf      = UNIFY_ORF_PREDICTIONS.out.gtf
+            // Pre-join for ORF_QC before channels are consumed by CLASSIFY
+            ch_orf_qc_unified_pre = ch_unify_bed.join(ch_unify_metadata)
             ch_unify_expression_summary  = UNIFY_ORF_PREDICTIONS.out.expression_summary
             ch_unify_expression_rpkm_tpm = UNIFY_ORF_PREDICTIONS.out.expression_rpkm_tpm
         }
@@ -1415,11 +1418,9 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        def ch_orf_qc_unified = ch_unify_bed.join(ch_unify_metadata)
-
-        if (ch_orf_qc_unified) {
+        if (ch_orf_qc_unified_pre) {
             ORF_QC(
-                ch_orf_qc_unified,
+                ch_orf_qc_unified_pre,
                 ch_orf_qc_ribocode.ifEmpty([]),
                 ch_orf_qc_psites.ifEmpty([]),
                 ch_orf_qc_rw_psite.ifEmpty([]),
