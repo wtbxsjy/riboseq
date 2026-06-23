@@ -1418,23 +1418,19 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        if (ch_orf_qc_unified_pre) {
-            ORF_QC(
-                ch_orf_qc_unified_pre,
-                ch_orf_qc_ribocode.ifEmpty([]),
-                ch_orf_qc_psites.ifEmpty([]),
-                ch_orf_qc_rw_psite.ifEmpty([]),
-                ch_orf_qc_rw_region.ifEmpty([]),
-                ch_orf_qc_ribotricer.ifEmpty([]),
-                ch_orf_qc_ribotish.ifEmpty([]),
-                ch_orf_qc_ribotish_offset.ifEmpty([]),
-                ch_orf_qc_price.ifEmpty([]),
-                ch_rpbp_bayes.map { meta, f -> f }.collect().ifEmpty([]),
-                ch_orf_qc_orfquant.ifEmpty([])
-            )
-        } else {
-            log.warn "ORF QC module enabled but no unified ORFs available — skipping."
-        }
+        ORF_QC(
+            ch_orf_qc_unified_pre.ifEmpty([]),
+            ch_orf_qc_ribocode.ifEmpty([]),
+            ch_orf_qc_psites.ifEmpty([]),
+            ch_orf_qc_rw_psite.ifEmpty([]),
+            ch_orf_qc_rw_region.ifEmpty([]),
+            ch_orf_qc_ribotricer.ifEmpty([]),
+            ch_orf_qc_ribotish.ifEmpty([]),
+            ch_orf_qc_ribotish_offset.ifEmpty([]),
+            ch_orf_qc_price.ifEmpty([]),
+            ch_rpbp_bayes.map { meta, f -> f }.collect().ifEmpty([]),
+            ch_orf_qc_orfquant.ifEmpty([])
+        )
     }
 
     //
