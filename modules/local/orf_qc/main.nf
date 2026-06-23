@@ -30,8 +30,8 @@ process ORF_QC {
     tuple val(meta), path("*_psite_harmonized.tsv")        , emit: psite_harmonized
     tuple val(meta), path("*_sample_flags.json")           , emit: flags
     tuple val(meta), path("*_qc_metrics.tsv")              , emit: metrics, optional: true
-    tuple val(meta), path("*_joint_riboseq_qc_mqc.yaml")   , emit: mqc_yaml
-    tuple val(meta), path("*_joint_riboseq_qc_mqc.txt")    , emit: mqc_data
+    tuple val(meta), path("*_joint_riboseq_qc_mqc.yaml")   , emit: mqc_yaml, optional: true
+    tuple val(meta), path("*_joint_riboseq_qc_mqc.txt")    , emit: mqc_data, optional: true
     path "versions.yml"                                    , emit: versions
 
     when:
