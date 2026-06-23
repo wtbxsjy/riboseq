@@ -80,7 +80,8 @@ process UNIFY_ORF_PREDICTIONS {
             echo "pip install failed, trying with python -m pip..."
             python3 -m pip install --user --no-cache-dir pyfaidx biopython
         }
-    
+    fi
+
     # Verify installation
     echo "Verifying dependencies..."
     python3 -c "import Bio; import pyfaidx; print('Dependencies OK: Bio=' + Bio.__version__ + ', pyfaidx=' + pyfaidx.__version__)"
