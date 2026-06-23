@@ -1419,7 +1419,7 @@ workflow RIBOSEQ {
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
         ORF_QC(
-            ch_orf_qc_unified_pre.ifEmpty([]),
+            ch_orf_qc_unified_pre,
             ch_orf_qc_ribocode.ifEmpty([]),
             ch_orf_qc_psites.ifEmpty([]),
             ch_orf_qc_rw_psite.ifEmpty([]),
