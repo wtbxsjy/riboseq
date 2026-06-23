@@ -1039,8 +1039,8 @@ workflow RIBOSEQ {
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
             ch_unify_bed      = UNIFY_ORF_PREDICTIONS.out.bed
             ch_unify_gtf      = UNIFY_ORF_PREDICTIONS.out.gtf
-            // Pre-join for ORF_QC before channels are consumed by CLASSIFY
-            ch_orf_qc_unified_pre = ch_unify_bed.join(ch_unify_metadata)
+            // Pre-join for ORF_QC into a value channel before channels are consumed by CLASSIFY
+            ch_orf_qc_unified_pre = ch_unify_bed.join(ch_unify_metadata, failOnMismatch: false).first()
             ch_unify_expression_summary  = UNIFY_ORF_PREDICTIONS.out.expression_summary
             ch_unify_expression_rpkm_tpm = UNIFY_ORF_PREDICTIONS.out.expression_rpkm_tpm
         }
