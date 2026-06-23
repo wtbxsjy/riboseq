@@ -1423,23 +1423,50 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        // Read unified BED + metadata directly from publishDir.
-        // Channel.value() creates independent value channels that don't
-        // conflict with CLASSIFY's subscription to ch_unify_bed/ch_unify_metadata.
+        // ORF_QC inputs via Channel.value() using published files.
+        // Channels consumed by upstream processes (CLASSIFY, COLLECT_QC_STATS)
+        // cannot be reused — use publishDir files directly instead.
         def orf_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+        def out = params.outdir
         ch_orf_qc_unified_final = Channel.value([
             [ id: orf_prefix ],
-            file("${params.outdir}/orf_unification/${orf_prefix}.bed.gz"),
-            file("${params.outdir}/orf_unification/${orf_prefix}.metadata.tsv")
+            file("${out}/orf_unification/${orf_prefix}.bed.gz"),
+            file("${out}/orf_unification/${orf_prefix}.metadata.tsv")
         ])
-        // Tool inputs: pass empty lists for now (placeholder - real data
-        // requires fixing the .collect() deadlock on consumed channels)
-        ch_orf_qc_rpc = Channel.value([])
+        ch_orf_qc_ribocode_f = Channel.value(
+            file("${out}/orf_predictions/ribocode/*_collapsed.txt").toList()
+        )
+        ch_orf_qc_psites_f = Channel.value(
+            file("${out}/riboseqc/*_P_sites_calcs").toList()
+        )
+        ch_orf_qc_rw_psite_f = Channel.value(
+            file("${out}/riboseq_qc/ribowaltz/*_psite_offset.tsv").toList()
+        )
+        ch_orf_qc_rw_region_f = Channel.value(
+            file("${out}/riboseq_qc/ribowaltz/*_frame_distribution.tsv").toList()
+        )
+        ch_orf_qc_ribotricer_f = Channel.value(
+            file("${out}/orf_predictions/ribotricer/postfilter/*_translating_ORFs.tsv").toList()
+        )
+        ch_orf_qc_ribotish_f = Channel.value(
+            file("${out}/orf_predictions/ribotish/postfilter/*_pred.txt").toList()
+        )
+        ch_orf_qc_ribotish_offset_f = Channel.value(
+            file("${out}/riboseqc/*_{P_sites_calcs}_offset.tsv").toList()
+        ).ifEmpty( file("${out}/riboseq_qc/ribowaltz/*_psite_offset.tsv").toList() )
+        ch_orf_qc_price_f = Channel.value(
+            file("${out}/orf_predictions/price/*.orfs.tsv").toList()
+        )
+        ch_orf_qc_orfquant_f = Channel.value(
+            file("${out}/orf_predictions/orfquant/postfilter/*_Detected_ORFs.gtf.gz").toList()
+        )
+        ch_orf_qc_rpbp_f = Channel.value([])
         ORF_QC(
             ch_orf_qc_unified_final,
-            ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc,
-            ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc,
-            ch_orf_qc_rpc, ch_orf_qc_rpc
+            ch_orf_qc_ribocode_f, ch_orf_qc_psites_f, ch_orf_qc_rw_psite_f,
+            ch_orf_qc_rw_region_f, ch_orf_qc_ribotricer_f, ch_orf_qc_ribotish_f,
+            ch_orf_qc_ribotish_offset_f, ch_orf_qc_price_f, ch_orf_qc_rpbp_f,
+            ch_orf_qc_orfquant_f
         )
     }
 
