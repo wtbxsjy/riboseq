@@ -31,6 +31,16 @@ BED12_COLUMNS = [
     "blockCount", "blockSizes", "blockStarts",
 ]
 
+def _format_exon_blocks(blocks_json):
+    """Convert JSON blocks string to 'start-end,start-end' format for metadata."""
+    import json
+    try:
+        blocks = json.loads(blocks_json)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    return ",".join(f"{s}-{e}" for s, e in blocks if e > s)
+
+
 def _blocks_to_bed12(blocks_json, start):
     """Convert JSON blocks string to BED12 block fields."""
     import json
@@ -55,6 +65,95 @@ def _blocks_to_bed12(blocks_json, start):
         ",".join(block_sizes) + ",",
         ",".join(block_starts) + ",",
     )
+
+
+def _extract_orfont_sequences(con, fasta_path):
+    """Extract nucleotide sequences for all unified ORFs from genome FASTA.
+
+    Queries the unified_orfs table, fetches genomic sequence per exon block
+    using pyfaidx, handles strand-specific reverse complement, and
+    batch-updates the ``sequence`` and ``start_codon`` columns.
+
+    Returns the number of ORFs updated.
+    """
+    import json
+    from pyfaidx import Fasta
+    from Bio.Seq import Seq
+    import pandas as pd
+
+    logger.info("Loading genome FASTA: %s", fasta_path)
+    fasta = Fasta(fasta_path)
+    logger.info("  FASTA contigs: %d", len(fasta.keys()))
+
+    rows = con.execute("""
+        SELECT orf_id, chrom, strand, blocks
+        FROM unified_orfs
+    """).fetchall()
+
+    updates = []
+    skipped_chrom = set()
+    for orf_id, chrom, strand, blocks_json in rows:
+        try:
+            blocks = json.loads(blocks_json)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not blocks:
+            continue
+
+        # Extract per-block sequences
+        parts = []
+        try:
+            for bs, be in blocks:
+                try:
+                    seq = str(fasta[chrom][bs:be])
+                    parts.append(seq)
+                except KeyError:
+                    # Try alternate chromosome naming
+                    alt_chrom = chrom[3:] if chrom.startswith('chr') else 'chr' + chrom
+                    if alt_chrom not in skipped_chrom:
+                        try:
+                            seq = str(fasta[alt_chrom][bs:be])
+                            parts.append(seq)
+                        except KeyError:
+                            skipped_chrom.add(chrom)
+                            break
+                    else:
+                        break
+        except Exception:
+            continue
+
+        if not parts:
+            continue
+
+        nt_seq = ''.join(parts)
+        if strand == '-':
+            nt_seq = str(Seq(nt_seq).reverse_complement())
+
+        start_codon = nt_seq[:3].upper() if len(nt_seq) >= 3 else ''
+        updates.append((orf_id, nt_seq, start_codon))
+
+    if not updates:
+        logger.warning("Could not extract any sequences (check chromosome naming)")
+        return 0
+
+    # Batch update via temporary table
+    logger.info(
+        "  Updating %d / %d ORFs (%.1f%%), %d chroms not found...",
+        len(updates), len(rows),
+        100 * len(updates) / max(len(rows), 1),
+        len(skipped_chrom),
+    )
+    df = pd.DataFrame(updates, columns=['orf_id', 'sequence', 'start_codon'])
+    con.register('_seq_updates', df)
+    con.execute("""
+        UPDATE unified_orfs u
+        SET sequence = s.sequence, start_codon = s.start_codon
+        FROM _seq_updates s
+        WHERE u.orf_id = s.orf_id
+    """)
+    con.unregister('_seq_updates')
+
+    return len(updates)
 
 
 def _write_outputs(con, output_prefix):
@@ -89,7 +188,7 @@ def _write_outputs(con, output_prefix):
             "start", "end", "source", "gene_id", "gene_name",
             "transcript_id", "orf_length", "score", "source_count",
             "samples", "tools", "sequence", "start_codon",
-            "aa_sequence", "cds_overlap",
+            "aa_sequence", "cds_overlap", "exon_blocks",
         ]
         mf.write("\t".join(hdr) + "\n")
         for row in rows:
@@ -115,6 +214,7 @@ def _write_outputs(con, output_prefix):
                 d["start_codon"] or "",
                 d["aa_sequence"] or "",
                 str(d["is_cds_overlap"]).lower(),
+                _format_exon_blocks(d.get("blocks", "")),
             ]) + "\n")
 
     # Write BED12
@@ -335,6 +435,12 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
 
     # 7. Backfill gene names from gtf_genes table
     annotate_gene_names(con)
+
+    # 7b. Extract nucleotide sequences from genome FASTA using pyfaidx
+    if fasta_path and os.path.exists(fasta_path):
+        _extract_orfont_sequences(con, fasta_path)
+    else:
+        logger.warning("No genome FASTA available — sequence/aa_sequence fields will be empty")
 
     # 8. Translate AA sequences (DuckDB Python UDF)
     translate_aa_sequences(con)
