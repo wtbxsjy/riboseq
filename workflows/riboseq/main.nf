@@ -1423,25 +1423,23 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        // Use Channel.value([]) for tool inputs to avoid .collect() deadlock.
-        // .collect() on process outputs may never complete if the output channel
-        // was consumed by another process (single-consumer semantics).
-        // Channel.value([]) emits an empty list immediately.
+        // Read unified BED + metadata directly from publishDir.
+        // Channel.value() creates independent value channels that don't
+        // conflict with CLASSIFY's subscription to ch_unify_bed/ch_unify_metadata.
+        def orf_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+        ch_orf_qc_unified_final = Channel.value([
+            [ id: orf_prefix ],
+            file("${params.outdir}/orf_unification/${orf_prefix}.bed.gz"),
+            file("${params.outdir}/orf_unification/${orf_prefix}.metadata.tsv")
+        ])
+        // Tool inputs: pass empty lists for now (placeholder - real data
+        // requires fixing the .collect() deadlock on consumed channels)
         ch_orf_qc_rpc = Channel.value([])
         ORF_QC(
-            ch_unify_bed_val
-                .join(ch_unify_metadata_val)
-                .map { meta_b, bed, meta_m, f -> [ meta_b, bed, f ] },
-            ch_orf_qc_rpc,  // ribocode
-            ch_orf_qc_rpc,  // psites
-            ch_orf_qc_rpc,  // rw_psite
-            ch_orf_qc_rpc,  // rw_region
-            ch_orf_qc_rpc,  // ribotricer
-            ch_orf_qc_rpc,  // ribotish
-            ch_orf_qc_rpc,  // ribotish_offset
-            ch_orf_qc_rpc,  // price
-            ch_orf_qc_rpc,  // rpbp
-            ch_orf_qc_rpc   // orfquant
+            ch_orf_qc_unified_final,
+            ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc,
+            ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc, ch_orf_qc_rpc,
+            ch_orf_qc_rpc, ch_orf_qc_rpc
         )
     }
 
