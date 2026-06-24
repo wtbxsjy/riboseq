@@ -97,28 +97,36 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
     }
 }
 
+# Install txdbmaker if missing (Bioc 3.20+)
+if (!requireNamespace("txdbmaker", quietly = TRUE)) {
+    if (!requireNamespace("BiocManager", quietly = TRUE))
+        install.packages("BiocManager", repos = "https://cloud.r-project.org", quiet = TRUE)
+    BiocManager::install("txdbmaker", update = FALSE, ask = FALSE, quiet = TRUE)
+}
 library(ORFquant)
 
-	# Patch load_annotation for non-model organisms (forge_BSgenome=FALSE)
-	unlockBinding("load_annotation", asNamespace("ORFquant"))
-	patched_load_annotation <- function(path) {
-	    GTF_annotation <- get(load(path))
-	    if (is(GTF_annotation\$genome, "FaFile")) {
-	        genome_sequence <- GTF_annotation\$genome
-	    } else {
-	        genome_pkg <- GTF_annotation\$genome_package
-	        if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
-	            library(genome_pkg, character.only = TRUE)
-	            genome_sequence <- get(genome_pkg)
-	        } else {
-	            genome_sequence <- NULL
-	        }
-	    }
-	    GTF_annotation <<- GTF_annotation
-	    genome_seq <<- genome_sequence
-	}
-	assign("load_annotation", patched_load_annotation, envir = asNamespace("ORFquant"))
-	lockBinding("load_annotation", asNamespace("ORFquant"))
+
+		# Patch load_annotation for non-model organisms (forge_BSgenome=FALSE).
+		# 2026-06-24: is(genome, "FaFile") returns FALSE for FaFile_Circ subclass
+		# due to incomplete S4 registration in this container.
+		# Fix: check genome_package first, use genome field as fallback.
+		unlockBinding("load_annotation", asNamespace("ORFquant"))
+		patched_load_annotation <- function(path) {
+		    GTF_annotation <- get(load(path))
+		    genome_pkg <- GTF_annotation\$genome_package
+		    if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
+		        library(genome_pkg, character.only = TRUE)
+		        genome_sequence <- get(genome_pkg)
+		    } else if (!is.null(GTF_annotation\$genome)) {
+		        genome_sequence <- GTF_annotation\$genome
+		    } else {
+		        genome_sequence <- NULL
+		    }
+		    GTF_annotation <<- GTF_annotation
+		    genome_seq <<- genome_sequence
+		}
+		assign("load_annotation", patched_load_annotation, envir = asNamespace("ORFquant"))
+		lockBinding("load_annotation", asNamespace("ORFquant"))
 
 # Run ORFquant with error handling for low-quality samples
 cat("Running ORFquant on sample ${prefix}...\\n")

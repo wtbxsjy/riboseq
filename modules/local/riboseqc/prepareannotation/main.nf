@@ -38,7 +38,7 @@ process RIBOSEQC_PREPAREANNOTATION {
         scientific_name = "Genome.annotation",
         annotation_name = "custom",
         export_bed_tables_TxDb = FALSE,
-        forge_BSgenome = TRUE,
+        forge_BSgenome = FALSE,
         create_TxDb = TRUE
     )
 
