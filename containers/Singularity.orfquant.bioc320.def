@@ -21,7 +21,7 @@ From: /home/25119231r/riboseq/run/rice/containers/bioc_3_20.sif
 
     # Install patched ORFquant (dev branch with exonicParts fix)
     R --vanilla -q -e '
-        pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
+        pkg_dir <- "/opt/ORFquant"
         cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
         system(cmd)
         library(ORFquant)
@@ -30,10 +30,10 @@ From: /home/25119231r/riboseq/run/rice/containers/bioc_3_20.sif
 
 %setup
     ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
-    mkdir -p "${ROOTFS}/opt/orfquant_patched" "${ROOTFS}/opt/riboseqc"
+    mkdir -p "${ROOTFS}/opt/ORFquant" "${ROOTFS}/opt/riboseqc"
 
 %files
-    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
+    /home/25119231r/riboseq/ORFquant /opt/ORFquant
     /home/25119231r/riboseq/RiboseQC /opt/riboseqc
 
 %runscript
