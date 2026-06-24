@@ -23,6 +23,7 @@ process PREPARE_FOR_ORFQUANT_CORRECTED {
     tuple val(meta), path(bam), path(bai)  // BAM and index files
     path annotation                          // *_Rannot file from RIBOSEQC_PREPAREANNOTATION
     tuple val(meta2), path(rl_cutoff)        // read_length to cutoff mapping from EXTRACT_RL_CUTOFF
+    path bsgenome_dir                        // BSgenome package directory from PREPAREANNOTATION (optional)
 
     output:
     // prepare_for_ORFquant appends "_for_ORFquant" to dest_name
@@ -45,7 +46,24 @@ process PREPARE_FOR_ORFQUANT_CORRECTED {
     mkdir -p "\$_local_rlibs"
     export R_LIBS_USER="\${_local_rlibs}\${R_LIBS_USER:+:\${R_LIBS_USER}}"
 
+# Export BSgenome dir path to R via env var (handle optional input)
+if [ -n "${bsgenome_dir:-}" ] && [ "${bsgenome_dir}" != "NO_FILE" ] && [ -d "${bsgenome_dir}" ]; then
+    export BSGENOME_DIR="${bsgenome_dir}"
+fi
+
     cat <<'RSCRIPTEOF' > script.R
+# Install BSgenome from PREPAREANNOTATION output (if available)
+_bsgenome_dir <- Sys.getenv("BSGENOME_DIR", unset = "")
+if (nchar(_bsgenome_dir) > 0 && dir.exists(_bsgenome_dir)) {
+    cat("Installing BSgenome for non-model organism...\n")
+    _rlibs_local <- file.path(getwd(), "rlibs")
+    dir.create(_rlibs_local, showWarnings = FALSE, recursive = TRUE)
+    .libPaths(c(_rlibs_local, .libPaths()))
+    Sys.setenv(R_LIBS_USER = _rlibs_local)
+    install.packages(_bsgenome_dir, repos = NULL, type = "source", lib = _rlibs_local, quiet = TRUE)
+    cat("BSgenome installed to", _rlibs_local, "\n")
+}
+
 # Load ORFquant library
 library(ORFquant)
 

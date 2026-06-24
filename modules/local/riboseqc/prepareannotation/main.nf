@@ -12,8 +12,9 @@ process RIBOSEQC_PREPAREANNOTATION {
     path fasta
 
     output:
-    path "*_Rannot"    , emit: annotation
-    path "versions.yml", emit: versions
+    path "*_Rannot"              , emit: annotation
+    path "BSgenome.*"            , emit: bsgenome, optional: true
+    path "versions.yml"          , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -24,21 +25,37 @@ process RIBOSEQC_PREPAREANNOTATION {
     """
     #!/bin/bash
 
-    cat <<EOF > script.R
+    cat <<'RSCRIPT' > script.R
     library(RiboseQC)
+    library(Biostrings)
+    library(rtracklayer)
 
-    # Prepare annotation files
-    # forge_BSgenome=TRUE builds a temporary BSgenome package from FASTA
-    # so ORFquant has access to genomic sequences for gene-level analysis.
-    # Required for non-model organisms that lack pre-built BSgenome packages.
+    # Build 2bit file from FASTA (required for forge_BSgenome=TRUE)
+    cat("Building 2bit file from FASTA...\\n")
+    twobit_path <- "genome.2bit"
+    if (!file.exists(twobit_path)) {
+        genome <- readDNAStringSet("${fasta}")
+        genome <- replaceAmbiguities(genome, new = "N")
+        export(genome, twobit_path, format = "2bit")
+        cat("2bit file created:", twobit_path, "\\n")
+    }
+
+    # Install BSgenome to local writable directory
+    rlibs_local <- file.path(getwd(), "rlibs")
+    dir.create(rlibs_local, showWarnings = FALSE, recursive = TRUE)
+    .libPaths(c(rlibs_local, .libPaths()))
+
+    # Prepare annotation files with BSgenome forge
+    cat("Preparing annotation with BSgenome forge...\\n")
     prepare_annotation_files(
         annotation_directory = ".",
         genome_seq = "${fasta}",
         gtf_file = "${gtf}",
+        twobit_file = twobit_path,
         scientific_name = "Genome.annotation",
         annotation_name = "custom",
         export_bed_tables_TxDb = FALSE,
-        forge_BSgenome = FALSE,
+        forge_BSgenome = TRUE,
         create_TxDb = TRUE
     )
 
@@ -50,20 +67,18 @@ process RIBOSEQC_PREPAREANNOTATION {
         ),
         "versions.yml"
     )
-    EOF
 
-    # Use Rscript from the Conda environment if available
-    if [[ -n "\$CONDA_PREFIX" ]]; then
-        "\$CONDA_PREFIX/bin/Rscript" script.R
-    else
-        Rscript script.R
-    fi
+    cat("Annotation prepared successfully\\n")
+    RSCRIPT
+
+    Rscript script.R
     """
 
     stub:
     def prefix = gtf.baseName
     """
     touch ${prefix}_Rannot
+    mkdir -p BSgenome.Genome.annotation.custom
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

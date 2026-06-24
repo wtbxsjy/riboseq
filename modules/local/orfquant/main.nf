@@ -15,6 +15,7 @@ process ORFQUANT_RUN {
     path annotation                        // *_Rannot file from RiboseQC/ORFquant annotation
     path fasta                             // Genome fasta file
     path orfquant_pkg                      // Pre-downloaded ORFquant R package (tar.gz) - optional
+    path bsgenome_dir                      // BSgenome package directory from PREPAREANNOTATION (optional)
 
     output:
     tuple val(meta), path("*_final_ORFquant_results")  , emit: results
@@ -103,7 +104,19 @@ if (!requireNamespace("txdbmaker", quietly = TRUE)) {
         install.packages("BiocManager", repos = "https://cloud.r-project.org", quiet = TRUE)
     BiocManager::install("txdbmaker", update = FALSE, ask = FALSE, quiet = TRUE)
 }
-library(ORFquant)
+	# Install BSgenome from PREPAREANNOTATION output (if available)
+	_bsgenome_dir <- "${bsgenome_dir}"
+	if (!is.null(_bsgenome_dir) && nchar(_bsgenome_dir) > 0 && _bsgenome_dir != "NO_FILE" && dir.exists(_bsgenome_dir)) {
+	    cat("Installing BSgenome for non-model organism...\\n")
+	    _rlibs_local <- file.path(getwd(), "rlibs")
+	    dir.create(_rlibs_local, showWarnings = FALSE, recursive = TRUE)
+	    .libPaths(c(_rlibs_local, .libPaths()))
+	    Sys.setenv(R_LIBS_USER = _rlibs_local)
+	    install.packages(_bsgenome_dir, repos = NULL, type = "source", lib = _rlibs_local, quiet = TRUE)
+	    cat("BSgenome installed to", _rlibs_local, "\\n")
+	}
+
+	library(ORFquant)
 
 
 		# Patch load_annotation for non-model organisms (forge_BSgenome=FALSE).
