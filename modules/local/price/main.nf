@@ -49,10 +49,11 @@ process PRICE {
     ls -lh ${genome_name}*
 
     echo "[PRICE] Running PRICE ORF detection on ${meta.id}"
-    # Per GEDI wiki: -genomic takes genome name (not .oml file)
+    # -genomic requires absolute path to .oml file (GEDI looks it up by name
+    # in config, but IndexGenome only creates the file, doesn't register it).
     gedi Price \
         -reads ${bam} \
-        -genomic ${genome_name} \
+        -genomic "\$(realpath ${genome_name}.oml)" \
         -prefix ${prefix} \
         -nthreads ${task.cpus} \
         -progress \
