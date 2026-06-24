@@ -123,18 +123,28 @@ if (!requireNamespace("txdbmaker", quietly = TRUE)) {
 		# 2026-06-24: is(genome, "FaFile") returns FALSE for FaFile_Circ subclass
 		# due to incomplete S4 registration in this container.
 		# Fix: check genome_package first, use genome field as fallback.
-		unlockBinding("load_annotation", asNamespace("ORFquant"))
-		patched_load_annotation <- function(path) {
-		    GTF_annotation <- get(load(path))
-		    genome_pkg <- GTF_annotation\$genome_package
-		    if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
-		        library(genome_pkg, character.only = TRUE)
-		        genome_sequence <- get(genome_pkg)
-		    } else if (!is.null(GTF_annotation\$genome)) {
-		        genome_sequence <- GTF_annotation\$genome
-		    } else {
-		        genome_sequence <- NULL
-		    }
+			unlockBinding("load_annotation", asNamespace("ORFquant"))
+			patched_load_annotation <- function(path) {
+			    GTF_annotation <- get(load(path))
+			    genome_pkg <- GTF_annotation\$genome_package
+			    if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
+			        # Traditional BSgenome package reference
+			        library(genome_pkg, character.only = TRUE)
+			        genome_sequence <- get(genome_pkg)
+			    } else if (is.character(GTF_annotation\$genome) && nchar(GTF_annotation\$genome) > 0) {
+			        # forge_BSgenome=TRUE stores package name as string in genome field
+			        pkg_name <- GTF_annotation\$genome
+			        library(pkg_name, character.only = TRUE)
+			        genome_sequence <- get(pkg_name)
+			    } else if (!is.null(GTF_annotation\$genome)) {
+			        # FaFile or other genome object (forge_BSgenome=FALSE)
+			        genome_sequence <- GTF_annotation\$genome
+			    } else {
+			        genome_sequence <- NULL
+			    }
+			    GTF_annotation <<- GTF_annotation
+			    genome_seq <<- genome_sequence
+			}
 		    GTF_annotation <<- GTF_annotation
 		    genome_seq <<- genome_sequence
 		}

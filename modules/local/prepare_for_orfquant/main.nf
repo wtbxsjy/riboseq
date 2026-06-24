@@ -78,11 +78,20 @@ fix_load_annotation <- function() {
         GTF_annotation <- get(load(path))
         genome_pkg <- GTF_annotation\$genome_package
         if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
+            # Traditional BSgenome package reference
             library(genome_pkg, character.only = TRUE)
             genome_sequence <- get(genome_pkg)
+        } else if (is.character(GTF_annotation\$genome) && nchar(GTF_annotation\$genome) > 0) {
+            # forge_BSgenome=TRUE stores package name as string in genome field
+            pkg_name <- GTF_annotation\$genome
+            library(pkg_name, character.only = TRUE)
+            genome_sequence <- get(pkg_name)
         } else if (!is.null(GTF_annotation\$genome)) {
+            # FaFile or other genome object (forge_BSgenome=FALSE)
             genome_sequence <- GTF_annotation\$genome
         } else {
+            genome_sequence <- NULL
+        }
             genome_sequence <- NULL
         }
         GTF_annotation <<- GTF_annotation

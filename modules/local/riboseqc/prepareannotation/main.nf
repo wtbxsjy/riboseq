@@ -28,7 +28,18 @@ process RIBOSEQC_PREPAREANNOTATION {
     cat <<'RSCRIPT' > script.R
     library(RiboseQC)
     library(Biostrings)
+    library(BSgenome)
     library(rtracklayer)
+
+    # Monkey-patch BSgenome:::.copySeqFile to auto-create destination dir
+    # (forgeBSgenomeDataPkg may not create inst/extdata before file copy)
+    unlockBinding(".copySeqFile", asNamespace("BSgenome"))
+    orig_copy <- BSgenome:::.copySeqFile
+    assign(".copySeqFile", function(seqfile_name, seqs_srcdir, seqs_destdir, verbose=FALSE) {
+        if (!dir.exists(seqs_destdir)) dir.create(seqs_destdir, recursive=TRUE)
+        orig_copy(seqfile_name, seqs_srcdir, seqs_destdir, verbose)
+    }, envir = asNamespace("BSgenome"))
+    lockBinding(".copySeqFile", asNamespace("BSgenome"))
 
     # Build 2bit file from FASTA (required for forge_BSgenome=TRUE)
     cat("Building 2bit file from FASTA...\\n")
