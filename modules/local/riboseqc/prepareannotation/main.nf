@@ -41,6 +41,11 @@ process RIBOSEQC_PREPAREANNOTATION {
     library(RiboseQC)
     library(Biostrings)
     library(rtracklayer)
+    # BSgenomeForge needed for forge_BSgenome=TRUE (RiboseQC 0.99.0+)
+    if (!requireNamespace("BSgenomeForge", quietly=TRUE)) {
+        BiocManager::install("BSgenomeForge", lib=rlibs_local, update=FALSE, ask=FALSE, quiet=TRUE)
+        library(BSgenomeForge)
+    }
 
     # Build 2bit file from FASTA (required for forge_BSgenome=TRUE)
     cat("Building 2bit file from FASTA...\\n")
@@ -62,7 +67,7 @@ process RIBOSEQC_PREPAREANNOTATION {
         scientific_name = "Genome.annotation",
         annotation_name = "custom",
         export_bed_tables_TxDb = FALSE,
-        forge_BSgenome = TRUE,
+        forge_BSgenome = FALSE,
         create_TxDb = TRUE
     )
 
