@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: quay.io/biocontainers/riboseqc:1.1--r36_1
+From: bioconductor/bioconductor_docker:RELEASE_3_20
 
 %labels
     Author nf-core/riboseq
@@ -19,7 +19,10 @@ From: quay.io/biocontainers/riboseqc:1.1--r36_1
     patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
 
 %post
-    # Install patched ORFquant from local source
+    # Install RiboseQC (not in base Bioconductor Docker image)
+    R --vanilla -q -e "if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_github('lcalviell/Ribo-seQC', upgrade='never', quiet=TRUE)"
+
+    # Install patched ORFquant (dev branch) from local source
     # Patches applied:
     # 1. Bioc 3.20: disjointExons → exonicParts (2 calls in orfquant.R, lines ~1791, ~5133)
     #    - disjointExons was removed from GenomicFeatures in Bioc 3.20
