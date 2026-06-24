@@ -1,104 +1,77 @@
 Bootstrap: docker
-From: bioconductor/bioconductor_docker:RELEASE_3_20
+From: rocker/r-base:4.4.2
 
 %labels
     Author nf-core/riboseq
-    Description RiboseQC container with PATCHED ORFquant 1.3.2 (Bioc 3.20 compat: disjointExons→exonicParts + txdbmaker + Position/combine/IRanges fixes)
-
-%setup
-    ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
-    mkdir -p "${ROOTFS}/etc"
-    rm -f "${ROOTFS}/etc/resolv.conf"
-    : > "${ROOTFS}/etc/resolv.conf"
-    
-    # Copy patched ORFquant source into the container
-    mkdir -p "${ROOTFS}/opt/orfquant_patched"
-
-%files
-    # Copy the patched ORFquant 1.1 source directory into the container
-    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
+    Description RiboseQC + PATCHED ORFquant (dev) container for Ribo-seq analysis (R 4.4.2, Bioc 3.20)
 
 %post
-    # Install RiboseQC (not in base Bioconductor Docker image)
-    R --vanilla -q -e "if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_github('lcalviell/Ribo-seQC', upgrade='never', quiet=TRUE)"
+    # Install system dependencies for BioC packages
+    apt-get update -qq && apt-get install -y -qq \
+        libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
+        libfontconfig1-dev libharfbuzz-dev libfribidi-dev \
+        libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
+        libgsl-dev libnetcdf-dev libhdf5-dev \
+        2>/dev/null || true
 
-    # Install ORFquant dependencies not in base image
-    R --vanilla -q -e "BiocManager::install(c('multitaper','dplyr','tidyr'), update=FALSE, ask=FALSE)"
+    # Install BiocManager and core BioC packages
+    R --vanilla -q -e '
+        if (!requireNamespace("BiocManager", quietly=TRUE))
+            install.packages("BiocManager", repos="https://cloud.r-project.org")
+        # ORFquant dev branch dependencies
+        BiocManager::install(c(
+            "rtracklayer", "BSgenome", "Biostrings", "GenomicFeatures",
+            "multitaper", "GenomicAlignments", "GenomicFiles",
+            "BiocGenerics", "Rsamtools", "GenomicRanges", "BiocParallel",
+            "dplyr", "tidyr", "ggplot2", "cowplot", "gridExtra",
+            "knitr", "rmarkdown", "reshape2", "AnnotationDbi",
+            "txdbmaker", "optparse"
+        ), update=FALSE, ask=FALSE)
+        # Additional ORFquant dev deps
+        install.packages(c("devtools", "testthat"), repos="https://cloud.r-project.org")
+    '
 
-    # Install txdbmaker for Bioc 3.20+ compatibility
-    R --vanilla -q -e "BiocManager::install('txdbmaker', update=FALSE, ask=FALSE)"
+    # Install RiboseQC from GitHub
+    R --vanilla -q -e '
+        if (!requireNamespace("remotes", quietly=TRUE))
+            install.packages("remotes", repos="https://cloud.r-project.org")
+        remotes::install_github("lcalviell/Ribo-seQC", upgrade="never")
+    '
 
     # Install patched ORFquant (dev branch) from local source
-    # Patches applied:
-    # 1. Bioc 3.20: disjointExons → exonicParts (2 calls in orfquant.R, lines ~1791, ~5133)
-    #    - disjointExons was removed from GenomicFeatures in Bioc 3.20
-    #    - exonicParts(..., linked.to.single.gene.only=FALSE) is the replacement
-    # 2. NAMESPACE: Import order fixed - BiocGenerics imported LAST
-    #    to ensure Position and combine don't get overridden by ggplot2/gridExtra
-    # 3. orfquant.R: IRanges empty data protection added at lines 160 and 973
-    #    to prevent "at least two out of start/end/width must be supplied" errors
-    # 4. orfquant.R (line ~3105): P_sites_all empty data filter added
-    #    to handle filtered BAMs (MT removed) with missing P-site data for some read lengths
-    
     cat > /tmp/install_orfquant.R <<'RSCRIPT'
 pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
-
-if (!dir.exists(pkg_dir)) {
-    stop("Patched ORFquant source not found at: ", pkg_dir)
-}
-
-message("Installing patched ORFquant 1.1 from: ", pkg_dir)
+if (!dir.exists(pkg_dir)) stop("Patched ORFquant source not found at: ", pkg_dir)
+message("Installing patched ORFquant from: ", pkg_dir)
 cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
 message(cmd)
 status <- system(cmd)
 if (status != 0) stop("R CMD INSTALL failed with status ", status)
-
-# Verify no Position conflict warning
-message("\n=== Verifying ORFquant installation ===")
 library(ORFquant)
 message("ORFquant version: ", packageVersion("ORFquant"))
-message("Installation successful - no Position/combine conflict warnings should appear above!")
+message("Installation successful!")
 RSCRIPT
-
-    # Install txdbmaker for Bioc 3.20+ compatibility
-    # (needed by GenomicFeatures functions that were migrated to txdbmaker)
-    R --vanilla -q -e "if (!requireNamespace('BiocManager', quietly=TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org'); BiocManager::install('txdbmaker', update=FALSE, ask=FALSE)"
-
     R --vanilla -q -f /tmp/install_orfquant.R
 
-    # Ensure optparse is available for ORFquant classification helpers
-    R --vanilla -q -e "if (!requireNamespace('optparse', quietly=TRUE)) install.packages('optparse', repos='https://cloud.r-project.org')"
+%setup
+    ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
+    mkdir -p "${ROOTFS}/etc" "${ROOTFS}/opt/orfquant_patched"
+    rm -f "${ROOTFS}/etc/resolv.conf"
+    : > "${ROOTFS}/etc/resolv.conf"
+
+%files
+    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
 
 %runscript
     exec "$@"
 
 %help
-    This container includes RiboseQC and PATCHED ORFquant 1.3.1 for Ribo-seq analysis.
-    
-    VERSION 1.3.0 PERFORMANCE OPTIMIZATIONS:
-    - DPSS caching: 3-34x speedup in spectral analysis
-    - Vectorized calc_orf_pval: batch P-site extraction, vapply statistics
-    - Optimized select_txs: vapply matrix construction
-    - Early filtering: skip non-qualifying ORFs before expensive computations
-    - Memory pre-allocation: reduced dynamic vector growth overhead
-    
-    PATCH DETAILS:
+    Container with RiboseQC and PATCHED ORFquant (dev branch) for Ribo-seq analysis.
+    R 4.4.2, Bioconductor 3.20.
+
+    Patches applied:
     - Bioc 3.20: disjointExons → exonicParts (2 locations in orfquant.R)
-    - Bioc 3.20: txdbmaker pre-installed (GenomicFeatures functions migrated)
-    - ORFquant NAMESPACE modified to import BiocGenerics LAST
-    - Ensures BiocGenerics::Position and BiocGenerics::combine are not overridden
-    - IRanges edge case protection added to prevent errors on empty data (2 locations)
-    - P_sites_all validation filter for GRangesList with empty/invalid elements
-    - Fixes "attempt to apply non-function" error in parallel ORFquant runs
-    - Fixes "at least two out of start/end/width must be supplied" IRanges error
-    - Handles filtered BAMs (MT removed) that may have missing P-sites for some read lengths
-    
-    Build:
-        apptainer build --fakeroot -F orfquant_patched.sif containers/Singularity.orfquant.patched.def
-
-    Use in nf-core/riboseq:
-        nextflow run main.nf -profile test_local_singularity \
-          --orfquant_container /abs/path/orfquant_patched.sif
-
-    Usage:
-        apptainer exec orfquant_patched.sif Rscript your_script.R
+    - Bioc 3.20: txdbmaker pre-installed
+    - ORFquant NAMESPACE: BiocGenerics imported LAST (Position/combine fix)
+    - IRanges empty data protection
+    - P_sites_all validation filter
