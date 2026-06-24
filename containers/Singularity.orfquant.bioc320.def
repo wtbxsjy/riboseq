@@ -6,7 +6,8 @@ From: /home/25119231r/riboseq/run/rice/containers/bioc_3_20.sif
     R --vanilla -q -e '
         # CRAN packages first
         install.packages(c("rmarkdown","knitr","reshape2","ggplot2","cowplot",
-            "gridExtra","dplyr","tidyr","devtools","remotes","optparse","testthat"),
+            "gridExtra","dplyr","tidyr","devtools","remotes","optparse","testthat",
+            "DT","ggpubr","viridis"),
             repos="https://cloud.r-project.org")
         # BioC packages
         BiocManager::install(c("rtracklayer","BSgenome","Biostrings",

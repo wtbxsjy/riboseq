@@ -3,9 +3,11 @@ process RIBOSEQC_PREPAREANNOTATION {
     label 'process_medium'
 
     conda "${moduleDir}/environment.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1' :
-        'quay.io/biocontainers/riboseqc:1.1--r36_1' }"
+    // Use ORFquant patched container if available (has RiboseQC + Bioc 3.20 fixes)
+    container "${ params.orfquant_container ?:
+        (workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+            'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1' :
+            'quay.io/biocontainers/riboseqc:1.1--r36_1') }"
 
     input:
     path gtf
@@ -26,20 +28,19 @@ process RIBOSEQC_PREPAREANNOTATION {
     #!/bin/bash
 
     cat <<'RSCRIPT' > script.R
+    # Install RiboseQC from local source if not already available
+    # (patched container has source at /opt/riboseqc/RiboseQC with Bioc 3.20 fixes)
+    rlibs_local <- file.path(getwd(), "rlibs")
+    dir.create(rlibs_local, showWarnings = FALSE, recursive = TRUE)
+    .libPaths(c(rlibs_local, .libPaths()))
+    local_src <- "/opt/riboseqc/RiboseQC"
+    if (dir.exists(local_src) && !requireNamespace("RiboseQC", quietly=TRUE)) {
+        cat("Installing RiboseQC from local source...\\n")
+        install.packages(local_src, repos=NULL, type="source", lib=rlibs_local, quiet=TRUE)
+    }
     library(RiboseQC)
     library(Biostrings)
-    library(BSgenome)
     library(rtracklayer)
-
-    # Monkey-patch BSgenome:::.copySeqFile to auto-create destination dir
-    # (forgeBSgenomeDataPkg may not create inst/extdata before file copy)
-    unlockBinding(".copySeqFile", asNamespace("BSgenome"))
-    orig_copy <- BSgenome:::.copySeqFile
-    assign(".copySeqFile", function(seqfile_name, seqs_srcdir, seqs_destdir, verbose=FALSE) {
-        if (!dir.exists(seqs_destdir)) dir.create(seqs_destdir, recursive=TRUE)
-        orig_copy(seqfile_name, seqs_srcdir, seqs_destdir, verbose)
-    }, envir = asNamespace("BSgenome"))
-    lockBinding(".copySeqFile", asNamespace("BSgenome"))
 
     # Build 2bit file from FASTA (required for forge_BSgenome=TRUE)
     cat("Building 2bit file from FASTA...\\n")
@@ -51,18 +52,13 @@ process RIBOSEQC_PREPAREANNOTATION {
         cat("2bit file created:", twobit_path, "\\n")
     }
 
-    # Install BSgenome to local writable directory
-    rlibs_local <- file.path(getwd(), "rlibs")
-    dir.create(rlibs_local, showWarnings = FALSE, recursive = TRUE)
-    .libPaths(c(rlibs_local, .libPaths()))
-
     # Prepare annotation files with BSgenome forge
+    # RiboseQC 0.99.0: no genome_seq parameter, uses twobit_file directly
     cat("Preparing annotation with BSgenome forge...\\n")
     prepare_annotation_files(
         annotation_directory = ".",
-        genome_seq = "${fasta}",
-        gtf_file = "${gtf}",
         twobit_file = twobit_path,
+        gtf_file = "${gtf}",
         scientific_name = "Genome.annotation",
         annotation_name = "custom",
         export_bed_tables_TxDb = FALSE,
