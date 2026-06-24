@@ -14,12 +14,8 @@ From: /home/25119231r/riboseq/run/rice/containers/bioc_3_20.sif
             "BiocGenerics","Rsamtools","GenomicRanges","BiocParallel",
             "AnnotationDbi","txdbmaker"), update=FALSE, ask=FALSE)
         # RiboseQC (from local source with Bioc 3.20 disjointExons fix)
-        pkg_dir <- "/opt/riboseqc"
-        if (dir.exists(pkg_dir) && file.exists(file.path(pkg_dir, "DESCRIPTION"))) {
-            system(sprintf("R CMD INSTALL %s", shQuote(pkg_dir)))
-        } else {
-            remotes::install_github("lcalviell/Ribo-seQC", upgrade="never")
-        }
+        pkg_dir <- "/opt/riboseqc/RiboseQC"
+        system(sprintf("R CMD INSTALL %s", shQuote(pkg_dir)))
     '
 
     # Install patched ORFquant (dev branch with exonicParts fix)
