@@ -21,7 +21,7 @@ From: /home/25119231r/riboseq/run/rice/containers/bioc_3_20.sif
 
     # Install patched ORFquant (dev branch with exonicParts fix)
     R --vanilla -q -e '
-        pkg_dir <- "/opt/ORFquant"
+        pkg_dir <- "/opt/ORFquant/ORFquant"
         cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
         system(cmd)
         library(ORFquant)
