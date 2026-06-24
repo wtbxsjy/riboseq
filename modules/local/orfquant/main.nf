@@ -54,7 +54,13 @@ process ORFQUANT_RUN {
 
     # Write R script - ORFquant should be pre-installed in custom container
     cat > run_orfquant.R <<'RSCRIPTEOF'
-install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
+install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02", local_src = NULL) {
+    if (!is.null(local_src) && dir.exists(local_src) && file.exists(file.path(local_src, "DESCRIPTION"))) {
+        message("Installing ORFquant from local source: ", local_src)
+        cmd <- sprintf("R CMD INSTALL %s", shQuote(local_src))
+        status <- system(cmd)
+        if (status == 0) return(invisible(TRUE))
+    }
     work <- file.path(getwd(), "orfquant_src")
     dir.create(work, showWarnings = FALSE, recursive = TRUE)
 
@@ -84,7 +90,7 @@ install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
 if (!requireNamespace("ORFquant", quietly = TRUE)) {
     local_pkg <- if (${use_local_pkg ? 'TRUE' : 'FALSE'}) "${local_pkg_path}" else NULL
     tryCatch({
-        install_orfquant(local_pkg_tgz = local_pkg, tag = "1.02")
+        install_orfquant(local_pkg_tgz = local_pkg, tag = "1.02", local_src = "/opt/ORFquant")
     }, error = function(e) {
         stop(
             "ORFquant is not installed and automatic installation failed: ", conditionMessage(e), "\n",
