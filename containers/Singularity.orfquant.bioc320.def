@@ -1,0 +1,47 @@
+Bootstrap: localimage
+From: /home/25119231r/riboseq/run/rice/containers/bioc_3_20.sif
+
+%post
+    # Install ALL ORFquant dev branch + RiboseQC dependencies
+    R --vanilla -q -e '
+        # CRAN packages first
+        install.packages(c("rmarkdown","knitr","reshape2","ggplot2","cowplot",
+            "gridExtra","dplyr","tidyr","devtools","remotes","optparse","testthat"),
+            repos="https://cloud.r-project.org")
+        # BioC packages
+        BiocManager::install(c("rtracklayer","BSgenome","Biostrings",
+            "GenomicFeatures","multitaper","GenomicAlignments","GenomicFiles",
+            "BiocGenerics","Rsamtools","GenomicRanges","BiocParallel",
+            "AnnotationDbi","txdbmaker"), update=FALSE, ask=FALSE)
+        # RiboseQC (from local source with Bioc 3.20 disjointExons fix)
+        pkg_dir <- "/opt/riboseqc"
+        if (dir.exists(pkg_dir) && file.exists(file.path(pkg_dir, "DESCRIPTION"))) {
+            system(sprintf("R CMD INSTALL %s", shQuote(pkg_dir)))
+        } else {
+            remotes::install_github("lcalviell/Ribo-seQC", upgrade="never")
+        }
+    '
+
+    # Install patched ORFquant (dev branch with exonicParts fix)
+    R --vanilla -q -e '
+        pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
+        cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
+        system(cmd)
+        library(ORFquant)
+        cat("ORFquant:", as.character(packageVersion("ORFquant")), "\n")
+    '
+
+%setup
+    ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
+    mkdir -p "${ROOTFS}/opt/orfquant_patched" "${ROOTFS}/opt/riboseqc"
+
+%files
+    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
+    /home/25119231r/riboseq/RiboseQC /opt/riboseqc
+
+%runscript
+    exec "$@"
+
+%help
+    ORFquant (dev branch, Bioc 3.20) + RiboseQC + txdbmaker
+    R 4.4.2, disjointExons→exonicParts fix applied
