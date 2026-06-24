@@ -23,7 +23,6 @@ process PREPARE_FOR_ORFQUANT_CORRECTED {
     tuple val(meta), path(bam), path(bai)  // BAM and index files
     path annotation                          // *_Rannot file from RIBOSEQC_PREPAREANNOTATION
     tuple val(meta2), path(rl_cutoff)        // read_length to cutoff mapping from EXTRACT_RL_CUTOFF
-    path bsgenome_dir                        // BSgenome package directory from PREPAREANNOTATION (optional)
 
     output:
     // prepare_for_ORFquant appends "_for_ORFquant" to dest_name
@@ -46,24 +45,7 @@ process PREPARE_FOR_ORFQUANT_CORRECTED {
     mkdir -p "\$_local_rlibs"
     export R_LIBS_USER="\${_local_rlibs}\${R_LIBS_USER:+:\${R_LIBS_USER}}"
 
-# Export BSgenome dir path to R via env var (handle optional input)
-if [ -n "${bsgenome_dir:-}" ] && [ "${bsgenome_dir}" != "NO_FILE" ] && [ -d "${bsgenome_dir}" ]; then
-    export BSGENOME_DIR="${bsgenome_dir}"
-fi
-
     cat <<'RSCRIPTEOF' > script.R
-# Install BSgenome from PREPAREANNOTATION output (if available)
-_bsgenome_dir <- Sys.getenv("BSGENOME_DIR", unset = "")
-if (nchar(_bsgenome_dir) > 0 && dir.exists(_bsgenome_dir)) {
-    cat("Installing BSgenome for non-model organism...\n")
-    _rlibs_local <- file.path(getwd(), "rlibs")
-    dir.create(_rlibs_local, showWarnings = FALSE, recursive = TRUE)
-    .libPaths(c(_rlibs_local, .libPaths()))
-    Sys.setenv(R_LIBS_USER = _rlibs_local)
-    install.packages(_bsgenome_dir, repos = NULL, type = "source", lib = _rlibs_local, quiet = TRUE)
-    cat("BSgenome installed to", _rlibs_local, "\n")
-}
-
 # Load ORFquant library
 library(ORFquant)
 
@@ -78,20 +60,11 @@ fix_load_annotation <- function() {
         GTF_annotation <- get(load(path))
         genome_pkg <- GTF_annotation\$genome_package
         if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
-            # Traditional BSgenome package reference
             library(genome_pkg, character.only = TRUE)
             genome_sequence <- get(genome_pkg)
-        } else if (is.character(GTF_annotation\$genome) && nchar(GTF_annotation\$genome) > 0) {
-            # forge_BSgenome=TRUE stores package name as string in genome field
-            pkg_name <- GTF_annotation\$genome
-            library(pkg_name, character.only = TRUE)
-            genome_sequence <- get(pkg_name)
         } else if (!is.null(GTF_annotation\$genome)) {
-            # FaFile or other genome object (forge_BSgenome=FALSE)
             genome_sequence <- GTF_annotation\$genome
         } else {
-            genome_sequence <- NULL
-        }
             genome_sequence <- NULL
         }
         GTF_annotation <<- GTF_annotation
