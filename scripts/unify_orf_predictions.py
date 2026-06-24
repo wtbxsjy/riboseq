@@ -15,6 +15,13 @@ import threading
 
 def _open(path, mode='r'):
     if path.endswith('.gz'):
+        if os.path.exists(path):
+            return gzip.open(path, mode + 't')
+        # Bash script may have gunzipped the file already (e.g. *.gtf.gz -> *.gtf)
+        alt_path = path[:-3]
+        if os.path.exists(alt_path):
+            return open(alt_path, mode)
+        # Fall through: let original gzip.open() raise FileNotFoundError
         return gzip.open(path, mode + 't')
     return open(path, mode)
 
