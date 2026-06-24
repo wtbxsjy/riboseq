@@ -14,21 +14,23 @@ From: rocker/r-base:4.4.2
         libgsl-dev libnetcdf-dev libhdf5-dev \
         2>/dev/null || true
 
-    # Install BiocManager and core BioC packages
+    # Install ALL ORFquant dependencies (both CRAN and BioC)
     R --vanilla -q -e '
         if (!requireNamespace("BiocManager", quietly=TRUE))
             install.packages("BiocManager", repos="https://cloud.r-project.org")
-        # ORFquant dev branch dependencies
+        # CRAN packages first
+        install.packages(c(
+            "rmarkdown", "knitr", "reshape2", "ggplot2", "cowplot",
+            "gridExtra", "dplyr", "tidyr", "devtools", "testthat",
+            "remotes", "optparse"
+        ), repos="https://cloud.r-project.org")
+        # BioC packages
         BiocManager::install(c(
             "rtracklayer", "BSgenome", "Biostrings", "GenomicFeatures",
             "multitaper", "GenomicAlignments", "GenomicFiles",
             "BiocGenerics", "Rsamtools", "GenomicRanges", "BiocParallel",
-            "dplyr", "tidyr", "ggplot2", "cowplot", "gridExtra",
-            "knitr", "rmarkdown", "reshape2", "AnnotationDbi",
-            "txdbmaker", "optparse"
+            "AnnotationDbi", "txdbmaker"
         ), update=FALSE, ask=FALSE)
-        # Additional ORFquant dev deps
-        install.packages(c("devtools", "testthat"), repos="https://cloud.r-project.org")
     '
 
     # Install RiboseQC from GitHub
