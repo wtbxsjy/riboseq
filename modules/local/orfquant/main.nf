@@ -112,38 +112,11 @@ if (!requireNamespace("txdbmaker", quietly = TRUE)) {
 
 	library(ORFquant)
 
+			# load_annotation monkey-patch REMOVED (2026-06-28).
+			# The patched ORFquant container now includes fork-safe load_annotation()
+			# with FaFile->DNAStringSet conversion.
 
-		# Patch load_annotation for non-model organisms (forge_BSgenome=FALSE).
-		# 2026-06-24: is(genome, "FaFile") returns FALSE for FaFile_Circ subclass
-		# due to incomplete S4 registration in this container.
-		# Fix: check genome_package first, use genome field as fallback.
-			unlockBinding("load_annotation", asNamespace("ORFquant"))
-			patched_load_annotation <- function(path) {
-			    GTF_annotation <- get(load(path))
-			    genome_pkg <- GTF_annotation\$genome_package
-			    if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
-			        # Traditional BSgenome package reference
-			        library(genome_pkg, character.only = TRUE)
-			        genome_sequence <- get(genome_pkg)
-			    } else if (is.character(GTF_annotation\$genome) && nchar(GTF_annotation\$genome) > 0) {
-			        # forge_BSgenome=TRUE stores package name as string in genome field
-			        pkg_name <- GTF_annotation\$genome
-			        library(pkg_name, character.only = TRUE)
-			        genome_sequence <- get(pkg_name)
-			    } else if (!is.null(GTF_annotation\$genome)) {
-			        # FaFile or other genome object (forge_BSgenome=FALSE)
-			        genome_sequence <- GTF_annotation\$genome
-			    } else {
-			        genome_sequence <- NULL
-			    }
-			    GTF_annotation <<- GTF_annotation
-			    genome_seq <<- genome_sequence
-			}
-		    GTF_annotation <<- GTF_annotation
-		    genome_seq <<- genome_sequence
-		}
-		assign("load_annotation", patched_load_annotation, envir = asNamespace("ORFquant"))
-		lockBinding("load_annotation", asNamespace("ORFquant"))
+
 
 # Run ORFquant with error handling for low-quality samples
 cat("Running ORFquant on sample ${prefix}...\\n")
