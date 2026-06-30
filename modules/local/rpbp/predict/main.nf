@@ -26,10 +26,6 @@ process RPBP_PREDICT {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def args = task.ext.args ?: ''
     """
-    # Error handling: wrap the entire RPBP pipeline to handle empty results gracefully
-    rpbp_ok=0
-    set +e
-
     # Find models using python
     # We output them to files to read them into variables
     python3 -c '
@@ -85,75 +81,51 @@ with open("untranslated_models.txt", "w") as f: f.write(get_models("untranslated
         $bam \\
         $orfs_genomic \\
         ${prefix}.metagene-profiles.csv.gz \\
-        --num-cpus $task.cpus || rpbp_ok=\$?
+        --num-cpus $task.cpus
 
     # 2. Estimate metagene profile Bayes factors
-    if [ \$rpbp_ok -eq 0 ]; then
-        estimate-metagene-profile-bayes-factors \\
-            ${prefix}.metagene-profiles.csv.gz \\
-            ${prefix}.metagene-profile-bayes-factors.csv.gz \\
-            --periodic-models \$PERIODIC_MODELS \\
-            --nonperiodic-models \$NONPERIODIC_MODELS \\
-            --num-cpus $task.cpus \\
-            $args || rpbp_ok=\$?
-    fi
+    estimate-metagene-profile-bayes-factors \\
+        ${prefix}.metagene-profiles.csv.gz \\
+        ${prefix}.metagene-profile-bayes-factors.csv.gz \\
+        --periodic-models \$PERIODIC_MODELS \\
+        --nonperiodic-models \$NONPERIODIC_MODELS \\
+        --num-cpus $task.cpus \\
+        $args
 
     # 3. Select periodic offsets
-    if [ \$rpbp_ok -eq 0 ]; then
-        select-periodic-offsets \\
-            ${prefix}.metagene-profile-bayes-factors.csv.gz \\
-            ${prefix}.periodic-offsets.csv.gz || rpbp_ok=\$?
-    fi
+    select-periodic-offsets \\
+        ${prefix}.metagene-profile-bayes-factors.csv.gz \\
+        ${prefix}.periodic-offsets.csv.gz
 
     # 4. Extract ORF profiles
     # Parse lengths and offsets
-    if [ \$rpbp_ok -eq 0 ]; then
-        ARGS=\$(python3 -c "import pandas as pd; df=pd.read_csv('${prefix}.periodic-offsets.csv.gz'); print('--lengths ' + ' '.join(map(str, df['length'].astype(int))) + ' --offsets ' + ' '.join(map(str, df['highest_peak_offset'].astype(int))))")
-        extract-orf-profiles \\
-            $bam \\
-            $orfs_genomic \\
-            $orfs_exons \\
-            ${prefix}.profiles.mtx.gz \\
-            \$ARGS \\
-            --num-cpus $task.cpus || rpbp_ok=\$?
-    fi
+    ARGS=\$(python3 -c "import pandas as pd; df=pd.read_csv('${prefix}.periodic-offsets.csv.gz'); print('--lengths ' + ' '.join(map(str, df['length'].astype(int))) + ' --offsets ' + ' '.join(map(str, df['highest_peak_offset'].astype(int))))")
+
+    extract-orf-profiles \\
+        $bam \\
+        $orfs_genomic \\
+        $orfs_exons \\
+        ${prefix}.profiles.mtx.gz \\
+        \$ARGS \\
+        --num-cpus $task.cpus
 
     # 5. Estimate ORF Bayes factors
-    if [ \$rpbp_ok -eq 0 ]; then
-        estimate-orf-bayes-factors \\
-            ${prefix}.profiles.mtx.gz \\
-            $orfs_genomic \\
-            ${prefix}.bayes-factors.bed.gz \\
-            --translated-models \$TRANSLATED_MODELS \\
-            --untranslated-models \$UNTRANSLATED_MODELS \\
-            --num-cpus $task.cpus \\
-            $args || rpbp_ok=\$?
-    fi
+    estimate-orf-bayes-factors \\
+        ${prefix}.profiles.mtx.gz \\
+        $orfs_genomic \\
+        ${prefix}.bayes-factors.bed.gz \\
+        --translated-models \$TRANSLATED_MODELS \\
+        --untranslated-models \$UNTRANSLATED_MODELS \\
+        --num-cpus $task.cpus \\
+        $args
 
     # 6. Select final prediction set
-    if [ \$rpbp_ok -eq 0 ]; then
-        select-final-prediction-set \\
-            ${prefix}.bayes-factors.bed.gz \\
-            $orfs_genomic \\
-            ${prefix}.predicted-orfs.bed.gz \\
-            ${prefix}.predicted-orfs.dna.fa \\
-            ${prefix}.predicted-orfs.protein.fa || rpbp_ok=\$?
-    fi
-
-    set -e
-
-    # Handle empty/failed results
-    if [ \$rpbp_ok -ne 0 ]; then
-        if [ "\${RPBP_FAIL_ON_EMPTY:-false}" = "true" ]; then
-            echo "FATAL: RPBP failed to produce ORF predictions for ${meta.id} and --rpbp_fail_on_empty is true"
-            exit 1
-        fi
-        echo "WARNING: RPBP failed for ${meta.id} - creating placeholder files"
-        echo "# RPBP placeholder - no ORFs predicted" | gzip -c > ${prefix}.predicted-orfs.bed.gz
-        echo ">no_orfs" > ${prefix}.predicted-orfs.dna.fa
-        echo ">no_orfs" > ${prefix}.predicted-orfs.protein.fa
-        echo -e "# RPBP placeholder - no Bayes factors computed" | gzip -c > ${prefix}.bayes-factors.bed.gz
-    fi
+    select-final-prediction-set \\
+        ${prefix}.bayes-factors.bed.gz \\
+        $orfs_genomic \\
+        ${prefix}.predicted-orfs.bed.gz \\
+        ${prefix}.predicted-orfs.dna.fa \\
+        ${prefix}.predicted-orfs.protein.fa
 
     cat <<END_VERSIONS > versions.yml
 "${task.process}":

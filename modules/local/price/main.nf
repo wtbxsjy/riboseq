@@ -23,14 +23,9 @@ process PRICE {
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_name = "price_genome_${meta.id}"
-    // PRICE read-length filter: by default use 28:30 (canonical RPFs).
-    // Use != null check (not Elvis ?:) because Groovy treats 0 as falsy,
-    // so `params.sorf_read_len_min ?: 28` would silently convert an explicit
-    // `--sorf_read_len_min 0` (user wants "no filter") into the default 28.
-    // When both min/max are 0, pass an empty filter so PRICE uses all reads.
-    def length_min = params.sorf_read_len_min != null ? params.sorf_read_len_min : 28
-    def length_max = params.sorf_read_len_max != null ? params.sorf_read_len_max : 30
-    def price_filter = (length_min == 0 && length_max == 0) ? '' : "${length_min}:${length_max}"
+    // PRICE read-length filtering is done upstream via sORF filtering.
+    // The -filter flag is NOT a valid GEDI Price parameter (removed per wiki).
+    def extra_args = params.extra_price_args ?: ''
     """
     #!/bin/bash
     set -euo pipefail
@@ -54,13 +49,16 @@ process PRICE {
     ls -lh ${genome_name}*
 
     echo "[PRICE] Running PRICE ORF detection on ${meta.id}"
+    # -genomic requires absolute path to .oml file (GEDI looks it up by name
+    # in config, but IndexGenome only creates the file, doesn't register it).
     gedi Price \
         -reads ${bam} \
-        -genomic ${genome_name}.oml \
+        -genomic "\$(realpath ${genome_name}.oml)" \
         -prefix ${prefix} \
-        ${price_filter ? "-filter ${price_filter}" : ''} \
         -nthreads ${task.cpus} \
         -progress \
+        -novelTranscripts \
+        ${extra_args} \
         || {
             echo "WARNING: PRICE main pipeline returned non-zero exit code."
             echo "Some stages may have completed. Checking for partial output..."
@@ -76,10 +74,6 @@ process PRICE {
             -genomic ${genome_name}.oml \
             || echo "WARNING: PriceAnalyze post-processing failed."
     else
-        if [ "\${PRICE_FAIL_ON_EMPTY:-false}" = "true" ]; then
-            echo "FATAL: PRICE produced no ORF predictions for ${meta.id} and --price_fail_on_empty is true"
-            exit 1
-        fi
         echo "[PRICE] No ORFs detected. Creating placeholder outputs."
         echo -e "orf_id\\tchr\\tstart\\tend\\tstrand\\ttype\\tscore" > "${prefix}.orfs.tsv"
     fi

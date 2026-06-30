@@ -8,11 +8,10 @@ process EXPRESSION_QUANT {
         'python:3.11-slim' }"
 
     input:
-    path unified_meta                               // unified ORF metadata
-    path unified_bed                                // unified ORF BED
-    path orf_confidence                             // ORF confidence TSV (from ORF_QC)
-    path psites_bedgraph                            // all P-site bedgraphs from RiboseQC (collected list)
-    path coverage_bedgraph                          // all coverage bedgraphs (collected list)
+    path expression_summary    // from UNIFY (pre-computed per-sample P-site expression)
+    path expression_rpkm_tpm   // from UNIFY (pre-computed per-sample RPKM/TPM)
+    path orf_confidence        // ORF confidence TSV from ORF_QC (optional)
+    path format_script         // format_expression_output.py from bin/
 
     output:
     path "*_expression_summary.tsv"                 , emit: expression
@@ -26,59 +25,30 @@ process EXPRESSION_QUANT {
     def prefix = task.ext.prefix ?: "expression_quant"
     def min_ocs = params.expression_quant_min_ocs ?: 0.0
     def max_orfs = params.expression_quant_max_orfs ?: 0
-    def workers = params.expression_quant_workers ?: 4
+    // ORF confidence may not be available (e.g. ORF_QC hasn't completed yet)
+    def _orf_conf = orf_confidence instanceof List ? (orf_confidence.isEmpty() ? null : orf_confidence[0]) : (orf_confidence.name != 'NO_FILE' ? orf_confidence : null)
+    def orf_conf_opt = _orf_conf ? "--orf-confidence ${_orf_conf}" : ''
     """
     #!/bin/bash
     set -euo pipefail
 
-    echo "=== ORF Expression Quantification ==="
+    echo "=== ORF Expression Quantification (reformat) ==="
     echo "Prefix: ${prefix}"
     echo "Min OCS: ${min_ocs}"
-    echo "Workers: ${workers}"
 
-    # Collect sample names from bedgraph files
-    ls *_P_sites_plus.bedgraph 2>/dev/null | sed 's/_P_sites_plus.bedgraph//' > sample_list.txt || true
-    n_samples=\$(wc -l < sample_list.txt || echo 0)
-    echo "Samples with P-site data: \$n_samples"
+    # Expression stats already computed during UNIFY_ORF_PREDICTIONS
+    # This process only reformats and optionally applies OCS filtering.
+    python3 ${format_script} \\
+        --expression-summary ${expression_summary} \\
+        --expression-rpkm-tpm ${expression_rpkm_tpm} \\
+        --min-ocs ${min_ocs} \\
+        --max-orfs ${max_orfs} \\
+        --output-summary "${prefix}_expression_summary.tsv" \\
+        --output-rpkm-tpm "${prefix}_expression_rpkm_tpm.tsv" \\
+        ${orf_conf_opt}
 
-    # Check ORF confidence file validity
-    orf_conf_arg=""
-    if [ -f "${orf_confidence}" ] && [ -s "${orf_confidence}" ]; then
-        orf_conf_arg="--orf-confidence ${orf_confidence}"
-        echo "Using ORF confidence file: ${orf_confidence}"
-    else
-        echo "WARNING: ORF confidence file missing or empty. Quantifying without OCS filter."
-    fi
-
-    if [ "\$n_samples" -eq 0 ]; then
-        echo "WARNING: No P-site bedgraph files found. Creating placeholder output."
-        echo -e "orf_id\\tchrom\\tstart\\tend\\tstrand\\ttotal_reads\\tn_expressed_samples" > "${prefix}_expression_summary.tsv"
-        echo -e "orf_id\\tchrom\\tstart\\tend\\tstrand\\torf_length\\torf_length_kb" > "${prefix}_expression_rpkm_tpm.tsv"
-    else
-        # Phase 1: P-site expression quantification
-        echo "--- Phase 1: P-site expression quantification ---"
-        quantify_orf_expression.py \\
-            --orf-meta ${unified_meta} \\
-            \${orf_conf_arg} \\
-            --psites-dir . \\
-            --sample-pattern "*_P_sites_plus.bedgraph" \\
-            --output "${prefix}_expression_summary.tsv" \\
-            --min-ocs ${min_ocs} \\
-            --max-orfs ${max_orfs} \\
-            --workers ${workers}
-
-        # Phase 2: RPKM/TPM calculation
-        echo "--- Phase 2: RPKM/TPM calculation ---"
-        calc_orf_rpkm_tpm.py \\
-            --expression "${prefix}_expression_summary.tsv" \\
-            --coverage-dir . \\
-            --sample-pattern "*_coverage_plus.bedgraph" \\
-            --output "${prefix}_expression_rpkm_tpm.tsv" \\
-            --workers ${workers}
-
-        echo "--- Done ---"
-        ls -lh ${prefix}_*
-    fi
+    echo "--- Done ---"
+    ls -lh ${prefix}_*
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

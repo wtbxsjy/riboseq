@@ -26,6 +26,8 @@ process UNIFY_ORF_PREDICTIONS {
     path "*.bed.gz"      , emit: bed
     path "*.gtf.gz"      , emit: gtf
     path "*.stats.txt"   , emit: stats
+    path "*_expression_summary.tsv"    , emit: expression_summary
+    path "*_expression_rpkm_tpm.tsv"   , emit: expression_rpkm_tpm
     path "versions.yml"          , emit: versions
 
     when:
@@ -79,7 +81,7 @@ process UNIFY_ORF_PREDICTIONS {
             python3 -m pip install --user --no-cache-dir pyfaidx biopython
         }
     fi
-    
+
     # Verify installation
     echo "Verifying dependencies..."
     python3 -c "import Bio; import pyfaidx; print('Dependencies OK: Bio=' + Bio.__version__ + ', pyfaidx=' + pyfaidx.__version__)"
@@ -166,7 +168,7 @@ process UNIFY_ORF_PREDICTIONS {
                 --fasta ${fasta} \\
                 --output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads ${task.cpus} \\
+                --threads 2 \\
                 --frame-merge-min-overlap ${frame_merge_min_overlap} \\
                 ${no_frame_merge} \\
                 ${seq_cluster} \\
@@ -185,7 +187,7 @@ process UNIFY_ORF_PREDICTIONS {
                 --fasta ${fasta} \\
                 --output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads ${task.cpus} \\
+                --threads 2 \\
                 --frame-merge-min-overlap ${frame_merge_min_overlap} \\
                 ${no_frame_merge} \\
                 ${seq_cluster} \\
@@ -256,6 +258,8 @@ process UNIFY_ORF_PREDICTIONS {
     gzip -f ${prefix}.bed
     touch ${prefix}.gtf
     gzip -f ${prefix}.gtf
+    touch ${prefix}_expression_summary.tsv
+    touch ${prefix}_expression_rpkm_tpm.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -336,14 +340,21 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
     """
     set -uo pipefail
 
+    # Setup user-local Python package directory to avoid permission issues.
+    # MUST be set BEFORE any pip install --user call (see main UNIFY process for details).
+    export PYTHONUSERBASE="\$PWD/.pylibs"
+    export PATH="\$PYTHONUSERBASE/bin:\$PATH"
+    export PYTHONPATH="\$PYTHONUSERBASE/lib/python3.9/site-packages:\${PYTHONPATH:-}"
+    export PIP_NO_CACHE_DIR=1
+    mkdir -p "\$PYTHONUSERBASE"
+
+    # Redirect HOME to a writable location so DuckDB can create ~/.duckdb for
+    # extensions (e.g. parquet). Required under singularity --no-home.
+    export HOME="\$PWD"
+
     if python3 -c "import Bio; import pyfaidx" 2>/dev/null; then
         echo "Dependencies already available in container"
     else
-        export PYTHONUSERBASE="\$PWD/.pylibs"
-        export PATH="\$PYTHONUSERBASE/bin:\$PATH"
-        export PYTHONPATH="\$PYTHONUSERBASE/lib/python3.9/site-packages:\${PYTHONPATH:-}"
-        export PIP_NO_CACHE_DIR=1
-        mkdir -p "\$PYTHONUSERBASE"
         pip install --user --no-cache-dir --no-warn-script-location pyfaidx biopython 2>&1 || \
             python3 -m pip install --user --no-cache-dir pyfaidx biopython
     fi
@@ -403,7 +414,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
                 --output ${prefix} \\
                 --per-tool-output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads ${task.cpus} \\
+                --threads 2 \\
                 --no-frame-merge \\
                 ${ribotish_arg} \\
                 ${ribotricer_arg} \\
@@ -421,7 +432,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
                 --output ${prefix} \\
                 --per-tool-output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads ${task.cpus} \\
+                --threads 2 \\
                 --no-frame-merge \\
                 ${ribotish_arg} \\
                 ${ribotricer_arg} \\

@@ -15,6 +15,13 @@ import threading
 
 def _open(path, mode='r'):
     if path.endswith('.gz'):
+        if os.path.exists(path):
+            return gzip.open(path, mode + 't')
+        # Bash script may have gunzipped the file already (e.g. *.gtf.gz -> *.gtf)
+        alt_path = path[:-3]
+        if os.path.exists(alt_path):
+            return open(alt_path, mode)
+        # Fall through: let original gzip.open() raise FileNotFoundError
         return gzip.open(path, mode + 't')
     return open(path, mode)
 
@@ -1810,12 +1817,21 @@ def _build_candidate_block_bins(final_list, bin_size=BedgraphIndex.BIN_SIZE):
 def _stream_bedgraph_file_counts(task):
     """
     Stream a single bedgraph file and accumulate counts for candidate blocks.
+
+    Returns: (counts, max_vals, val_sums, val_counts)
+        counts      - defaultdict(int):  weighted sum (bg_value * overlap_bp)
+        max_vals    - dict:              max bg_value per cand_idx (for pN)
+        val_sums    - defaultdict(float): sum of bg_values per cand_idx (for pN)
+        val_counts  - defaultdict(int):   count of overlapping intervals per cand_idx (for pN)
     """
     bedgraph_file, chrom_bins = task
     counts = defaultdict(int)
+    max_vals = {}
+    val_sums = defaultdict(float)
+    val_counts = defaultdict(int)
 
     if not bedgraph_file or not os.path.exists(bedgraph_file):
-        return counts
+        return (counts, max_vals, val_sums, val_counts)
 
     try:
         with _open(bedgraph_file, 'r') as handle:
@@ -1853,10 +1869,14 @@ def _stream_bedgraph_file_counts(task):
                         overlap_end = min(bg_end, block_end)
                         if overlap_start < overlap_end:
                             counts[cand_idx] += int(bg_value * (overlap_end - overlap_start))
+                            # Per-interval stats for pN calculation
+                            max_vals[cand_idx] = max(max_vals.get(cand_idx, bg_value), bg_value)
+                            val_sums[cand_idx] += bg_value
+                            val_counts[cand_idx] += 1
     except Exception as exc:
         print(f"Warning: Error streaming bedgraph {bedgraph_file}: {exc}", file=sys.stderr)
 
-    return counts
+    return (counts, max_vals, val_sums, val_counts)
 
 
 def _estimate_bedgraph_bytes(bedgraph_dir, sample_list, metric_types):
@@ -1876,9 +1896,12 @@ def _estimate_bedgraph_bytes(bedgraph_dir, sample_list, metric_types):
 def calculate_statistics_streaming(final_list, bedgraph_dir, sample_list, num_workers=None, metric_types=None):
     """
     Low-memory statistics path: stream each bedgraph file once and update all ORFs.
+
+    Accumulates both aggregate stats (on ORFCandidate objects) and per-sample
+    breakdowns returned as a dict suitable for writing expression output files.
     """
     if not bedgraph_dir or not os.path.exists(bedgraph_dir) or not sample_list:
-        return
+        return None
 
     if metric_types is None:
         metric_types = ('psite', 'psite_uniq', 'coverage', 'coverage_uniq')
@@ -1898,8 +1921,20 @@ def calculate_statistics_streaming(final_list, bedgraph_dir, sample_list, num_wo
         'coverage': 'total_reads',
         'coverage_uniq': 'unique_reads',
     }
+
+    # --- Per-sample tracking setup ---
+    n_orfs = len(final_list)
+    n_samples = len(sample_list)
+    sample_idx = {s: i for i, s in enumerate(sample_list)}
+    per_sample_reads = [[0] * n_samples for _ in range(n_orfs)]
+    per_sample_max = [[0.0] * n_samples for _ in range(n_orfs)]
+    per_sample_val_sum = [[0.0] * n_samples for _ in range(n_orfs)]
+    per_sample_val_cnt = [[0] * n_samples for _ in range(n_orfs)]
+    per_sample_coverage = [[0.0] * n_samples for _ in range(n_orfs)]
+
     tasks = []
     for sample in sample_list:
+        s_idx = sample_idx[sample]
         for strand_suffix in ('plus', 'minus'):
             chrom_bins = block_bins[strand_suffix]
             if not chrom_bins:
@@ -1909,10 +1944,10 @@ def calculate_statistics_streaming(final_list, bedgraph_dir, sample_list, num_wo
                     bedgraph_dir,
                     f"{sample}_{BEDGRAPH_METRIC_FILES[metric]}_{strand_suffix}.bedgraph"
                 )
-                tasks.append((metric, bedgraph_file, chrom_bins))
+                tasks.append((metric, bedgraph_file, chrom_bins, s_idx))
 
     if not tasks:
-        return
+        return None
 
     max_workers = max(1, min(num_workers, len(tasks), 4))
     print(
@@ -1922,20 +1957,70 @@ def calculate_statistics_streaming(final_list, bedgraph_dir, sample_list, num_wo
 
     completed = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {
-            executor.submit(_stream_bedgraph_file_counts, (bedgraph_file, chrom_bins)): metric
-            for metric, bedgraph_file, chrom_bins in tasks
-        }
+        future_map = {}
+        for metric, bedgraph_file, chrom_bins, s_idx in tasks:
+            future = executor.submit(_stream_bedgraph_file_counts, (bedgraph_file, chrom_bins))
+            future_map[future] = (metric, s_idx)
+
         for future in as_completed(future_map):
-            metric = future_map[future]
-            counts = future.result()
+            metric, s_idx = future_map[future]
+            counts, max_vals, val_sums, val_counts = future.result()
+
+            # Aggregate stats (unchanged behaviour)
             attr = attr_map[metric]
             for cand_idx, value in counts.items():
                 setattr(final_list[cand_idx], attr, getattr(final_list[cand_idx], attr) + value)
+
+            # Per-sample accumulation
+            if metric in ('psite', 'psite_uniq'):
+                for cand_idx, value in counts.items():
+                    per_sample_reads[cand_idx][s_idx] += value
+                for cand_idx, val in max_vals.items():
+                    per_sample_max[cand_idx][s_idx] = max(per_sample_max[cand_idx][s_idx], val)
+                for cand_idx, val in val_sums.items():
+                    per_sample_val_sum[cand_idx][s_idx] += val
+                for cand_idx, val in val_counts.items():
+                    per_sample_val_cnt[cand_idx][s_idx] += val
+            elif metric in ('coverage', 'coverage_uniq'):
+                for cand_idx, value in counts.items():
+                    per_sample_coverage[cand_idx][s_idx] += value
+
             completed += 1
             print(f"  Streamed {completed}/{len(tasks)} bedgraph files...", file=sys.stderr, end='\r')
 
     print(f"  Streamed {len(tasks)}/{len(tasks)} bedgraph files.", file=sys.stderr)
+
+    # Compute derived per-sample values
+    per_sample_pN = [[0.0] * n_samples for _ in range(n_orfs)]
+    per_sample_rpkm = [[0.0] * n_samples for _ in range(n_orfs)]
+    for i in range(n_orfs):
+        length_kb = final_list[i].length_nt / 1000.0
+        for s in range(n_samples):
+            if per_sample_reads[i][s] > 0 and per_sample_val_sum[i][s] > 0:
+                per_sample_pN[i][s] = round(
+                    per_sample_max[i][s] * per_sample_val_cnt[i][s] / max(per_sample_val_sum[i][s], 1e-10), 4
+                )
+            if length_kb > 0:
+                per_sample_rpkm[i][s] = per_sample_coverage[i][s] / length_kb
+
+    # Compute TPM (per-sample normalization)
+    per_sample_tpm = [[0.0] * n_samples for _ in range(n_orfs)]
+    for s in range(n_samples):
+        total_rpkm = sum(per_sample_rpkm[i][s] for i in range(n_orfs))
+        if total_rpkm > 0:
+            inv_total = 1e6 / total_rpkm
+            for i in range(n_orfs):
+                per_sample_tpm[i][s] = per_sample_rpkm[i][s] * inv_total
+
+    return {
+        'per_sample_reads': per_sample_reads,
+        'per_sample_pN': per_sample_pN,
+        'per_sample_coverage_rpm': per_sample_coverage,
+        'per_sample_rpkm': per_sample_rpkm,
+        'per_sample_tpm': per_sample_tpm,
+        'sample_idx': sample_idx,
+        'sample_list': sample_list,
+    }
 
 
 def parse_price(file_path, gtf_index, sample_id, min_len=0,
@@ -2202,6 +2287,68 @@ def annotate_sequences_and_cds(candidates, use_parallel, num_workers, genome_fas
         extract_sequence(cand, genome_fasta)
     print("Annotating CDS overlap and overlapping genes...", file=sys.stderr)
     annotate_cds_overlap(candidates, gtf_index)
+
+
+def _write_expression_outputs(candidates, per_sample_data, prefix):
+    """Write per-ORF expression summary and RPKM/TPM TSV files.
+
+    Columns match the output of quantify_orf_expression.py + calc_orf_rpkm_tpm.py
+    exactly so downstream consumers (MultiQC, user scripts) see no difference.
+    """
+    if not per_sample_data or not candidates:
+        return
+
+    sample_list = per_sample_data['sample_list']
+    sample_idx_map = per_sample_data['sample_idx']
+    sorted_samples = sorted(sample_list, key=lambda s: sample_idx_map[s])
+    n_orfs = len(candidates)
+
+    # --- expression_summary.tsv ---
+    summary_path = f"{prefix}_expression_summary.tsv"
+    with open(summary_path, 'w') as f:
+        header = ["orf_id", "chrom", "start", "end", "strand"]
+        for s in sorted_samples:
+            header.append(f"{s}_reads")
+            header.append(f"{s}_pN")
+        header.extend(["total_reads", "n_expressed_samples"])
+        f.write('\t'.join(header) + '\n')
+
+        for i, cand in enumerate(candidates):
+            orf_id = f"ORF_{i+1}_{cand.gid}"
+            row = [orf_id, cand.chrom, str(cand.start), str(cand.end), cand.strand]
+            for s in sorted_samples:
+                s_idx = sample_idx_map[s]
+                reads_val = per_sample_data['per_sample_reads'][i][s_idx]
+                pN_val = per_sample_data['per_sample_pN'][i][s_idx]
+                row.append(str(reads_val))
+                row.append(f"{pN_val:.4f}")
+            total_r = sum(per_sample_data['per_sample_reads'][i])
+            n_exp = sum(1 for v in per_sample_data['per_sample_reads'][i] if v > 0)
+            row.extend([str(total_r), str(n_exp)])
+            f.write('\t'.join(row) + '\n')
+
+    # --- expression_rpkm_tpm.tsv ---
+    rpkm_path = f"{prefix}_expression_rpkm_tpm.tsv"
+    with open(rpkm_path, 'w') as f:
+        header = ["orf_id", "chrom", "start", "end", "strand", "orf_length", "orf_length_kb"]
+        for s in sorted_samples:
+            header.append(f"{s}_coverage_rpm")
+            header.append(f"{s}_rpkm")
+            header.append(f"{s}_tpm")
+        f.write('\t'.join(header) + '\n')
+
+        for i, cand in enumerate(candidates):
+            orf_id = f"ORF_{i+1}_{cand.gid}"
+            row = [orf_id, cand.chrom, str(cand.start), str(cand.end), cand.strand,
+                   str(cand.length_nt), f"{cand.length_nt / 1000.0:.3f}"]
+            for s in sorted_samples:
+                s_idx = sample_idx_map[s]
+                row.append(f"{per_sample_data['per_sample_coverage_rpm'][i][s_idx]:.4f}")
+                row.append(f"{per_sample_data['per_sample_rpkm'][i][s_idx]:.4f}")
+                row.append(f"{per_sample_data['per_sample_tpm'][i][s_idx]:.4f}")
+            f.write('\t'.join(row) + '\n')
+
+    print(f"Expression outputs written to {summary_path}, {rpkm_path}", file=sys.stderr)
 
 
 def _write_orf_outputs(candidates: list, prefix: str) -> None:
@@ -2618,6 +2765,7 @@ def main(argv=None):
             print(f"  {sample:20s}: ribotish={ribotish_cnt:6d}, ribotricer={ribotricer_cnt:6d}, ribocode={ribocode_cnt:6d}, orfquant={orfquant_cnt:6d}, total={total:6d}", file=sys.stderr)
     
     # Calculate statistics from bedgraphs if provided (using optimized indexed version)
+    per_sample_data = None
     if args.bedgraph_dir and args.sample_list:
         sample_list = args.sample_list.split(',')
         print(f"Calculating statistics from bedgraphs for {len(sample_list)} samples...", file=sys.stderr)
@@ -2650,7 +2798,7 @@ def main(argv=None):
             )
             del bedgraph_indices
         else:
-            calculate_statistics_streaming(
+            per_sample_data = calculate_statistics_streaming(
                 final_list,
                 args.bedgraph_dir,
                 sample_list,
@@ -2658,6 +2806,13 @@ def main(argv=None):
                 metric_types=metric_types,
             )
         gc.collect()
+
+        # Write per-ORF expression outputs from per-sample data (streaming mode only)
+        if per_sample_data:
+            _write_expression_outputs(final_list, per_sample_data, args.output)
+        else:
+            print("Note: per-sample expression outputs not available (preload mode or no bedgraph data).",
+                  file=sys.stderr)
 
     if skip_stage3:
         annotate_sequences_and_cds(final_list, use_parallel, num_workers, genome_fasta, gtf_index)

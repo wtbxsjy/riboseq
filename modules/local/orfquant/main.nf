@@ -52,8 +52,14 @@ process ORFQUANT_RUN {
     export R_LIBS_USER="\${_local_rlibs}\${R_LIBS_USER:+:\${R_LIBS_USER}}"
 
     # Write R script - ORFquant should be pre-installed in custom container
-    cat > run_orfquant.R <<RSCRIPTEOF
-install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
+    cat > run_orfquant.R <<'RSCRIPTEOF'
+install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02", local_src = NULL) {
+    if (!is.null(local_src) && dir.exists(local_src) && file.exists(file.path(local_src, "DESCRIPTION"))) {
+        message("Installing ORFquant from local source: ", local_src)
+        cmd <- sprintf("R CMD INSTALL %s", shQuote(local_src))
+        status <- system(cmd)
+        if (status == 0) return(invisible(TRUE))
+    }
     work <- file.path(getwd(), "orfquant_src")
     dir.create(work, showWarnings = FALSE, recursive = TRUE)
 
@@ -83,7 +89,7 @@ install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02") {
 if (!requireNamespace("ORFquant", quietly = TRUE)) {
     local_pkg <- if (${use_local_pkg ? 'TRUE' : 'FALSE'}) "${local_pkg_path}" else NULL
     tryCatch({
-        install_orfquant(local_pkg_tgz = local_pkg, tag = "1.02")
+        install_orfquant(local_pkg_tgz = local_pkg, tag = "1.02", local_src = "/opt/ORFquant")
     }, error = function(e) {
         stop(
             "ORFquant is not installed and automatic installation failed: ", conditionMessage(e), "\n",
@@ -97,7 +103,20 @@ if (!requireNamespace("ORFquant", quietly = TRUE)) {
     }
 }
 
-library(ORFquant)
+# Install txdbmaker if missing (Bioc 3.20+)
+if (!requireNamespace("txdbmaker", quietly = TRUE)) {
+    if (!requireNamespace("BiocManager", quietly = TRUE))
+        install.packages("BiocManager", repos = "https://cloud.r-project.org", quiet = TRUE)
+    BiocManager::install("txdbmaker", update = FALSE, ask = FALSE, quiet = TRUE)
+}
+
+	library(ORFquant)
+
+			# load_annotation monkey-patch REMOVED (2026-06-28).
+			# The patched ORFquant container now includes fork-safe load_annotation()
+			# with FaFile->DNAStringSet conversion.
+
+
 
 # Run ORFquant with error handling for low-quality samples
 cat("Running ORFquant on sample ${prefix}...\\n")
@@ -130,16 +149,6 @@ orfquant_success <- tryCatch({
     )
     
     if (is_low_signal_error) {
-        # Check if user wants to fail on empty results
-        fail_on_empty <- tolower(Sys.getenv("ORFQUANT_FAIL_ON_EMPTY", "false"))
-        if (fail_on_empty == "true") {
-            stop(
-                "FATAL: ORFquant produced no ORF predictions for sample and ",
-                "--orfquant_fail_on_empty is true. ",
-                "Original error: ", error_msg
-            )
-        }
-
         cat("\\nWARNING: ORFquant failed due to insufficient signal/ORF predictions.\\n")
         cat("This typically occurs when:\\n")
         cat("  - Sample has low ribosome profiling signal\\n")
