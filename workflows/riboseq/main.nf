@@ -145,20 +145,6 @@ workflow RIBOSEQ {
     ch_qc_rtr_bam_summary = Channel.empty()
     ch_qc_rw_region       = Channel.empty()
 
-    // Pre-collected clones for ORF_QC (avoids single-consumer channel deadlock)
-    ch_unify_bed_val       = Channel.empty()
-    ch_unify_metadata_val  = Channel.empty()
-    ch_orf_qc_unified_pre  = Channel.empty()
-    ch_orf_qc_rw_psite    = Channel.empty()
-    ch_orf_qc_rw_region   = Channel.empty()
-    ch_orf_qc_ribotish    = Channel.empty()
-    ch_orf_qc_ribotish_offset = Channel.empty()
-    ch_orf_qc_ribotricer  = Channel.empty()
-    ch_orf_qc_ribocode    = Channel.empty()
-    ch_orf_qc_price       = Channel.empty()
-    ch_orf_qc_psites      = Channel.empty()
-    ch_orf_qc_orfquant    = Channel.empty()
-
     //
     // BAM INPUT MODE: Skip preprocessing and alignment
     //
@@ -618,8 +604,6 @@ workflow RIBOSEQ {
             .map { meta, bam, bai -> [ meta.id, meta, bam, bai ] }
         ch_offset_for_ribotish = RIBOTISH_QUALITY_RIBOSEQ.out.offset
             .map { meta, offset -> [ meta.id, offset ] }
-        // Pre-collect clone for ORF_QC
-        ch_orf_qc_ribotish_offset = RIBOTISH_QUALITY_RIBOSEQ.out.offset.map { meta, f -> f }.collect()
         
         ribotish_postfilter_inputs = ch_bams_for_ribotish
             .join(ch_offset_for_ribotish, by: 0)
@@ -639,8 +623,6 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(RIBOTISH_PREDICT_POSTFILTER.out.versions)
         ch_ribotish_predictions = RIBOTISH_PREDICT_POSTFILTER.out.predictions
-        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY)
-        ch_orf_qc_ribotish = RIBOTISH_PREDICT_POSTFILTER.out.predictions.map { meta, f -> f }.collect()
         ch_qc_ribotish_all = RIBOTISH_PREDICT_POSTFILTER.out.all.map { meta, f -> f }
 
         if (params.sorf_predict_pooled) {
@@ -683,8 +665,6 @@ workflow RIBOSEQ {
         ch_versions = ch_versions.mix(RIBOTRICER_DETECTORFS_POSTFILTER.out.versions)
         ch_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs
         ch_qc_ribotricer_orfs = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs.map { meta, f -> f }
-        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY + COLLECT_QC_STATS)
-        ch_orf_qc_ribotricer = RIBOTRICER_DETECTORFS_POSTFILTER.out.orfs.map { meta, f -> f }.collect()
         ch_qc_rtr_bam_summary = RIBOTRICER_DETECTORFS_POSTFILTER.out.bam_summary
     }
 
@@ -802,8 +782,6 @@ workflow RIBOSEQ {
              ch_versions = ch_versions.mix(RIBOCODE.out.versions)
              ch_ribocode_gtf = RIBOCODE.out.gtf
              ch_qc_ribocode_txt = RIBOCODE.out.collapsed.map { meta, f -> f }
-            // Pre-collect clone for ORF_QC (channel consumed later by COLLECT_QC_STATS)
-            ch_orf_qc_ribocode = RIBOCODE.out.collapsed.map { meta, f -> f }.collect()
         }
     } else if (!params.skip_ribocode && is_bam_input) {
         log.warn "RiboCode requires transcriptome BAM which is not available in BAM input mode. Skipping RiboCode."
@@ -823,8 +801,6 @@ workflow RIBOSEQ {
         ch_price_gtf = PRICE.out.orfs_tsv
         // Fall back to GTF if TSV is empty (stub mode)
         ch_price_gtf = ch_price_gtf.ifEmpty( PRICE.out.gtf )
-        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY)
-        ch_orf_qc_price = ch_price_gtf.map { meta, f -> f }.collect()
     }
 
     //
@@ -843,9 +819,6 @@ workflow RIBOSEQ {
         ch_versions = ch_versions.mix(RIBOWALTZ.out.versions)
         ch_ribowaltz_psite = RIBOWALTZ.out.psite_offset
         ch_qc_rw_region = RIBOWALTZ.out.region_distribution
-        // Pre-collect clones for ORF_QC (channels can only be consumed once)
-        ch_orf_qc_rw_psite = RIBOWALTZ.out.psite_offset.map { meta, f -> f }.collect()
-        ch_orf_qc_rw_region = RIBOWALTZ.out.region_distribution.map { meta, f -> f }.collect()
         // Feed QC outputs to MultiQC-compatible collection
         ch_multiqc_files = ch_multiqc_files.mix(
             RIBOWALTZ.out.psite_offset.map { meta, f -> f },
@@ -887,8 +860,6 @@ workflow RIBOSEQ {
         ch_riboseqc_annotation = RIBOSEQC_POSTFILTER.out.annotation
         ch_riboseqc_orfquant   = RIBOSEQC_POSTFILTER.out.orfquant
         ch_qc_psites_calcs     = RIBOSEQC_POSTFILTER.out.psites_calcs.map { meta, f -> f }
-        // Pre-collect clone for ORF_QC (channel consumed later by COLLECT_QC_STATS)
-        ch_orf_qc_psites = RIBOSEQC_POSTFILTER.out.psites_calcs.map { meta, f -> f }.collect()
     }
 
     //
@@ -907,8 +878,6 @@ workflow RIBOSEQ {
         )
         ch_versions = ch_versions.mix(ORFQUANT.out.versions)
         ch_orfquant_gtf = ORFQUANT.out.gtf
-        // Pre-collect clone for ORF_QC (channel consumed later by UNIFY)
-        ch_orf_qc_orfquant = ORFQUANT.out.gtf.map { meta, f -> f }.collect()
         ch_qc_orfquant_results = ORFQUANT.out.results.map { meta, f -> f }
     } else if (!params.skip_orfquant && params.skip_riboseqc) {
         log.warn "ORFquant requires RiboseQC output. Skipping ORFquant because RiboseQC is skipped."
@@ -1041,13 +1010,6 @@ workflow RIBOSEQ {
             ch_unify_metadata = UNIFY_ORF_PREDICTIONS.out.metadata
             ch_unify_bed      = UNIFY_ORF_PREDICTIONS.out.bed
             ch_unify_gtf      = UNIFY_ORF_PREDICTIONS.out.gtf
-            // Pre-capture unified bed+metadata as value channels for ORF_QC.
-            // .first() creates a value channel that stores the first (only) emission,
-            // making it independent of downstream CLASSIFY consumption.
-            ch_unify_bed_val = ch_unify_bed.first()
-            ch_unify_metadata_val = ch_unify_metadata.first()
-            ch_unify_expression_summary  = UNIFY_ORF_PREDICTIONS.out.expression_summary
-            ch_unify_expression_rpkm_tpm = UNIFY_ORF_PREDICTIONS.out.expression_rpkm_tpm
         }
     }
 
@@ -1423,58 +1385,30 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        // ORF_QC inputs via Channel.value() using published files.
-        // Channels consumed by upstream processes (CLASSIFY, COLLECT_QC_STATS)
-        // cannot be reused — use publishDir files directly instead.
-        def orf_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-        def out = params.outdir
-        ch_orf_qc_unified_final = Channel.value([
-            [ id: orf_prefix ],
-            file("${out}/orf_unification/${orf_prefix}.bed.gz"),
-            file("${out}/orf_unification/${orf_prefix}.metadata.tsv")
-        ])
-        ch_orf_qc_ribocode_f = Channel.value(
-            file("${out}/orf_predictions/ribocode/*_collapsed.txt").toList()
-        )
-        ch_orf_qc_psites_f = Channel.value(
-            file("${out}/riboseqc/*_P_sites_calcs").toList()
-        )
-        ch_orf_qc_rw_psite_f = Channel.value(
-            file("${out}/riboseq_qc/ribowaltz/*_psite_offset.tsv").toList()
-        )
-        ch_orf_qc_rw_region_f = Channel.value(
-            file("${out}/riboseq_qc/ribowaltz/*_frame_distribution.tsv").toList()
-        )
-        ch_orf_qc_ribotricer_f = Channel.value(
-            file("${out}/orf_predictions/ribotricer/postfilter/*_translating_ORFs.tsv").toList()
-        )
-        ch_orf_qc_ribotish_f = Channel.value(
-            file("${out}/orf_predictions/ribotish/postfilter/*_pred.txt").toList()
-        )
-        ch_orf_qc_ribotish_offset_f = Channel.value(
-            file("${out}/riboseqc/*_{P_sites_calcs}_offset.tsv").toList()
-        ).ifEmpty( file("${out}/riboseq_qc/ribowaltz/*_psite_offset.tsv").toList() )
-        ch_orf_qc_price_f = Channel.value(
-            file("${out}/orf_predictions/price/*.orfs.tsv").toList()
-        )
-        ch_orf_qc_orfquant_f = Channel.value(
-            file("${out}/orf_predictions/orfquant/postfilter/*_Detected_ORFs.gtf.gz").toList()
-        )
-        ch_orf_qc_rpbp_f = Channel.value([])
-        ORF_QC(
-            ch_orf_qc_unified_final,
-            ch_orf_qc_ribocode_f, ch_orf_qc_psites_f, ch_orf_qc_rw_psite_f,
-            ch_orf_qc_rw_region_f, ch_orf_qc_ribotricer_f, ch_orf_qc_ribotish_f,
-            ch_orf_qc_ribotish_offset_f, ch_orf_qc_price_f, ch_orf_qc_rpbp_f,
-            ch_orf_qc_orfquant_f
-        )
+        def ch_orf_qc_unified = ch_unify_bed.join(ch_unify_metadata)
+
+        if (ch_orf_qc_unified) {
+            ORF_QC(
+                ch_orf_qc_unified,
+                ch_qc_ribocode_txt.collect().ifEmpty([]),
+                ch_qc_psites_calcs.collect().ifEmpty([]),
+                ch_ribowaltz_psite.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_qc_rw_region.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_qc_ribotricer_orfs.collect().ifEmpty([]),
+                ch_ribotish_predictions.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_offset_for_ribotish.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_price_gtf.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_rpbp_bayes.map { meta, f -> f }.collect().ifEmpty([]),
+                ch_orfquant_gtf.map { meta, f -> f }.collect().ifEmpty([])
+            )
+        } else {
+            log.warn "ORF QC module enabled but no unified ORFs available — skipping."
+        }
     }
 
     //
     // ORF Expression Quantification: per-ORF per-sample P-site reads/pN + RPKM/TPM
-    //
-    // Expression stats are pre-computed during UNIFY_ORF_PREDICTIONS (streaming pass).
-    // This process is a lightweight reformatter that optionally applies OCS filtering.
+    // Runs after ORF_QC (needs confidence scores). Queries RiboseQC bedgraphs.
     //
     if (!params.skip_expression_quant) {
         // ORF confidence: from ORF_QC if available, otherwise placeholder
@@ -1482,12 +1416,20 @@ workflow RIBOSEQ {
             ORF_QC.out.confidence.map { meta, f -> f }.collect().ifEmpty([]) :
             Channel.value([])
 
-        if (ch_unify_expression_summary && ch_unify_expression_rpkm_tpm) {
+        if (ch_unify_metadata && ch_unify_bed) {
+            // Collect P-site + coverage bedgraphs from postfilter RiboseQC
+            ch_psites_bg = RIBOSEQC_POSTFILTER.out.psites_bedgraph
+                .map { meta, f -> f }.collect().ifEmpty([])
+
+            ch_coverage_bg = RIBOSEQC_POSTFILTER.out.coverage
+                .map { meta, f -> f }.collect().ifEmpty([])
+
             EXPRESSION_QUANT(
-                ch_unify_expression_summary.first(),
-                ch_unify_expression_rpkm_tpm.first(),
+                ch_unify_metadata.first(),
+                ch_unify_bed.first(),
                 ch_orf_conf.first(),
-                file("${workflow.projectDir}/bin/format_expression_output.py")
+                ch_psites_bg,
+                ch_coverage_bg
             )
             ch_versions = ch_versions.mix(EXPRESSION_QUANT.out.versions)
 
@@ -1497,7 +1439,7 @@ workflow RIBOSEQ {
                 EXPRESSION_QUANT.out.rpkm_tpm
             )
         } else {
-            log.warn "EXPRESSION_QUANT requires unified ORF expression data — skipping."
+            log.warn "EXPRESSION_QUANT requires unified ORFs — skipping."
         }
     }
 
@@ -1543,16 +1485,8 @@ workflow RIBOSEQ {
                 .flatten()
                 .collectFile(name: 'name_replacement.txt', newLine: true)
 
-        // Filter out any non-path values (e.g. PoisonPill) that may propagate
-        // from skipped/empty channels in Nextflow 26.x.
-        // See: https://github.com/nextflow-io/nextflow/issues/5738
-        ch_multiqc_files
-            .filter { it instanceof java.nio.file.Path || it instanceof CharSequence }
-            .collect()
-            .set { ch_multiqc_files_collected }
-
         MULTIQC (
-            ch_multiqc_files_collected,
+            ch_multiqc_files.collect(),
             ch_multiqc_config.toList(),
             ch_multiqc_custom_config.toList(),
             ch_multiqc_logo.toList(),

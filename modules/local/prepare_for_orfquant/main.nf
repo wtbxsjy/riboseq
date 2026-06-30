@@ -51,21 +51,25 @@ library(ORFquant)
 
 # Patch ORFquant::load_annotation to handle NULL genome_package
 # (happens with forge_BSgenome=FALSE for non-model organisms).
-# 2026-06-24: is(genome, "FaFile") returns FALSE for FaFile_Circ in container.
-# Fix: check genome_package first, use genome field as fallback.
+# The original calls library(GTF_annotation\$genome_package) which
+# fails with "'package' must be of length 1" when genome_package is NULL.
+# This patched version replicates the original logic exactly,
+# adding only a NULL/nchar guard around the library() call.
 fix_load_annotation <- function() {
     ns <- asNamespace("ORFquant")
     unlockBinding("load_annotation", ns)
     patched_load_annotation <- function(path) {
         GTF_annotation <- get(load(path))
-        genome_pkg <- GTF_annotation\$genome_package
-        if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
-            library(genome_pkg, character.only = TRUE)
-            genome_sequence <- get(genome_pkg)
-        } else if (!is.null(GTF_annotation\$genome)) {
+        if (is(GTF_annotation\$genome, "FaFile")) {
             genome_sequence <- GTF_annotation\$genome
         } else {
-            genome_sequence <- NULL
+            genome_pkg <- GTF_annotation\$genome_package
+            if (!is.null(genome_pkg) && nchar(genome_pkg) > 0) {
+                library(genome_pkg, character.only = TRUE)
+                genome_sequence <- get(genome_pkg)
+            } else {
+                genome_sequence <- NULL
+            }
         }
         GTF_annotation <<- GTF_annotation
         genome_seq <<- genome_sequence

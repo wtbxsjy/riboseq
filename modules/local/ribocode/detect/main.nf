@@ -92,6 +92,10 @@ PY
         -outgtf \\
         -outbed \\
         $args || {
+        if [ "\${RIBOCODE_FAIL_ON_EMPTY:-false}" = "true" ]; then
+            echo "FATAL: RiboCode produced no ORF predictions for ${meta.id} and --ribocode_fail_on_empty is true"
+            exit 1
+        fi
         echo "RiboCode failed for ${meta.id} - likely due to insufficient periodicity in data"
         echo "This is common for low-depth or test datasets"
         # Create marker and placeholder files so downstream channels stay stable.
