@@ -80,8 +80,7 @@ process ORF_QC {
     </body></html>
     EOF
     else
-        # Install runtime dependencies
-        apt-get update -qq && apt-get install -y -qq bedtools 2>/dev/null || true
+        # Install Python dependencies if needed
         pip install --quiet pandas numpy scipy plotly 2>/dev/null || true
 
         # Phase 1: Extract metrics from all tools

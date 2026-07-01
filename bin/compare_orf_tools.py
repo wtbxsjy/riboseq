@@ -105,9 +105,76 @@ def _orfs_to_bed6(orfs: List[Dict], tool_name: str) -> str:
     return tmp.name
 
 
+def _python_intersect(bed_a: str, bed_b: str, reciprocal: bool = True) -> List[Tuple[str, str]]:
+    """Pure-Python BED6 overlap — portable fallback when bedtools is unavailable.
+
+    Reads two BED6 files and returns (name_a, name_b) for interval pairs whose
+    overlap satisfies the reciprocal-50% criterion (when reciprocal=True).
+    """
+    def _read_bed6(path: str) -> Dict[Tuple[str, str], List[Tuple[int, int, str]]]:
+        out: Dict[Tuple[str, str], List[Tuple[int, int, str]]] = defaultdict(list)
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 4:
+                    continue
+                chrom = parts[0]
+                try:
+                    s = int(parts[1])
+                    e = int(parts[2])
+                except (ValueError, IndexError):
+                    continue
+                name = parts[3]
+                strand = parts[5] if len(parts) >= 6 else "."
+                out[(chrom, strand)].append((s, e, name))
+        return out
+
+    iv_a = _read_bed6(bed_a)
+    iv_b = _read_bed6(bed_b)
+    if not iv_a or not iv_b:
+        return []
+
+    pairs: List[Tuple[str, str]] = []
+    for key, list_a in iv_a.items():
+        list_b = iv_b.get(key)
+        if not list_b:
+            continue
+        list_a.sort(key=lambda x: x[0])
+        list_b.sort(key=lambda x: x[0])
+
+        # Sweep-line over sorted intervals
+        idx_b = 0
+        n_b = len(list_b)
+        for sa, ea, na in list_a:
+            la = ea - sa
+            # Skip b-intervals that end ≤ start_a
+            while idx_b < n_b and list_b[idx_b][1] <= sa:
+                idx_b += 1
+            j = idx_b
+            while j < n_b and list_b[j][0] < ea:
+                sb, eb, nb = list_b[j]
+                lb = eb - sb
+                overlap_start = max(sa, sb)
+                overlap_end = min(ea, eb)
+                overlap_len = overlap_end - overlap_start
+                if overlap_len > 0:
+                    if (not reciprocal) or (
+                        la > 0 and lb > 0
+                        and overlap_len / la >= 0.5
+                        and overlap_len / lb >= 0.5
+                    ):
+                        pairs.append((na, nb))
+                j += 1
+    return pairs
+
+
 def _bedtools_intersect(bed_a: str, bed_b: str, reciprocal: bool = True) -> List[Tuple[str, str]]:
     """Run bedtools intersect between two BED files.
     Returns list of (orf_id_a, orf_id_b) overlapping pairs.
+    Falls back to pure-Python implementation when bedtools is unavailable.
     """
     cmd = ["bedtools", "intersect", "-wa", "-wb"]
     if reciprocal:
@@ -117,8 +184,8 @@ def _bedtools_intersect(bed_a: str, bed_b: str, reciprocal: bool = True) -> List
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            print(f"  WARNING: bedtools intersect failed: {result.stderr}", file=sys.stderr)
-            return []
+            print(f"  INFO: bedtools error — falling back to pure Python", file=sys.stderr)
+            return _python_intersect(bed_a, bed_b, reciprocal)
         pairs = []
         for line in result.stdout.strip().split("\n"):
             if not line:
@@ -128,11 +195,11 @@ def _bedtools_intersect(bed_a: str, bed_b: str, reciprocal: bool = True) -> List
                 pairs.append((fields[3], fields[9]))  # name columns (4th and 10th)
         return pairs
     except FileNotFoundError:
-        print("  WARNING: bedtools not found — skipping pairwise comparison", file=sys.stderr)
-        return []
+        print("  INFO: bedtools not found — using pure-Python fallback", file=sys.stderr)
+        return _python_intersect(bed_a, bed_b, reciprocal)
     except Exception as e:
-        print(f"  WARNING: bedtools error: {e}", file=sys.stderr)
-        return []
+        print(f"  INFO: bedtools error: {e} — falling back to pure Python", file=sys.stderr)
+        return _python_intersect(bed_a, bed_b, reciprocal)
 
 
 def compute_tool_agreement(tool_data: Dict) -> Dict[str, Any]:
