@@ -154,8 +154,10 @@ def compute_tool_agreement(tool_data: Dict) -> Dict[str, Any]:
         if tool_name in ("riboseqc", "ribowaltz"):
             continue
 
+        all_orfs = []
         for sample_data in samples.values():
-            tool_orfs[tool_name] = sample_data.get("orfs", [])
+            all_orfs.extend(sample_data.get("orfs", []))
+        tool_orfs[tool_name] = all_orfs
 
     if len(tool_orfs) < 2:
         return {"status": "INSUFFICIENT_DATA", "pairwise": []}

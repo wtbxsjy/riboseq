@@ -312,8 +312,22 @@ def parse_ribotricer(paths: Dict[str, List[str]]) -> Dict[str, Any]:
 
         orfs = []
         for row in rows:
+            # Parse genomic coordinates from ORF_ID format:
+            #   {transcript_id}_{gstart}_{gstop}_{cds_length}
+            # or from dedicated chrom/start/end columns if present
+            orf_id = row.get("ORF_ID", "")
+            gstart = row.get("start") or row.get("orf_gstart")
+            gstop = row.get("end") or row.get("orf_gstop")
+            if not gstart or not gstop:
+                parts = orf_id.rsplit("_", 3)
+                if len(parts) == 4:
+                    try:
+                        gstart = int(parts[1])
+                        gstop = int(parts[2])
+                    except (ValueError, TypeError):
+                        pass
             orf = {
-                "orf_id": row.get("ORF_ID", ""),
+                "orf_id": orf_id,
                 "orf_type": row.get("ORF_type", ""),
                 "status": row.get("status", "nontranslating"),
                 "phase_score": float(row.get("phase_score", 0)),
@@ -328,6 +342,9 @@ def parse_ribotricer(paths: Dict[str, List[str]]) -> Dict[str, Any]:
                 "chrom": row.get("chrom", ""),
                 "strand": row.get("strand", ""),
                 "start_codon": row.get("start_codon", ""),
+                # Genomic coordinates (for cross-tool overlap)
+                "orf_gstart": gstart,
+                "orf_gstop": gstop,
                 # P-value from phase score
                 "phase_score_pvalue": _phase_score_to_pvalue(
                     float(row.get("phase_score", 0)),
@@ -590,6 +607,8 @@ def parse_orfquant(paths: Dict[str, List[str]]) -> Dict[str, Any]:
                         "orf_type": attrs.get("ORF_category_Tx_compatible",
                                    attrs.get("ORF_category_Gen", "")),
                         "chrom": fields[0],
+                        "start": int(fields[3]),   # GTF col 4 (1-based)
+                        "end": int(fields[4]),     # GTF col 5 (1-based)
                         "strand": fields[6],
                         "p_sites": float(attrs.get("P_sites", 0)),
                         "pct_p_sites": float(attrs.get("ORF_pct_P_sites", 0)),
