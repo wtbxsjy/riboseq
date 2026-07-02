@@ -297,7 +297,11 @@ def compute_tool_agreement(tool_data: Dict) -> Dict[str, Any]:
 
             if tool_a in bed_unique and tool_b in bed_unique:
                 upairs = _python_intersect(bed_unique[tool_a], bed_unique[tool_b], reciprocal=True)
-                overlap_unique = len(upairs)
+                # Count unique entries (not pairs) — one-to-many nesting
+                # inflates pair count beyond set size; min is conservative
+                unique_a_overlap = len({na for na, _ in upairs})
+                unique_b_overlap = len({nb for _, nb in upairs})
+                overlap_unique = min(unique_a_overlap, unique_b_overlap)
                 union = unique_a + unique_b - overlap_unique
                 jaccard = overlap_unique / union if union > 0 else 0.0
 
