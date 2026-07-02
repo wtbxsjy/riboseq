@@ -176,7 +176,7 @@ def _bedtools_intersect(bed_a: str, bed_b: str, reciprocal: bool = True) -> List
     Returns list of (orf_id_a, orf_id_b) overlapping pairs.
     Falls back to pure-Python implementation when bedtools is unavailable.
     """
-    cmd = ["bedtools", "intersect", "-wa", "-wb"]
+    cmd = ["bedtools", "intersect", "-wa", "-wb", "-s"]  # -s = strand-specific
     if reciprocal:
         cmd += ["-f", "0.5", "-r"]
     cmd += ["-a", bed_a, "-b", bed_b]
@@ -202,11 +202,46 @@ def _bedtools_intersect(bed_a: str, bed_b: str, reciprocal: bool = True) -> List
         return _python_intersect(bed_a, bed_b, reciprocal)
 
 
+def _dedup_bed6(bed_path: str) -> Tuple[str, int]:
+    """Deduplicate a BED6 file by (chrom, start, end, strand).
+
+    Returns (path_to_deduped_bed, unique_count).
+    Multi-sample ORF entries at the same genomic position collapse to one.
+    """
+    seen: Set[Tuple[str, int, int, str]] = set()
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False)
+    count = 0
+    with open(bed_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 6:
+                continue
+            try:
+                s = int(parts[1])
+                e = int(parts[2])
+            except (ValueError, IndexError):
+                continue
+            key = (parts[0], s, e, parts[5])
+            if key not in seen:
+                seen.add(key)
+                tmp.write(line + "\n")
+                count += 1
+    tmp.close()
+    if count == 0:
+        os.unlink(tmp.name)
+        return ("", 0)
+    return (tmp.name, count)
+
+
 def compute_tool_agreement(tool_data: Dict) -> Dict[str, Any]:
     """Compute pairwise ORF overlap between tools.
 
-    Returns:
-        Dict with pairwise_jaccard, pairwise_overlap_count, etc.
+    Uses unique genomic positions (deduplicated across samples) for
+    Jaccard calculation. Raw overlapping-pair counts are also reported
+    for reference.
     """
     # Collect ORFs per tool (prediction tools only)
     tool_orfs: Dict[str, List[Dict]] = {}
@@ -229,12 +264,19 @@ def compute_tool_agreement(tool_data: Dict) -> Dict[str, Any]:
     if len(tool_orfs) < 2:
         return {"status": "INSUFFICIENT_DATA", "pairwise": []}
 
-    # Convert each tool's ORFs to BED6
+    # Convert each tool's ORFs to BED6 (raw + deduplicated)
     bed_files: Dict[str, str] = {}
+    bed_unique: Dict[str, str] = {}
+    unique_counts: Dict[str, int] = {}
     for tool_name, orfs in tool_orfs.items():
         bf = _orfs_to_bed6(orfs, tool_name)
         if bf:
             bed_files[tool_name] = bf
+            # Deduplicate by genomic position for correct Jaccard calculation
+            uf, uc = _dedup_bed6(bf)
+            if uf:
+                bed_unique[tool_name] = uf
+                unique_counts[tool_name] = uc
 
     # Compute pairwise comparisons
     tool_names = sorted(tool_orfs.keys())
@@ -246,26 +288,39 @@ def compute_tool_agreement(tool_data: Dict) -> Dict[str, Any]:
                 continue
             if tool_a not in bed_files or tool_b not in bed_files:
                 continue
-            pairs = _bedtools_intersect(bed_files[tool_a], bed_files[tool_b])
-            overlap = len(pairs)
-            total_a = len(tool_orfs[tool_a])
-            total_b = len(tool_orfs[tool_b])
-            union = total_a + total_b - overlap
-            jaccard = overlap / union if union > 0 else 0.0
+
+            # 1) Unique-position overlap → correct Jaccard
+            unique_a = unique_counts.get(tool_a, 0)
+            unique_b = unique_counts.get(tool_b, 0)
+            overlap_unique = 0
+            jaccard = 0.0
+
+            if tool_a in bed_unique and tool_b in bed_unique:
+                upairs = _python_intersect(bed_unique[tool_a], bed_unique[tool_b], reciprocal=True)
+                overlap_unique = len(upairs)
+                union = unique_a + unique_b - overlap_unique
+                jaccard = overlap_unique / union if union > 0 else 0.0
+
+            # 2) Raw pair count (all samples, informational)
+            raw_pairs = _python_intersect(bed_files[tool_a], bed_files[tool_b], reciprocal=True)
+            raw_total_a = len(tool_orfs[tool_a])
+            raw_total_b = len(tool_orfs[tool_b])
 
             pairwise.append({
                 "tool_a": tool_a,
                 "tool_b": tool_b,
                 "jaccard": round(jaccard, 4),
-                "overlap_count": overlap,
-                "a_total": total_a,
-                "b_total": total_b,
-                "a_only": total_a - overlap,
-                "b_only": total_b - overlap,
+                "overlap_count": overlap_unique,
+                "a_total": unique_a,
+                "b_total": unique_b,
+                # Raw (multi-sample) counts for reference
+                "overlap_pairs": len(raw_pairs),
+                "a_total_raw": raw_total_a,
+                "b_total_raw": raw_total_b,
             })
 
     # Clean up temp files
-    for f in bed_files.values():
+    for f in list(bed_files.values()) + list(bed_unique.values()):
         try:
             os.unlink(f)
         except OSError:
@@ -716,9 +771,11 @@ def main():
         json.dump(agreement, fh, indent=2)
     if agreement.get("pairwise"):
         with open(f"{args.output_prefix}_tool_agreement.tsv", "w") as fh:
-            fh.write("tool_a\ttool_b\tjaccard\toverlap_count\ta_total\tb_total\n")
+            fh.write("tool_a\ttool_b\tjaccard\toverlap_count\ta_total\tb_total\toverlap_pairs\ta_total_raw\tb_total_raw\n")
             for p in agreement["pairwise"]:
-                fh.write(f"{p['tool_a']}\t{p['tool_b']}\t{p['jaccard']}\t{p['overlap_count']}\t{p['a_total']}\t{p['b_total']}\n")
+                fh.write(f"{p['tool_a']}\t{p['tool_b']}\t{p['jaccard']}\t{p['overlap_count']}\t"
+                         f"{p['a_total']}\t{p['b_total']}\t{p['overlap_pairs']}\t"
+                         f"{p['a_total_raw']}\t{p['b_total_raw']}\n")
         print(f"  Pairwise comparisons: {len(agreement['pairwise'])}")
     else:
         print(f"  {agreement.get('status', 'UNKNOWN')}")
