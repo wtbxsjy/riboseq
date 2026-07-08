@@ -1,0 +1,211 @@
+---
+title: "ggRibo Coverage Plots — `r params$project$label`"
+author: "Ribo-seq Pipeline"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+params:
+  config: "config_template.yaml"
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(ggRibo)
+library(ggplot2)
+library(yaml)
+library(R6)
+library(scales)
+library(furrr)
+
+source(here::here("scripts/post_analysis/_functions.R"))
+
+cfg <- load_config(params$config)
+ggc <- cfg$ggribo
+
+# Load final ORF list (from 01_filtering_analysis)
+orf_list_file <- file.path(cfg$input$output_dir, "final_orfs_for_ggribo.tsv")
+if (!file.exists(orf_list_file)) {
+  stop("final_orfs_for_ggribo.tsv not found — run 01_filtering_analysis.qmd first")
+}
+orfs <- read_tsv(orf_list_file, show_col_types = FALSE)
+message(sprintf("Loaded %d ORFs for ggRibo plotting", nrow(orfs)))
+
+# Load expression for sample lookups
+expr <- read_tsv(cfg$input$expression, show_col_types = FALSE)
+
+# Setup output directories
+plot_base <- file.path(cfg$input$output_dir, "ggribo_plots")
+tmp_gtf_dir <- file.path(cfg$input$output_dir, "tmp_gtf")
+dir.create(plot_base, showWarnings = FALSE, recursive = TRUE)
+dir.create(tmp_gtf_dir, showWarnings = FALSE, recursive = TRUE)
+
+plan(multisession, workers = ggc$workers)
+```
+
+# 1. ORF Summary
+
+```{r orf-summary}
+orfs |>
+  count(orf_biotype, sort = TRUE) |>
+  mutate(pct = 100 * n / sum(n)) |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("Biotype", "Count", "%"),
+    caption = "ORFs to plot by biotype")
+```
+
+# 2. Generate ggRibo Plots
+
+```{r ggribo-generate, results='asis'}
+org_label   <- cfg$project$label
+org_species <- cfg$project$species
+org_id      <- cfg$project$name
+
+# ── Single-ORF plotter (used by furrr) ──
+plot_one <- function(i, orfs, expr, cfg, tmp_gtf_dir, plot_base,
+                     org_id, org_label, org_species) {
+  r <- orfs[i, ]
+  biotype_dir <- file.path(plot_base, r$orf_biotype)
+  dir.create(biotype_dir, showWarnings = FALSE, recursive = TRUE)
+
+  # Safe filename
+  orf_id_clean <- gsub("[:/ ]", "_", r$orf_id)
+  out_file <- file.path(biotype_dir, paste0(orf_id_clean, ".png"))
+
+  if (file.exists(out_file)) {
+    return(tibble(orf_id = r$orf_id, status = "cached", file = out_file))
+  }
+
+  # GTF
+  orf_spec <- list(org = org_id, chrom = as.character(r$chrom),
+                   start = r$start, end = r$end, strand = r$strand)
+  gtf_path <- file.path(tmp_gtf_dir, paste0("ggribo_", i, ".gtf"))
+  ids <- tryCatch(create_orf_gtf(orf_spec, gtf_path),
+                  error = function(e) NULL)
+  if (is.null(ids)) return(tibble(orf_id = r$orf_id, status = "gtf_error", file = NA_character_))
+
+  # Top samples
+  top <- find_top_samples(expr, r$orf_id, n = cfg$ggribo$top_n_samples)
+  if (is.null(top) || length(top) == 0)
+    return(tibble(orf_id = r$orf_id, status = "no_samples", file = NA_character_))
+
+  bg_list <- list(); sn_list <- c(); sr_list <- c()
+  for (s in top) {
+    bg <- find_bedgraph_files(cfg, s$sample)
+    if (!is.null(bg)) {
+      bg_list[[length(bg_list) + 1]] <- bg
+      sn_list <- c(sn_list, s$sample)
+      sr_list <- c(sr_list, s$reads)
+    }
+  }
+  if (length(bg_list) == 0)
+    return(tibble(orf_id = r$orf_id, status = "no_bedgraph", file = NA_character_))
+  ns <- length(bg_list)
+
+  # Plot
+  tryCatch({
+    gtf_import_custom(gtf_path, format = "gtf", organism = org_species)
+    seq_result <- create_seq_input(
+      ribo_files = bg_list, sample_names = sn_list, include_rna = FALSE
+    )
+    assign("inputs_full", seq_result, envir = .GlobalEnv)
+
+    orf_len <- r$end - r$start
+    title_str <- sprintf("%s | %s | %s | %dnt | reads=%s pN=%.1f",
+      org_label, r$orf_id, r$orf_biotype, orf_len,
+      format(r$total_reads_expr, big.mark = ","), r$max_pN)
+
+    p <- ggRibo(
+      gene_id    = ids$gene_id,
+      tx_id      = ids$tx_id,
+      Extend     = cfg$ggribo$extend_bp,
+      NAME       = title_str,
+      Riboseq    = seq_result$Riboseq,
+      SampleNames = sn_list,
+      GRangeInfo  = Txome_Range,
+      data_types  = rep("Ribo-seq", ns),
+      Y_scale     = "each",
+      plot_genomic_direction = TRUE,
+      show_seq    = FALSE,
+      ribo_linewidth = 0.6
+    )
+
+    ggsave(out_file, p, width = 14, height = max(5, ns * 2.5),
+           dpi = 150, limitsize = FALSE, bg = "white")
+
+    tibble(orf_id = r$orf_id, status = "ok", file = out_file)
+  }, error = function(e) {
+    tibble(orf_id = r$orf_id, status = paste0("error: ", e$message),
+           file = NA_character_)
+  })
+}
+
+# ── Batch execution ──
+message(sprintf("Generating %d ggRibo plots with %d workers ...",
+        nrow(orfs), ggc$workers))
+
+results <- future_map_dfr(seq_len(nrow(orfs)), plot_one,
+  orfs = orfs, expr = expr, cfg = cfg,
+  tmp_gtf_dir = tmp_gtf_dir, plot_base = plot_base,
+  org_id = org_id, org_label = org_label, org_species = org_species,
+  .options = furrr_options(seed = TRUE)
+)
+
+plan(sequential)
+
+# Summarise
+res_summary <- results |>
+  count(status) |>
+  mutate(pct = 100 * n / sum(n))
+
+res_summary |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("Status", "Count", "%"),
+    caption = "ggRibo generation results")
+```
+
+# 3. Plot Index
+
+```{r index, results='asis'}
+# Build HTML index grouped by biotype
+biotypes <- unique(orfs$orf_biotype) |> sort()
+
+cat("## Generated Plots\n\n")
+
+for (bt in biotypes) {
+  bt_dir <- file.path(plot_base, bt)
+  pngs <- list.files(bt_dir, pattern = "\\.png$", full.names = FALSE)
+  if (length(pngs) == 0) next
+
+  cat(sprintf("### %s (%d plots)\n\n", bt, length(pngs)))
+  cat('<div style="display:flex;flex-wrap:wrap;gap:10px;">\n')
+
+  for (png in pngs[1:min(20, length(pngs))]) {
+    rel_path <- file.path(bt, png)
+    cat(sprintf(
+      '<div style="width:300px"><a href="%s" target="_blank"><img src="%s" style="width:100%%" loading="lazy"></a><p style="font-size:10px">%s</p></div>\n',
+      rel_path, rel_path, png
+    ))
+  }
+
+  if (length(pngs) > 20) {
+    cat(sprintf('\n<p><em>... and %d more plots</em></p>\n', length(pngs) - 20))
+  }
+
+  cat('</div>\n\n')
+}
+```
+
+```{r final-summary}
+cat(sprintf(
+  "\n### Complete\n\n- **Total ORFs:** %d\n- **Plotted:** %d\n- **Errors:** %d\n- **Output:** %s\n\n",
+  nrow(orfs),
+  sum(results$status == "ok"),
+  sum(results$status != "ok"),
+  plot_base
+))
+```

@@ -1,0 +1,41 @@
+# ─── ORF Post-Analysis Configuration ─────────────────────────────────
+# Copy to your project directory and edit paths.
+# Usage:
+#   bash scripts/post_analysis/run_all.sh path/to/your_config.yaml
+
+project:
+  name: "rice"                # short project id
+  species: "Oryza sativa"     # scientific name (for ggRibo)
+  label: "Rice"               # display label in plots
+
+# ─── Input paths (absolute or relative to pipeline root) ────────────
+# Use {result_dir} as a shorthand for the pipeline output directory
+input:
+  result_dir: "/home/25119231r/riboseq/run/rice/result"
+  metadata:    "{result_dir}/orf_unification/unified_orfs.metadata.tsv"
+  confidence:  "{result_dir}/orf/unified_orfs_orf_confidence.tsv"
+  expression:  "{result_dir}/orf_unification/unified_orfs_expression_summary.tsv"
+  rpkm_tpm:    "{result_dir}/orf_unification/unified_orfs_expression_rpkm_tpm.tsv"
+  unified_bed: "{result_dir}/orf_unification/unified_orfs.bed.gz"
+  gencode:     "{result_dir}/orf_classification/gencode/gencode_results.orfs.out.gz"
+  riboseqc_dir: "{result_dir}/riboseqc"
+  output_dir:  "{result_dir}/../post_analysis/output"
+  bedgraph_plus_pattern:  "*_P_sites_plus.bedgraph"
+  bedgraph_minus_pattern: "*_P_sites_minus.bedgraph"
+
+# ─── P-site purity filtering ────────────────────────────────────────
+filtering:
+  p_site_gse_min: 9
+  p_site_pct_min: 0.5
+  p_site_pos_min: 2
+  # cross-sample aggregation strategies to test
+  cross_sample_strategies: ["any", "≥2", "≥3"]
+
+# ─── ggRibo plotting ────────────────────────────────────────────────
+ggribo:
+  max_per_biotype: 50          # sample at most N per ORF biotype
+  top_n_samples: 3             # show top N samples per ORF
+  extend_bp: 200               # flanking bp each side
+  workers: 8                   # parallel workers for rendering
+  # ORF biotypes to include (null = all non-CDS)
+  biotypes: ["uORF", "dORF", "doORF", "intORF", "uoORF", "lncRNA"]
