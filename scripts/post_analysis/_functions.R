@@ -229,9 +229,9 @@ build_filter_matrix <- function(df) {
     pass_triple_3   = "Triple (≥3)"
   )
 
-  map_dfr(setNames(filter_cols, filter_cols), function(fc) {
+  results <- lapply(setNames(filter_cols, filter_cols), function(fc) {
     sub <- df |> filter(.data[[fc]])
-    tibble(
+    data.frame(
       filter_id  = fc,
       filter_label = filter_labels[fc],
       n_retained = nrow(sub),
@@ -246,6 +246,7 @@ build_filter_matrix <- function(df) {
       median_pN  = median(sub$pN, na.rm = TRUE)
     )
   })
+  do.call(rbind, results) |> as.data.frame(stringsAsFactors = FALSE)
 }
 
 

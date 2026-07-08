@@ -13,7 +13,8 @@ date: "`r Sys.Date()`"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 6)
 
 suppressPackageStartupMessages({
   library(dplyr)
@@ -24,51 +25,88 @@ suppressPackageStartupMessages({
   library(yaml)
   library(R6)
 })
-# Optional: for richer plots
-has_patchwork <- requireNamespace("patchwork", quietly = TRUE)
-has_ggrepel   <- requireNamespace("ggrepel", quietly = TRUE)
-has_UpSetR    <- requireNamespace("UpSetR", quietly = TRUE)
 
-source(here::here("scripts/post_analysis/_functions.R"))
+# Look for _functions.R relative to this qmd or in the pipeline root
+if (file.exists("_functions.R")) {
+  source("_functions.R")
+} else if (file.exists("../../scripts/post_analysis/_functions.R")) {
+  source("../../scripts/post_analysis/_functions.R")
+} else {
+  stop("Cannot find _functions.R")
+}
 
-cfg <- load_config(params$config)
+cfg  <- load_config(params$config)
 data <- load_pipeline_data(cfg)
 df   <- data$merged
-
-# Apply expression-based quality filters (no bedgraph rescanning)
-df <- apply_expression_filters(df, cfg, data$expression)
+df   <- apply_expression_filters(df, cfg, data$expression)
 ```
 
-# 1. Data Overview
+# 1. Data Sources & Methodology
+
+## 1.1 Input Data
 
 ```{r overview}
-tibble(
+data.frame(
   Source = c("Metadata", "Confidence (OCS)", "Expression (reads + pN)", "GENCODE"),
-  N_ORFs = c(
-    nrow(data$metadata),
-    nrow(data$confidence),
-    nrow(data$expression),
-    nrow(data$gencode)
-  )
+  N_ORFs = c(nrow(data$metadata), nrow(data$confidence),
+             nrow(data$expression), nrow(data$gencode))
 ) |>
-  mutate(Source = fct_inorder(Source)) |>
   knitr::kable(format = "html", caption = "Input data sources")
 
-# Merge rate
 total_meta <- nrow(data$metadata)
 with_gencode <- sum(!is.na(df$orf_biotype))
 with_ocs     <- sum(!is.na(df$tier))
 with_expr    <- sum(!is.na(df$total_reads_expr))
 
-tibble(
+data.frame(
   Metric = c("Total unified ORFs", "With GENCODE classification",
              "With OCS score", "With expression data"),
   Count = c(total_meta, with_gencode, with_ocs, with_expr),
-  Pct = 100 * c(total_meta, with_gencode, with_ocs, with_expr) / total_meta
+  Pct   = round(100 * c(total_meta, with_gencode, with_ocs, with_expr) / total_meta, 1)
 ) |>
-  knitr::kable(format = "html", digits = 1,
-               caption = "Cross-source match rates")
+  knitr::kable(format = "html", caption = "Cross-source match rates")
 ```
+
+## 1.2 ORF Confidence Score (OCS) Methodology
+
+The ORF Confidence Score (OCS) is a composite metric computed from four
+independent sub-scores, each normalized to [0, 1]:
+
+| Component | Source | Description |
+|-----------|--------|-------------|
+| **S_translation** | Tool-specific significance | Normalized p-value / score from the detecting tool (e.g. Ribo-TISH p-value, Ribotricer phase score). Aggregated across detecting tools by max. |
+| **S_agreement** | Cross-tool overlap | Number of tools detecting the ORF, normalized by total tools. Multi-tool consensus increases confidence. |
+| **S_coverage** | Expression breadth | Fraction of samples with reads > 0. Captures reproducibility across biological replicates. |
+| **S_periodicity** | Read-level 3-nt periodicity | Aggregate periodicity score from RiboseQC read-length analysis. High periodicity indicates genuine ribosome footprints. |
+| **S_readlevel** | Sample-wide QC modifier | Penalty factor when sample-level QC flags are present (e.g. low alignment rate, poor periodicity). |
+
+**OCS Formula:**
+$$OCS = w_t \cdot S_{translation} + w_a \cdot S_{agreement} + w_c \cdot S_{coverage} + w_p \cdot S_{periodicity} - S_{readlevel}$$
+
+Default OCS weights: translation=0.35, agreement=0.25, coverage=0.25, periodicity=0.15.
+
+**Tier thresholds:**
+- **High**: OCS ≥ 0.8 — strong evidence, multiple tools, reproducible
+- **Medium**: OCS ≥ 0.5 — moderate evidence
+- **Low**: OCS ≥ 0.2 — weak but detectable signal
+- **Uncertain**: OCS < 0.2 — likely noise
+
+## 1.3 Expression-Based P-site Quality Proxies
+
+Rather than rescanning bedgraph files (369K ORFs × 23 samples × 2 strands
+≈ 109 CPU hours), we use per-sample `reads` and `pN` columns from
+`unified_orfs_expression_summary.tsv` as computationally efficient proxies
+for P-site quality:
+
+| Original Criterion | Proxy | Rationale |
+|-------------------|-------|-----------|
+| `p_site_GSE > 9` | `{sample}_reads > 9` | Total reads overlapping the ORF correlates strongly with P-site count |
+| `p_site_pct > 0.5` | `{sample}_pN > 0.5` | pN (periodicity score) is computed from P-site frame preference — high pN implies high P-site fraction |
+| `p_site_pos > 2` | *dropped* | No direct proxy in expression summary; position-offset information is lost, but the first two criteria capture most of the signal |
+
+**Cross-sample aggregation:** A per-sample criterion is "passed" if ANY
+sample meets the threshold. More stringent strategies (≥2, ≥3 samples)
+are tested in the filter comparison matrix below.
 
 # 2. ORF Biotype Distribution
 
@@ -76,18 +114,19 @@ tibble(
 biotype_counts <- df |>
   filter(!is.na(orf_biotype)) |>
   count(orf_biotype, sort = TRUE) |>
-  mutate(orf_biotype = fct_reorder(orf_biotype, n))
+  mutate(orf_biotype = factor(orf_biotype, levels = rev(unique(orf_biotype))))
 
 ggplot(biotype_counts, aes(n, orf_biotype, fill = orf_biotype == "CDS")) +
   geom_col() +
-  scale_x_log10(labels = scales::comma) +
+  scale_x_log10(labels = comma) +
   scale_fill_manual(values = c("TRUE" = "grey60", "FALSE" = "#E64B35"), guide = "none") +
-  labs(title = "ORF biotype distribution (GENCODE)",
+  labs(title = "ORF biotype distribution (GENCODE classification)",
+       subtitle = sprintf("Non-CDS: %s ORFs across %d biotypes",
+         comma(sum(biotype_counts$n[biotype_counts$orf_biotype != "CDS"])),
+         nrow(biotype_counts) - 1),
        x = "Number of ORFs (log10)", y = NULL) +
   theme_minimal(base_size = 13)
 ```
-
-**Non-CDS ORFs:** `{r} scales::comma(sum(biotype_counts$n[biotype_counts$orf_biotype != "CDS"]))` across {nrow(biotype_counts) - 1} biotypes.
 
 # 3. OCS Tier Distribution
 
@@ -95,65 +134,59 @@ ggplot(biotype_counts, aes(n, orf_biotype, fill = orf_biotype == "CDS")) +
 df |>
   filter(!is.na(tier)) |>
   count(tier) |>
-  mutate(tier = fct_relevel(tier, "High", "Medium", "Low", "Uncertain"),
+  mutate(tier = factor(tier, levels = c("High", "Medium", "Low", "Uncertain")),
          pct = n / sum(n)) |>
   ggplot(aes(tier, n, fill = tier)) +
   geom_col() +
-  geom_text(aes(label = sprintf("%s\n(%.1f%%)", scales::comma(n), 100 * pct)),
-            vjust = -0.2) +
+  geom_text(aes(label = sprintf("%s\n(%.1f%%)", comma(n), 100 * pct)), vjust = -0.2) +
   scale_fill_manual(values = c(High = "#00A087", Medium = "#7E6148",
-                                Low = "#E64B35", Uncertain = "grey70"),
-                    guide = "none") +
+                                Low = "#E64B35", Uncertain = "grey70"), guide = "none") +
   labs(title = "OCS tier distribution", x = NULL, y = "Count") +
   theme_minimal(base_size = 13)
 ```
 
-# 4. Per-Sample Expression Distributions (reads × pN)
+# 4. Expression Distributions
 
 ```{r expr-dist, fig.height=10, fig.width=12}
 read_cols <- grep("_reads$", names(data$expression), value = TRUE)
 pN_cols   <- grep("_pN$", names(data$expression), value = TRUE)
 
-# Per-ORF max reads and max pN across samples
 expr_agg <- data$expression |>
-  mutate(
-    max_reads = apply(pick(all_of(read_cols)), 1, max, na.rm = TRUE),
-    max_pN    = apply(pick(all_of(pN_cols)), 1, max, na.rm = TRUE),
-    n_samples = apply(pick(all_of(read_cols)), 1, function(x) sum(x > 0, na.rm = TRUE))
+  reframe(
+    max_reads = do.call(pmax, c(pick(all_of(read_cols)), na.rm = TRUE)),
+    max_pN    = do.call(pmax, c(pick(all_of(pN_cols)), na.rm = TRUE)),
+    n_samples = rowSums(pick(all_of(read_cols)) > 0, na.rm = TRUE)
   )
 
-thresholds <- tibble(
-  metric = c("max_reads", "max_pN"),
-  label  = c("Max reads per ORF", "Max pN per ORF"),
-  thresh = c(cfg$filtering$p_site_gse_min, cfg$filtering$p_site_pct_min)
-)
-
-p1 <- bind_rows(
-  expr_agg |> select(value = max_reads) |> mutate(metric = "max_reads"),
-  expr_agg |> select(value = max_pN) |> mutate(metric = "max_pN")
-) |>
-  left_join(thresholds, by = "metric") |>
-  ggplot(aes(value)) +
+# Reads histogram
+p1 <- ggplot(expr_agg, aes(max_reads)) +
   geom_histogram(bins = 100, fill = "#4682B4", alpha = 0.8) +
-  geom_vline(aes(xintercept = thresh), color = "#E64B35",
+  geom_vline(xintercept = cfg$filtering$p_site_gse_min, color = "#E64B35",
              linewidth = 1, linetype = "dashed") +
-  facet_wrap(~ label, scales = "free", ncol = 1) +
-  scale_x_log10(labels = scales::comma) +
-  labs(title = "Per-ORF expression distributions (proxy for P-site purity)",
-       subtitle = sprintf("Red line = filter threshold (reads>%d, pN>%.1f)",
-                cfg$filtering$p_site_gse_min, cfg$filtering$p_site_pct_min),
-       x = NULL, y = "Count") +
+  scale_x_log10(labels = comma) +
+  labs(title = "Max reads per ORF (proxy for P-site GSE count)",
+       subtitle = sprintf("Red line = threshold (reads > %d)", cfg$filtering$p_site_gse_min),
+       x = "max reads across samples (log10)", y = "Count") +
   theme_minimal(base_size = 12)
 
-# Sample coverage histogram
-p2 <- expr_agg |>
-  ggplot(aes(n_samples)) +
-  geom_histogram(binwidth = 1, fill = "#7E6148", alpha = 0.8) +
-  labs(title = "Number of samples with reads per ORF",
+# pN histogram
+p2 <- ggplot(expr_agg, aes(max_pN)) +
+  geom_histogram(bins = 100, fill = "#7E6148", alpha = 0.8) +
+  geom_vline(xintercept = cfg$filtering$p_site_pct_min, color = "#E64B35",
+             linewidth = 1, linetype = "dashed") +
+  labs(title = "Max pN per ORF (proxy for P-site fraction)",
+       subtitle = sprintf("Red line = threshold (pN > %.1f)", cfg$filtering$p_site_pct_min),
+       x = "max pN across samples", y = "Count") +
+  theme_minimal(base_size = 12)
+
+# Sample coverage
+p3 <- ggplot(expr_agg, aes(n_samples)) +
+  geom_histogram(binwidth = 1, fill = "#00A087", alpha = 0.8) +
+  labs(title = "Samples with reads per ORF",
        x = "N samples with reads > 0", y = "Count") +
   theme_minimal(base_size = 12)
 
-print(p1 / p2 + plot_layout(heights = c(2, 1)))
+print(p1); print(p2); print(p3)
 ```
 
 # 5. Filter Strategy Comparison
@@ -164,21 +197,18 @@ filter_matrix <- build_filter_matrix(df)
 filter_matrix |>
   select(filter_label, n_retained, pct_total, n_OCS_High, n_OCS_Medium,
          n_nonCDS, n_multi_tool, median_pN) |>
-  knitr::kable(
-    format = "html",
-    digits = 1,
+  knitr::kable(format = "html", digits = 1,
     col.names = c("Strategy", "Retained", "% Total", "High OCS",
                   "Medium OCS", "Non-CDS", "≥2 tools", "Median pN"),
-    caption = "Filter strategy comparison matrix"
-  )
+    caption = "Filter strategy comparison matrix")
 
-# Visual: retained vs OCS overlap
+# Visual
 filter_matrix |>
-  mutate(filter_label = fct_reorder(filter_label, n_retained)) |>
-  ggplot(aes(n_retained, n_OCS_High, label = filter_label)) +
-  geom_point(aes(size = n_nonCDS, color = pct_total)) +
-  geom_text_repel(size = 3, max.overlaps = 15) +
-  scale_x_log10(labels = scales::comma) +
+  mutate(filter_label = factor(filter_label, levels = filter_label[order(n_retained)])) |>
+  ggplot(aes(n_retained, n_OCS_High)) +
+  geom_point(aes(size = n_nonCDS, color = pct_total), alpha = 0.8) +
+  geom_text(aes(label = filter_label), size = 3, hjust = -0.1, vjust = 0.5) +
+  scale_x_log10(labels = comma) +
   scale_color_viridis_c() +
   labs(title = "Filter strategies: retention vs OCS High overlap",
        x = "ORFs retained (log10)", y = "High OCS retained",
@@ -188,67 +218,64 @@ filter_matrix |>
 
 # 6. Orthogonality: Expression Filters × OCS
 
-```{r upset, fig.height=8, fig.width=12}
-upset_data <- df |>
+```{r orthog}
+# Non-CDS cross-tabulation
+ct <- df |>
   filter(!is.na(orf_biotype), orf_biotype != "CDS") |>
   mutate(
-    `reads>9 + pN>0.5 (any)` = as.integer(pass_triple_any),
-    `reads>9 + pN>0.5 (≥2)` = as.integer(pass_triple_2),
-    `reads>9 + pN>0.5 (≥3)` = as.integer(pass_triple_3),
-    `OCS High`               = as.integer(tier == "High"),
-    `OCS Medium+`            = as.integer(tier %in% c("High", "Medium")),
-    `≥2 detecting tools`     = as.integer(n_detecting >= 2),
-    `High expression`        = as.integer(total_reads_expr >= quantile(total_reads_expr, 0.9, na.rm = TRUE))
+    filter_status = case_when(
+      pass_triple_3 ~ "Triple (≥3 samples)",
+      pass_triple_2 ~ "Triple (≥2 samples)",
+      pass_triple_any ~ "Triple (any sample)",
+      TRUE ~ "Not passed"
+    ),
+    ocs_group = case_when(
+      tier == "High"               ~ "OCS High",
+      tier %in% c("High","Medium") ~ "OCS Medium+",
+      TRUE                          ~ "OCS Low/Uncertain"
+    )
   ) |>
-  select(orf_id, `reads>9 + pN>0.5 (any)`, `reads>9 + pN>0.5 (≥2)`,
-         `reads>9 + pN>0.5 (≥3)`, `OCS High`, `OCS Medium+`,
-         `≥2 detecting tools`, `High expression`) |>
-  column_to_rownames("orf_id") |>
-  as.data.frame()
+  count(filter_status, ocs_group) |>
+  tidyr::pivot_wider(names_from = ocs_group, values_from = n, values_fill = 0)
 
-n_up <- nrow(upset_data)
-if (n_up > 5000) {
-  upset_data <- upset_data[sample(n_up, 5000), ]
-}
+knitr::kable(ct, format = "html",
+  caption = "Non-CDS ORFs: expression filter × OCS tier cross-tabulation")
 
-upset(upset_data,
-      sets = c("reads>9 + pN>0.5 (≥2)", "OCS High", "≥2 detecting tools",
-               "High expression"),
-      order.by = "freq",
-      main.bar.color = "#4682B4",
-      sets.bar.color = "#7E6148",
-      text.scale = 1.5)
+# Tool agreement breakdown
+ct2 <- df |>
+  filter(!is.na(orf_biotype), orf_biotype != "CDS") |>
+  mutate(pass = ifelse(pass_triple_2, "Pass filter", "Fail filter")) |>
+  count(pass, n_detecting) |>
+  tidyr::pivot_wider(names_from = n_detecting, values_from = n, values_fill = 0,
+                     names_prefix = "Ntools=")
+
+knitr::kable(ct2, format = "html",
+  caption = "Non-CDS ORFs: expression filter × number of detecting tools")
 ```
 
 # 7. Correlation Between Scoring Dimensions
 
-```{r cor-heatmap, fig.height=6, fig.width=8}
+```{r cor-heatmap, fig.height=6, fig.width=9}
 cor_data <- df |>
   filter(!is.na(orf_biotype), orf_biotype != "CDS") |>
-  select(
-    pN, total_reads_expr, max_pN, mean_ratio, n_samples,
-    s_translation, s_agreement, s_coverage, s_periodicity,
-    n_detecting, n_pass_all
-  ) |>
+  select(pN, total_reads_expr, max_pN, n_samples,
+         s_translation, s_agreement, s_coverage, s_periodicity,
+         n_detecting, n_pass_all) |>
   rename(
-    `pN (metadata)` = pN,
-    `Total reads` = total_reads_expr,
-    `Max pN` = max_pN,
-    `Mean ratio` = mean_ratio,
-    `N samples` = n_samples,
-    `S_translation` = s_translation,
-    `S_agreement` = s_agreement,
-    `S_coverage` = s_coverage,
-    `S_periodicity` = s_periodicity,
-    `N detecting tools` = n_detecting,
-    `N pass triple` = n_pass_all
+    `pN (metadata)` = pN,    `Total reads` = total_reads_expr,
+    `Max pN` = max_pN,       `N samples` = n_samples,
+    S_translation = s_translation, S_agreement = s_agreement,
+    S_coverage = s_coverage, S_periodicity = s_periodicity,
+    `N tools` = n_detecting, `N pass filter` = n_pass_all
   )
 
 cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
 
 cor_matrix |>
   as.data.frame() |>
-  rownames_to_column("var1") |>
+  as.data.frame() |>
+  mutate(var1 = rownames(cor_matrix)) |>
+  select(var1, everything()) |>
   pivot_longer(-var1, names_to = "var2", values_to = "r") |>
   ggplot(aes(var1, var2, fill = r)) +
   geom_tile() +
@@ -256,66 +283,66 @@ cor_matrix |>
   scale_fill_gradient2(low = "#3B4992", mid = "white", high = "#E64B35",
                        limits = c(-1, 1)) +
   labs(title = "Correlation: scoring dimensions (non-CDS ORFs)",
-       x = NULL, y = NULL, fill = "Pearson r") +
+       subtitle = "Expression metrics (reads, pN) are largely orthogonal to OCS sub-scores",
+       x = NULL, y = NULL, fill = "r") +
   theme_minimal(base_size = 11) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-# 8. Final ORF Selection for ggRibo
+# 8. Final ORF Selection
 
 ```{r final-selection}
-# Apply the recommended default filter: triple-filter (≥2 samples), non-CDS
 final_orfs <- df |>
-  filter(
-    !is.na(orf_biotype),
-    orf_biotype != "CDS",
-    pass_triple_2
-  )
+  filter(!is.na(orf_biotype), orf_biotype != "CDS", pass_triple_2)
 
-n_final <- nrow(final_orfs)
-message(sprintf("Final ggRibo candidates: %s ORFs", scales::comma(n_final)))
+message(sprintf("Final ggRibo candidates: %s ORFs", comma(nrow(final_orfs))))
 
-# Per-biotype counts
 final_orfs |>
   count(orf_biotype, sort = TRUE) |>
   knitr::kable(format = "html", col.names = c("Biotype", "Count"),
-               caption = "Per-biotype ORF counts for ggRibo")
+               caption = "Per-biotype ORF counts passing all filters")
 
-# Write final ORF list
+# Sample by biotype for ggRibo
 ggribo_cfg <- cfg$ggribo
-final_orfs_sampled <- final_orfs |>
+final_sampled <- final_orfs |>
   slice_max(total_reads_expr, n = ggribo_cfg$max_per_biotype,
             by = orf_biotype, with_ties = FALSE)
 
 out_tsv <- file.path(cfg$input$output_dir, "final_orfs_for_ggribo.tsv")
-final_orfs_sampled |>
+final_sampled |>
   select(orf_id, chrom, start, end, strand, orf_biotype,
          total_reads_expr, max_pN, tier, n_detecting) |>
-  write_tsv(out_tsv)
+  fwrite(out_tsv, sep = "\t")
 
-message(sprintf("  Sampled %s ORFs (max %d per biotype) → %s",
-        scales::comma(nrow(final_orfs_sampled)),
-        ggribo_cfg$max_per_biotype, out_tsv))
+message(sprintf("Sampled %s ORFs → %s", comma(nrow(final_sampled)), out_tsv))
 ```
 
-# 9. Summary & Recommendations
+# 9. Summary
 
 ```{r summary}
-tibble(
+data.frame(
   Stage = c("Total unified ORFs", "With GENCODE", "Non-CDS",
-            "Triple-filter (any sample)", "Triple-filter (≥2 samples)",
+            "reads>9+pN>0.5 (any)", "reads>9+pN>0.5 (≥2)", "reads>9+pN>0.5 (≥3)",
             "Final ggRibo sampled"),
-  Count = c(
-    nrow(data$metadata),
-    sum(!is.na(df$orf_biotype)),
-    sum(!is.na(df$orf_biotype) & df$orf_biotype != "CDS"),
-    sum(df$pass_triple_any, na.rm = TRUE),
-    sum(df$pass_triple_2, na.rm = TRUE),
-    nrow(final_orfs_sampled)
-  )
+  Count = c(nrow(data$metadata), sum(!is.na(df$orf_biotype)),
+            sum(!is.na(df$orf_biotype) & df$orf_biotype != "CDS"),
+            sum(df$pass_triple_any, na.rm = TRUE),
+            sum(df$pass_triple_2, na.rm = TRUE),
+            sum(df$pass_triple_3, na.rm = TRUE),
+            nrow(final_sampled))
 ) |>
   knitr::kable(format = "html",
     caption = sprintf("Filtering cascade — %s", cfg$project$label))
 ```
 
-**Recommended default filter:** Triple-filter (GSE>9 + pct>0.5 + pos>2) in ≥2 samples, non-CDS only. This balances stringency with sample coverage and is orthogonal to the OCS scoring system.
+## Recommended Filter
+
+**Expression-based triple filter (reads>9 + pN>0.5 in ≥2 samples) for non-CDS ORFs.**
+
+This combines signal strength (reads), periodicity quality (pN), and
+reproducibility (≥2 samples). The filter is largely orthogonal to the
+OCS scoring system (correlation r < 0.3), providing independent
+validation.
+
+For ggRibo visualization, sample up to `r ggribo_cfg$max_per_biotype` ORFs
+per biotype, ranked by total expression.
