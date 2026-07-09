@@ -291,9 +291,12 @@ cor_matrix |>
 
 # 8. Final ORF Selection
 
+**Filter:** non-CDS + reads>9 + pN>0.5 (≥2 samples) + length ≤50 amino acids
+
 ```{r final-selection}
 final_orfs <- df |>
-  filter(!is.na(orf_biotype), orf_biotype != "CDS", pass_triple_2)
+  filter(!is.na(orf_biotype), orf_biotype != "CDS",
+         pass_triple_2, length_aa <= 50)
 
 message(sprintf("Final ggRibo candidates: %s ORFs", comma(nrow(final_orfs))))
 
@@ -302,34 +305,123 @@ final_orfs |>
   knitr::kable(format = "html", col.names = c("Biotype", "Count"),
                caption = "Per-biotype ORF counts passing all filters")
 
-# Sample by biotype for ggRibo
-ggribo_cfg <- cfg$ggribo
-final_sampled <- final_orfs |>
-  slice_max(total_reads_expr, n = ggribo_cfg$max_per_biotype,
-            by = orf_biotype, with_ties = FALSE)
-
+# Write full list (no sampling)
 out_tsv <- file.path(cfg$input$output_dir, "final_orfs_for_ggribo.tsv")
-final_sampled |>
+final_orfs |>
   select(orf_id, chrom, start, end, strand, orf_biotype,
          total_reads_expr, max_pN, tier, n_detecting) |>
   fwrite(out_tsv, sep = "\t")
 
-message(sprintf("Sampled %s ORFs → %s", comma(nrow(final_sampled)), out_tsv))
+message(sprintf("Wrote %s ORFs → %s", comma(nrow(final_orfs)), out_tsv))
 ```
 
-# 9. Summary
+# 9. OCS Distribution for Final ORFs
+
+```{r ocs-by-biotype, fig.height=8, fig.width=10}
+# OCS score distribution for final selected ORFs
+hist(final_orfs$ocs, breaks = 60, col = "#4682B4", border = "white",
+     main = "OCS Distribution of Final Selected ORFs",
+     xlab = "ORF Confidence Score (OCS)", ylab = "Count")
+abline(v = c(0.2, 0.5, 0.8), lty = 2, col = "#E64B35", lwd = 2)
+text(c(0.2, 0.5, 0.8), par("usr")[4] * 0.95,
+     labels = c("Low", "Medium", "High"), pos = 3, col = "#E64B35", cex = 0.9)
+
+# OCS boxplot by biotype
+boxplot(ocs ~ orf_biotype, data = final_orfs,
+        col = RColorBrewer::brewer.pal(6, "Set2"),
+        main = "OCS Distribution by ORF Biotype",
+        xlab = NULL, ylab = "ORF Confidence Score (OCS)",
+        las = 2, cex.axis = 0.9)
+abline(h = c(0.2, 0.5, 0.8), lty = 2, col = "grey60")
+```
+
+```{r ocs-tier-biotype, fig.height=5, fig.width=10}
+# Tier composition by biotype
+tt <- as.data.frame(table(final_orfs$orf_biotype, final_orfs$tier))
+names(tt) <- c("biotype", "tier", "n")
+tt$biotype <- factor(tt$biotype, levels = c("uORF","dORF","doORF","intORF","uoORF","lncRNA"))
+tt$tier    <- factor(tt$tier, levels = c("High","Medium","Low","Uncertain"))
+
+ggplot(tt, aes(biotype, n, fill = tier)) +
+  geom_col(position = "fill") +
+  scale_fill_manual(values = c(High = "#00A087", Medium = "#7E6148",
+                                Low = "#E64B35", Uncertain = "grey70"),
+                    name = "OCS Tier") +
+  labs(title = "OCS tier composition by ORF biotype",
+       subtitle = "Final selected ORFs (non-CDS, reads>9+pN>0.5(≥2), ≤50aa)",
+       x = NULL, y = "Proportion") +
+  theme_minimal(base_size = 12)
+```
+
+# 10. ORF Length Distribution
+
+```{r length-dist, fig.height=8, fig.width=12}
+# Pre-filter: all classified ORFs
+p1 <- df |>
+  filter(!is.na(orf_biotype)) |>
+  ggplot(aes(length_aa, fill = orf_biotype == "CDS")) +
+  geom_histogram(bins = 80, alpha = 0.7) +
+  geom_vline(xintercept = 50, color = "#E64B35", linewidth = 1, linetype = "dashed") +
+  scale_fill_manual(values = c("TRUE" = "grey60", "FALSE" = "#4682B4"),
+                    labels = c("TRUE" = "CDS", "FALSE" = "Non-CDS"), name = NULL) +
+  scale_x_log10(labels = comma) +
+  labs(title = "ORF length distribution — all classified ORFs (pre-filter)",
+       subtitle = sprintf("Red line: 50aa cutoff. Median = %s aa, %s ORFs ≤ 50aa",
+         comma(median(df$length_aa, na.rm = TRUE)),
+         comma(sum(df$length_aa <= 50, na.rm = TRUE))),
+       x = "ORF length (amino acids, log10)", y = "Count") +
+  theme_minimal(base_size = 12)
+
+# Post-filter: final selected ORFs only
+p2 <- final_orfs |>
+  ggplot(aes(length_aa, fill = orf_biotype)) +
+  geom_histogram(bins = 50, alpha = 0.8) +
+  facet_wrap(~ orf_biotype, scales = "free_y", ncol = 3) +
+  scale_fill_brewer(palette = "Set2", guide = "none") +
+  labs(title = "ORF length distribution — final selected (post-filter)",
+       subtitle = sprintf("Non-CDS, reads>9+pN>0.5(≥2), ≤50aa. %s ORFs",
+         comma(nrow(final_orfs))),
+       x = "ORF length (amino acids)", y = "Count") +
+  theme_minimal(base_size = 12)
+
+# Pre vs post comparison by biotype
+pre_len <- df |>
+  filter(!is.na(orf_biotype), orf_biotype != "CDS") |>
+  select(orf_biotype, length_aa) |>
+  mutate(stage = "Pre-filter")
+post_len <- final_orfs |>
+  select(orf_biotype, length_aa) |>
+  mutate(stage = "Post-filter")
+biotype_len <- dplyr::bind_rows(pre_len, post_len)
+
+p3 <- biotype_len |>
+  ggplot(aes(stage, length_aa, fill = stage)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  facet_wrap(~ orf_biotype, ncol = 3) +
+  scale_fill_manual(values = c("Pre-filter" = "grey70", "Post-filter" = "#00A087"),
+                    guide = "none") +
+  labs(title = "Length distribution: pre vs post filter by biotype",
+       x = NULL, y = "ORF length (amino acids)") +
+  theme_minimal(base_size = 12)
+
+print(p1)
+print(p2)
+print(p3)
+```
+
+# 11. Summary
 
 ```{r summary}
 data.frame(
   Stage = c("Total unified ORFs", "With GENCODE", "Non-CDS",
             "reads>9+pN>0.5 (any)", "reads>9+pN>0.5 (≥2)", "reads>9+pN>0.5 (≥3)",
-            "Final ggRibo sampled"),
+            "Final selected (≤50aa)"),
   Count = c(nrow(data$metadata), sum(!is.na(df$orf_biotype)),
             sum(!is.na(df$orf_biotype) & df$orf_biotype != "CDS"),
             sum(df$pass_triple_any, na.rm = TRUE),
             sum(df$pass_triple_2, na.rm = TRUE),
             sum(df$pass_triple_3, na.rm = TRUE),
-            nrow(final_sampled))
+            nrow(final_orfs))
 ) |>
   knitr::kable(format = "html",
     caption = sprintf("Filtering cascade — %s", cfg$project$label))
@@ -337,12 +429,11 @@ data.frame(
 
 ## Recommended Filter
 
-**Expression-based triple filter (reads>9 + pN>0.5 in ≥2 samples) for non-CDS ORFs.**
+**Non-CDS + reads>9 + pN>0.5 (≥2 samples) + length ≤50 amino acids.**
 
-This combines signal strength (reads), periodicity quality (pN), and
-reproducibility (≥2 samples). The filter is largely orthogonal to the
-OCS scoring system (correlation r < 0.3), providing independent
-validation.
+This combines signal strength (reads), periodicity quality (pN),
+reproducibility (≥2 samples), and sORF length constraint (≤50aa).
+The filter is largely orthogonal to the OCS scoring system
+(correlation r < 0.3), providing independent validation.
 
-For ggRibo visualization, sample up to `r ggribo_cfg$max_per_biotype` ORFs
-per biotype, ranked by total expression.
+**Final selected:** `{r} comma(nrow(final_orfs))` ORFs across 6 biotypes.
