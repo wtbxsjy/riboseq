@@ -23,9 +23,37 @@ process PRICE {
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_name = "price_genome_${meta.id}"
-    // PRICE read-length filtering is done upstream via sORF filtering.
-    // The -filter flag is NOT a valid GEDI Price parameter (removed per wiki).
-    def extra_args = params.extra_price_args ?: ''
+    // -filter is a valid GEDI Price parameter (confirmed `gedi Price -hh`).
+    // It accepts a read-length range like "26:34" and is preferred.
+    //
+    // Modes:
+    //   'auto'   → widen the sORF read-length range (e.g. 28-30 → 26-34)
+    //              based on experimental evidence that a ±2-4 nt margin
+    //              around the dominant footprint lengths improves ORF yield.
+    //   '26:34'  → use this exact range
+    //   ''       → no -filter (PRICE uses all read lengths; slowest)
+    def filter_arg = ''
+    def raw_filter = params.price_read_filter ?: ''
+    if (raw_filter && raw_filter != 'auto') {
+        filter_arg = "-filter ${raw_filter}"
+    } else if (raw_filter == 'auto') {
+        // Widen the sORF range by -2 nt on the low end and +4 nt on the high
+        // end.  PRICE benefits from a broader read-length distribution for
+        // codon model estimation, even if shorter/longer reads have weaker
+        // periodicity.  The margin values are derived from the parameter
+        // sweep (see docs/devlog/PRICE_PARAMETER_SWEEP_2026-07-10.md).
+        def rlmin = params.sorf_read_len_min ?: 28
+        def rlmax = params.sorf_read_len_max ?: 30
+        def auto_min = Math.max(rlmin - 2, 18)
+        def auto_max = Math.min(rlmax + 4, 60)
+        filter_arg = "-filter ${auto_min}:${auto_max}"
+    }
+    def keep_anno_arg = params.price_keep_anno ? '-keepAnno' : ''
+    def fdr_arg = (params.price_fdr && params.price_fdr != 0.1) ? "-fdr ${params.price_fdr}" : ''
+    // Cap threads to avoid excessive parallelism (GEDI default is 254,
+    // which can trigger race conditions on pathological contigs)
+    def nthreads = Math.min(task.cpus ?: 8, 16)
+    def extra_args = [filter_arg, keep_anno_arg, fdr_arg, params.extra_price_args ?: ''].findAll{it}.join(' ')
     """
     #!/bin/bash
     set -euo pipefail
@@ -55,7 +83,7 @@ process PRICE {
         -reads ${bam} \
         -genomic "\$(realpath ${genome_name}.oml)" \
         -prefix ${prefix} \
-        -nthreads ${task.cpus} \
+        -nthreads ${nthreads} \
         -progress \
         -novelTranscripts \
         ${extra_args} \
@@ -63,6 +91,14 @@ process PRICE {
             echo "WARNING: PRICE main pipeline returned non-zero exit code."
             echo "Some stages may have completed. Checking for partial output..."
         }
+    # Detect known GEDI crash: divide-by-zero in PriceOrfInference
+    # (triggered on some sORF-filtered BAMs with pathological contigs).
+    # If detected, emit a diagnostic message to help users debug.
+    if grep -q '/ by zero' .command.log 2>/dev/null; then
+        echo "[PRICE] ERROR: GEDI crashed with division-by-zero in ORF inference."
+        echo "[PRICE] This is a known GEDI issue with heavily filtered BAMs."
+        echo "[PRICE] Try using unfiltered genome BAM or a wider read-length range."
+    fi
 
     # Collect ORF output
     if [ -f "${prefix}.orfs.tsv" ] && [ -s "${prefix}.orfs.tsv" ]; then
@@ -165,6 +201,7 @@ RCODE
 
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def nthreads_stub = Math.min(task.cpus ?: 8, 16)
     """
     echo -e "orf_id\\tchr\\tstart\\tend\\tstrand\\ttype\\tscore" > ${prefix}.orfs.tsv
     echo "# PRICE stub" > ${prefix}_Detected_ORFs.gtf

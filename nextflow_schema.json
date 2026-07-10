@@ -1462,6 +1462,48 @@
             "false"
           ]
         },
+        "price_read_filter": {
+          "type": "string",
+          "default": "auto",
+          "fa_icon": "fas fa-filter",
+          "description": "Read-length filter for GEDI PRICE (e.g. '26:34'). Use 'auto' to widen the sORF range by +/-2-4 nt; use '' (empty) to let PRICE use all read lengths."
+        },
+        "price_keep_anno": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": true,
+          "fa_icon": "fas fa-tag",
+          "description": "Retain annotated CDS ORFs regardless of p-value (GEDI -keepAnno flag).",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "price_fdr": {
+          "type": "number",
+          "default": 0.1,
+          "fa_icon": "fas fa-chart-line",
+          "description": "FDR threshold for PRICE ORF multiple-testing correction."
+        },
+        "price_use_filtered_bam": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-exclamation-triangle",
+          "description": "Use sORF-filtered BAM for PRICE (legacy behaviour; not recommended).",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
         "rpbp_fail_on_empty": {
           "type": [
             "boolean",

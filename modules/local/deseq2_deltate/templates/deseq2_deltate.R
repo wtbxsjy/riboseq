@@ -378,8 +378,11 @@ sample_sheet <- sample_sheet |>
 
 missing_samples <- setdiff(rownames(sample_sheet), colnames(count_table))
 if (length(missing_samples) > 0) {
-    stop(paste(length(missing_samples), "samples missing from count table"))
+    warning(paste(length(missing_samples), "samples missing from count table, filtering them out:",
+                  paste(missing_samples, collapse = ", ")))
+    sample_sheet <- sample_sheet[!rownames(sample_sheet) %in% missing_samples, ]
 }
+stopifnot(nrow(sample_sheet) > 0)
 
 count_table <- count_table[, rownames(sample_sheet)]
 

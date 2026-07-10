@@ -812,10 +812,18 @@ workflow RIBOSEQ {
     //
     // PRICE: GEDI-based ORF detection pipeline (Erhard Lab)
     //
+    // PRICE uses the unfiltered (or lightly filtered) genome BAM so that
+    // it retains multi-mappers and the full read-length distribution for
+    // codon model estimation.  Read-length filtering is done via PRICE's
+    // own -filter flag (e.g. -filter 26:34) which is far more efficient
+    // than upstream sORF filtering for this tool.  See docs/devlog/
+    // PRICE_PARAMETER_SWEEP_2026-07-10.md for the experimental evidence.
+    //
     ch_price_gtf = Channel.empty()
     if (!params.skip_price) {
+        def ch_price_bam = params.price_use_filtered_bam ? ch_bams_for_sorf_prediction : ch_bams_for_analysis
         PRICE(
-            ch_bams_for_sorf_prediction,
+            ch_price_bam,
             ch_fasta,
             ch_gtf
         )
