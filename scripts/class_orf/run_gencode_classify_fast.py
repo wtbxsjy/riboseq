@@ -177,6 +177,8 @@ def load_orf_to_study_and_sequences(
     orf_to_study: Dict[str, str] = {}
     orf_to_nt: Dict[str, str] = {}
 
+    import sys as _sys
+    csv.field_size_limit(_sys.maxsize)
     with metadata_file.open(newline="") as handle:
         reader = csv.reader(handle, delimiter="\t")
         header = next(reader)
