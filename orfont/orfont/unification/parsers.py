@@ -446,7 +446,7 @@ def parse_ribocode(file_path, gtf_index, sample_id, min_len=0,
     metrics = _load_txt_metrics(_sidecar_txt_path(file_path))
 
     # GTF format
-    if file_path.endswith('.gtf'):
+    if file_path.endswith('.gtf') or file_path.endswith('.gtf.gz'):
         grouped = {}
         try:
             with _open(file_path, 'r') as f:
@@ -612,10 +612,33 @@ def parse_price(file_path, gtf_index, sample_id, min_len=6,
                 try:
                     colon_parts = loc_str.split(':')
                     if len(colon_parts) >= 3:
+                        # Format A: aa_start-aa_stop:chr:start-end:strand (old)
                         chrom = colon_parts[1]
                         coords = colon_parts[2]
                         strand = colon_parts[3] if len(colon_parts) > 3 else '+'
                         blocks = [(int(coords.split('-')[0]), int(coords.split('-')[1]))]
+                    elif len(colon_parts) == 2:
+                        # Format B: chr+strand:start-end|start-end (actual PRICE output)
+                        chr_strand = colon_parts[0]
+                        coords_str = colon_parts[1]
+                        if chr_strand[-1] in ('+', '-'):
+                            strand = chr_strand[-1]
+                            chrom = chr_strand[:-1]
+                        else:
+                            strand = '+'
+                            chrom = chr_strand
+                        # Parse coordinates (may have | for multi-exon)
+                        if '|' in coords_str:
+                            exons = coords_str.split('|')
+                            parsed = []
+                            for e in exons:
+                                se = e.split('-')
+                                parsed.append((int(se[0]), int(se[1])))
+                            if parsed:
+                                blocks = sorted(parsed)
+                        else:
+                            blocks = [(int(coords_str.split('-')[0]),
+                                       int(coords_str.split('-')[1]))]
                 except (ValueError, IndexError):
                     continue
 

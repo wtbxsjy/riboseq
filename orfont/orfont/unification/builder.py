@@ -318,7 +318,8 @@ def unify(ribotish_files=None, ribotricer_files=None, ribocode_files=None,
           output_dir='.', prefix='unified_orfs',
           frame_merge=True, frame_merge_min_overlap=0.9,
           seq_cluster=False, bedgraph_dir=None, sample_list=None,
-          min_len=6, extra_args=None):
+          min_len=6, extra_args=None,
+          duckdb_db_file=None, duckdb_memory_limit="32GB"):
     """Run ORF unification across tools and samples — optimized DuckDB path.
 
     Falls back to original script for:
@@ -326,6 +327,12 @@ def unify(ribotish_files=None, ribotricer_files=None, ribocode_files=None,
       - Sequence clustering (stage 3) — not yet implemented in DuckDB
       - Bedgraph statistics — not yet ported
       - Per-tool output mode
+
+    Args:
+        duckdb_db_file: path to persistent DuckDB database file.
+            If None, uses in-memory (high RAM usage, fast).
+            If set, data spills to disk (low RAM usage).
+        duckdb_memory_limit: DuckDB memory limit (e.g., "16GB", "32GB").
     """
     os.makedirs(output_dir, exist_ok=True)
     output_prefix = os.path.join(output_dir, prefix)
@@ -334,14 +341,18 @@ def unify(ribotish_files=None, ribotricer_files=None, ribocode_files=None,
         ribotish_files, ribotricer_files, ribocode_files, orfquant_files,
         price_files, gtf_path, fasta_path, output_prefix,
         min_len, frame_merge, frame_merge_min_overlap,
+        duckdb_db_file=duckdb_db_file,
+        duckdb_memory_limit=duckdb_memory_limit,
     )
 
 
 def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
                      orfquant_files, price_files, gtf_path, fasta_path, output_prefix,
-                     min_len, frame_merge=True, frame_merge_min_overlap=0.9):
-    """Optimized path: pandas bulk insert → DuckDB SQL dedup → output."""
-    from orfont.core.db import get_connection, init_schema, reset_connection
+                     min_len, frame_merge=True, frame_merge_min_overlap=0.9,
+                     duckdb_db_file=None, duckdb_memory_limit="32GB"):
+    """Optimized path: Streaming appender → DuckDB SQL dedup → output."""
+    from orfont.core.db import get_connection, init_schema, reset_connection, configure, \
+        streaming_appender
     from orfont.core.models import ORFCandidate, GTFIndex
     from orfont.unification.parsers import (
         parse_ribotish, parse_ribotricer, parse_orfquant, parse_ribocode, parse_price,
@@ -350,10 +361,15 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
 
     t_start = time.perf_counter()
 
-    # 1. Setup DuckDB
+    # 1. Setup DuckDB with configurable memory limit and persistent file
     reset_connection()
+    configure(db_file=duckdb_db_file, memory_limit=duckdb_memory_limit, threads=2)
     con = get_connection()
     init_schema(con)
+    if duckdb_db_file:
+        logger.info("DuckDB persistent: %s (memory_limit=%s)", duckdb_db_file, duckdb_memory_limit)
+    else:
+        logger.info("DuckDB in-memory (memory_limit=%s)", duckdb_memory_limit)
 
     # 2. Load GTF gene names (fast path — gene_id→gene_name only)
     logger.info("Loading GTF gene names...")
@@ -367,11 +383,9 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
     gtf_index = GTFIndex(gtf_path)
     logger.info("GTFIndex built in %.1fs", time.perf_counter() - t_gtf)
 
-    # 4. Parse all inputs → ORFCandidate → raw_orfs rows → pandas bulk insert
+    # 4. Parse all inputs → streaming DuckDB Appender (no Python accumulation)
     from orfont.io.orfs import orf_to_row, RAW_ORF_COLUMNS
-    from orfont.core.db import append_rows
 
-    all_rows = []
     tool_configs = [
         ("Ribo-TISH", ribotish_files, parse_ribotish, "_pred.txt"),
         ("Ribotricer", ribotricer_files, parse_ribotricer, "_translating_ORFs.tsv"),
@@ -381,39 +395,44 @@ def _unify_optimized(ribotish_files, ribotricer_files, ribocode_files,
     ]
 
     total_parsed = 0
-    for tool_name, files, parser, suffix in tool_configs:
-        if not files:
-            continue
-        for file_path in files:
-            sample_id = infer_sample_id_from_prediction_path(file_path, suffix)
-            logger.info("Parsing %s: %s (sample=%s)", tool_name, file_path, sample_id)
-            try:
-                candidates = parser(file_path, gtf_index, sample_id,
-                                    min_len=min_len,
-                                    exclude_tistypes={'Annotated', 'annotated'},
-                                    atg_only=False)
-            except Exception as e:
-                logger.warning("Parse failed for %s: %s — skipping", file_path, e)
+    n_files_parsed = 0
+    t_parse_start = time.perf_counter()
+
+    with streaming_appender(con, 'raw_orfs', columns=RAW_ORF_COLUMNS, batch_size=100000) as append:
+        for tool_name, files, parser, suffix in tool_configs:
+            if not files:
                 continue
-            for c in candidates:
-                all_rows.append(orf_to_row(c, tool_name, sample_id))
-            total_parsed += len(candidates)
-            logger.info("  parsed %d ORFs", len(candidates))
+            for file_path in files:
+                sample_id = infer_sample_id_from_prediction_path(file_path, suffix)
+                logger.info("Parsing %s: %s (sample=%s)", tool_name, file_path, sample_id)
+                try:
+                    candidates = parser(file_path, gtf_index, sample_id,
+                                        min_len=min_len,
+                                        exclude_tistypes={'Annotated', 'annotated'},
+                                        atg_only=False)
+                except Exception as e:
+                    logger.warning("Parse failed for %s: %s — skipping", file_path, e)
+                    continue
+                n_cand = 0
+                for c in candidates:
+                    append(orf_to_row(c, tool_name, sample_id))
+                    n_cand += 1
+                total_parsed += n_cand
+                n_files_parsed += 1
+                # Explicit cleanup to free memory between files
+                candidates.clear()
+                del candidates
+                logger.info("  → %d ORFs (total: %d, %d/%d files, %.1fs)",
+                            n_cand, total_parsed, n_files_parsed,
+                            sum(len(f) for _, f, _, _ in tool_configs if f),
+                            time.perf_counter() - t_parse_start)
 
-    logger.info("Total parsed: %d ORFs from %d tools", total_parsed,
-                sum(1 for _, files, _, _ in tool_configs if files))
+    logger.info("Total parsed: %d ORFs from %d files in %.1fs (streaming insert)",
+                total_parsed, n_files_parsed, time.perf_counter() - t_parse_start)
 
-    if not all_rows:
+    if total_parsed == 0:
         logger.warning("No ORFs parsed — returning empty outputs")
         return _write_outputs(con, output_prefix)
-
-    # 5. Bulk insert into raw_orfs (pandas DataFrame + register)
-    logger.info("Bulk inserting %d ORFs into DuckDB...", len(all_rows))
-    t_insert = time.perf_counter()
-    append_rows(con, 'raw_orfs', RAW_ORF_COLUMNS, all_rows)
-    logger.info("Bulk insert done in %.1fs (%.0f rows/s)",
-                time.perf_counter() - t_insert,
-                len(all_rows) / max(time.perf_counter() - t_insert, 0.001))
 
     # 6. SQL exact-match dedup
     from orfont.unification.dedup import (

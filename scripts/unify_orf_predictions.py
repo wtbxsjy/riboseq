@@ -2285,8 +2285,9 @@ def annotate_sequences_and_cds(candidates, use_parallel, num_workers, genome_fas
     print(f"Extracting sequences ({len(candidates)} candidates)...", file=sys.stderr)
     for cand in candidates:
         extract_sequence(cand, genome_fasta)
-    print("Annotating CDS overlap and overlapping genes...", file=sys.stderr)
-    annotate_cds_overlap(candidates, gtf_index)
+    # Skip CDS annotation in sequential path (can OOM/crash with large GTF)
+    # annotate_cds_overlap(candidates, gtf_index)
+    print("CDS overlap annotation skipped (sequential path).", file=sys.stderr)
 
 
 def _write_expression_outputs(candidates, per_sample_data, prefix):

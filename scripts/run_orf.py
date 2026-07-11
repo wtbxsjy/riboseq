@@ -122,6 +122,10 @@ def _run_orfont_unify(args):
     ap.add_argument('--sample-list', nargs='+', default=None)
     ap.add_argument('--threads', type=int, default=4)
     ap.add_argument('--per-tool-output', default=None)
+    ap.add_argument('--duckdb-db', default=None,
+                    help='Path to persistent DuckDB database file (default: in-memory)')
+    ap.add_argument('--duckdb-memory-limit', default='32GB',
+                    help='DuckDB memory limit (e.g., 16GB, 32GB, 48GB)')
     parsed, extra = ap.parse_known_args(args)
 
     # Resolve --min_len / --min-len (NF uses --min_len)
@@ -150,6 +154,8 @@ def _run_orfont_unify(args):
         bedgraph_dir=parsed.bedgraph_dir,
         sample_list=parsed.sample_list,
         min_len=min_len,
+        duckdb_db_file=parsed.duckdb_db,
+        duckdb_memory_limit=parsed.duckdb_memory_limit,
     )
     return 0
 

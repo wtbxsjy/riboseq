@@ -218,6 +218,66 @@ def _bulk_insert_via_pandas(con, table, columns, rows):
         con.unregister('_bulk_temp')
 
 
+class streaming_appender:
+    """Context manager: Batched pandas DataFrame insert for streaming rows.
+
+    Rows are accumulated in batches and flushed via the fast pandas
+    ``register`` + ``INSERT INTO ... SELECT *`` path.  Memory usage is
+    capped at ``batch_size`` rows.
+
+    Usage::
+
+        with streaming_appender(con, 'raw_orfs', RAW_ORF_COLUMNS) as append:
+            for orf in candidates:
+                append((chrom, strand, start, end, ...))
+
+    Args:
+        con: DuckDB connection
+        table: target table name
+        columns: list of column names
+        batch_size: rows per flush (default 500K)
+    """
+
+    def __init__(self, con, table, columns=None, batch_size=500000):
+        self.con = con
+        self.table = table
+        self.columns = columns or []
+        self.batch_size = batch_size
+        self._batch = []
+        self.count = 0
+
+    def __enter__(self):
+        self._batch = []
+        self.count = 0
+        return self._append
+
+    def _append(self, row_tuple):
+        self._batch.append(row_tuple)
+        self.count += 1
+        if len(self._batch) >= self.batch_size:
+            self._flush()
+
+    def _flush(self):
+        if not self._batch:
+            return
+        import pandas as pd
+        col_str = ', '.join(
+            f'"{c}"' if c.lower() in ('start', 'end') else c
+            for c in self.columns
+        )
+        df = pd.DataFrame(self._batch, columns=self.columns)
+        self.con.register('_stream_batch', df)
+        self.con.execute(
+            f"INSERT INTO {self.table} ({col_str}) SELECT * FROM _stream_batch")
+        self.con.unregister('_stream_batch')
+        self._batch.clear()
+
+    def __exit__(self, *args):
+        self._flush()
+        logger.debug("Streaming batch insert done: %d rows → %s", self.count, self.table)
+        return False
+
+
 def parquet_to_table(con: duckdb.DuckDBPyConnection, glob_pattern: str,
                      table: str):
     """Load all Parquet files matching a glob into a table.
