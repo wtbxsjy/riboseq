@@ -14,13 +14,17 @@ date: "`r Sys.Date()`"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
-library(tidyverse)
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(data.table)
+  library(tibble)
+})
 library(ggRibo)
-library(ggplot2)
 library(yaml)
 library(R6)
 library(scales)
-library(furrr)
 
 if (file.exists("_functions.R")) {
   source("_functions.R")
@@ -37,22 +41,27 @@ ggc <- cfg$ggribo
 if (is.null(ggc$top_n_samples)) ggc$top_n_samples <- 10
 if (is.null(ggc$sort_metric)) ggc$sort_metric <- "p_site_GSE"
 
+# Helper: read TSV via data.table
+.read_tsv_gg <- function(path) {
+  as_tibble(data.table::fread(path, sep = "\t", header = TRUE, stringsAsFactors = FALSE))
+}
+
 # Load final ORF list (from 02_psite_filtering)
 orf_list_file <- file.path(cfg$input$output_dir, "final_orfs_for_ggribo.tsv")
 if (!file.exists(orf_list_file)) {
   stop("final_orfs_for_ggribo.tsv not found — run 02_psite_filtering.qmd first")
 }
-orfs <- read_tsv(orf_list_file, show_col_types = FALSE)
+orfs <- .read_tsv_gg(orf_list_file)
 message(sprintf("Loaded %d ORFs for ggRibo plotting", nrow(orfs)))
 
 # Load expression for sample lookups
-expr <- read_tsv(cfg$input$expression, show_col_types = FALSE)
+expr <- .read_tsv_gg(cfg$input$expression)
 
 # Load P-site purity if available (for sorting and title metrics)
 psite_file <- file.path(cfg$input$output_dir, "psite_purity.tsv")
 psite_data <- NULL
 if (file.exists(psite_file)) {
-  psite_data <- read_tsv(psite_file, show_col_types = FALSE)
+  psite_data <- .read_tsv_gg(psite_file)
   message(sprintf("Loaded P-site purity data for %d ORFs", nrow(psite_data)))
 } else {
   message("P-site purity data not found — sorting by reads only")
@@ -63,15 +72,13 @@ plot_base <- file.path(cfg$input$output_dir, "ggribo_plots")
 tmp_gtf_dir <- file.path(cfg$input$output_dir, "tmp_gtf")
 dir.create(plot_base, showWarnings = FALSE, recursive = TRUE)
 dir.create(tmp_gtf_dir, showWarnings = FALSE, recursive = TRUE)
-
-plan(multisession, workers = ggc$workers)
 ```
 
 # 1. ORF Summary
 
 ```{r orf-summary, echo=FALSE}
 orfs |>
-  count(orf_biotype, sort = TRUE) |>
+  dplyr::count(orf_biotype, sort = TRUE) |>
   mutate(pct = 100 * n / sum(n)) |>
   knitr::kable(format = "html", digits = 1,
     col.names = c("Biotype", "Count", "%"),
@@ -195,18 +202,19 @@ plot_one <- function(i, orfs, expr, psite_data, cfg, tmp_gtf_dir, plot_base,
 message(sprintf("Generating %d ggRibo plots with %d workers (top %d samples by %s) ...",
         nrow(orfs), ggc$workers, ggc$top_n_samples, ggc$sort_metric))
 
-results <- future_map_dfr(seq_len(nrow(orfs)), plot_one,
+# Use parallel::mclapply (base R, no furrr dependency)
+results_list <- parallel::mclapply(seq_len(nrow(orfs)), plot_one,
   orfs = orfs, expr = expr, psite_data = psite_data, cfg = cfg,
   tmp_gtf_dir = tmp_gtf_dir, plot_base = plot_base,
   org_id = org_id, org_label = org_label, org_species = org_species,
-  .options = furrr_options(seed = TRUE)
+  mc.cores = ggc$workers
 )
 
-plan(sequential)
+results <- dplyr::bind_rows(results_list)
 
 # Summarise
 res_summary <- results |>
-  count(status) |>
+  dplyr::count(status) |>
   mutate(pct = 100 * n / sum(n))
 
 res_summary |>

@@ -428,7 +428,10 @@ build_filter_matrix <- function(df, filter_pattern = "^(prelim_pass_|psite_pass_
       median_pN  = median(sub$pN, na.rm = TRUE)
     )
   })
-  do.call(rbind, results) |> as.data.frame(stringsAsFactors = FALSE)
+  mat <- do.call(rbind, results) |> as.data.frame(stringsAsFactors = FALSE)
+  # Deduplicate rows with identical labels (e.g. psite_pass_gse == psite_pass_gse_2)
+  mat <- mat[!duplicated(mat$filter_label), ]
+  mat
 }
 
 

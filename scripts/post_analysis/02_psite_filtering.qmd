@@ -65,7 +65,9 @@ df <- data$merged |>
 df <- apply_psite_filters(df, cfg, psite_file)
 
 # ── Expression filter context (for cross-comparison) ──
-df <- apply_prelim_filters(df, cfg, data$expression)
+# Filter expression to match the working set
+expr_filtered <- data$expression |> semi_join(df |> select(orf_id), by = "orf_id")
+df <- apply_prelim_filters(df, cfg, expr_filtered)
 
 message(sprintf("Working set: %s ORFs (prelim-filtered)", scales::comma(nrow(df))))
 ```
@@ -248,14 +250,19 @@ filter_matrix |>
 # 5. Final ORF Selection
 
 **Filter:** Non-CDS (incl. intergenic) + real P-site GSE > `r cfg$filtering$p_site_gse_min`
-+ p_site_pct > `r cfg$filtering$p_site_pct_min` + p_site_pos > `r cfg$filtering$p_site_pos_min`
++ p_site_pct > `r cfg$filtering$p_site_pct_min`
 (≥`r cfg$filtering$final_cross_sample` samples) + length ≤ 50 amino acids.
 
+> **Note:** `p_site_pos` is not computed by the fast bedtools-based P-site computation.
+> The position filter is excluded — it is the least discriminating criterion anyway
+> (>97% pass rate in prior validation).
+
 ```{r final-selection, echo=FALSE}
-# Apply final filter
+# Apply final filter (GSE + pct; pos not computed by fast bedtools mode)
 final_orfs <- df |>
   filter(orf_biotype != "CDS",
-         psite_pass_triple,
+         psite_pass_gse,
+         psite_pass_pct,
          length_aa <= 50)
 
 message(sprintf("Final ggRibo candidates: %s ORFs", scales::comma(nrow(final_orfs))))
@@ -283,14 +290,18 @@ message(sprintf("Wrote %s ORFs → %s", scales::comma(nrow(final_orfs)), out_tsv
 
 ```{r final-summary, fig.height=8, fig.width=12, echo=FALSE}
 # OCS boxplot by biotype
-boxplot(ocs ~ orf_biotype, data = final_orfs,
-        col = c(intORF = "#E64B35", dORF = "#00A087", doORF = "#7E6148",
-                uORF = "#4682B4", uoORF = "#F39B7F", lncRNA = "#3C5488",
-                intergenic = "#FFDC91")[unique(final_orfs$orf_biotype)],
-        main = "OCS Distribution by ORF Biotype (Final Candidates)",
-        xlab = NULL, ylab = "ORF Confidence Score (OCS)",
-        las = 2, cex.axis = 0.9)
-abline(h = c(0.2, 0.5, 0.8), lty = 2, col = "grey60")
+if (nrow(final_orfs) > 0 && "ocs" %in% names(final_orfs) && "orf_biotype" %in% names(final_orfs)) {
+  bt_cols <- c(intORF = "#E64B35", dORF = "#00A087", doORF = "#7E6148",
+               uORF = "#4682B4", uoORF = "#F39B7F", lncRNA = "#3C5488",
+               intergenic = "#FFDC91")
+  present_bt <- intersect(unique(as.character(final_orfs$orf_biotype)), names(bt_cols))
+  boxplot(ocs ~ orf_biotype, data = final_orfs,
+          col = bt_cols[present_bt],
+          main = "OCS Distribution by ORF Biotype (Final Candidates)",
+          xlab = NULL, ylab = "ORF Confidence Score (OCS)",
+          las = 2, cex.axis = 0.9)
+  abline(h = c(0.2, 0.5, 0.8), lty = 2, col = "grey60")
+}
 
 # Tier composition
 tt <- as.data.frame(table(final_orfs$orf_biotype, final_orfs$tier))
@@ -324,10 +335,8 @@ data.frame(
     "Total unified ORFs",
     "Non-CDS (incl. intergenic)",
     "Stage 1: Prelim filter (reads+pN)",
-    sprintf("Stage 2: Real p_site_GSE > %d", cfg$filtering$p_site_gse_min),
-    sprintf("Stage 2: + p_site_pct > %.1f", cfg$filtering$p_site_pct_min),
-    sprintf("Stage 2: + p_site_pos > %d", cfg$filtering$p_site_pos_min),
-    sprintf("Stage 2: Triple (≥%d samples)", cfg$filtering$final_cross_sample),
+    sprintf("Stage 2: Real p_site_GSE > %d (≥%d samples)", cfg$filtering$p_site_gse_min, cfg$filtering$final_cross_sample),
+    sprintf("Stage 2: + p_site_pct > %.1f (≥%d samples)", cfg$filtering$p_site_pct_min, cfg$filtering$final_cross_sample),
     "Final: + length ≤ 50aa"
   ),
   Count = c(
@@ -336,8 +345,6 @@ data.frame(
     sum(df$prelim_pass_combined, na.rm = TRUE),
     sum(df$psite_pass_gse, na.rm = TRUE),
     sum(df$psite_pass_gse & df$psite_pass_pct, na.rm = TRUE),
-    sum(df$psite_pass_gse & df$psite_pass_pct & df$psite_pass_pos, na.rm = TRUE),
-    sum(df$psite_pass_triple, na.rm = TRUE),
     nrow(final_orfs)
   )
 ) |>

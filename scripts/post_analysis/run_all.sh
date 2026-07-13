@@ -57,11 +57,19 @@ echo ""
 
 # ─── Step 1: Preliminary Analysis ──────────────────────────────────────
 echo "=== Step 1: Preliminary Expression-Based Analysis ==="
-quarto render "$SCRIPT_DIR/01_prelim_analysis.qmd" \
+# Quarto --output-dir only works for projects, not single files.
+# Render from the output dir so the HTML lands there directly.
+RENDER_DIR="$OUTPUT_DIR/render_01"
+mkdir -p "$RENDER_DIR"
+cp "$SCRIPT_DIR/01_prelim_analysis.qmd" "$RENDER_DIR/"
+cp "$SCRIPT_DIR/_functions.R" "$RENDER_DIR/"
+(cd "$RENDER_DIR" && quarto render "01_prelim_analysis.qmd" \
   -P config:"$CONFIG" \
-  --execute \
-  --output-dir "$OUTPUT_DIR" \
+  --execute) \
   2>&1 | tee "$OUTPUT_DIR/logs/step1_prelim.log"
+# Move HTML to output dir, keep qmd for reference
+mv "$RENDER_DIR/01_prelim_analysis.html" "$OUTPUT_DIR/" 2>/dev/null || true
+rm -rf "$RENDER_DIR"
 echo "  → $OUTPUT_DIR/01_prelim_analysis.html"
 echo ""
 
@@ -82,10 +90,11 @@ echo "  RiboseQC dir: $RIBOSEQC_DIR"
 if [ -f "$PURITY_OUT" ]; then
   echo "  psite_purity.tsv already exists — skipping (delete to recompute)"
 else
-  python3 "$SCRIPT_DIR/compute_psite_purity.py" \
+  python3 "$SCRIPT_DIR/compute_psite_fast.py" \
     --bed "$PRELIM_BED" \
     --riboseqc-dir "$RIBOSEQC_DIR" \
     --output "$PURITY_OUT" \
+    --bedtools /usr/bin/bedtools \
     --workers 8 \
     2>&1 | tee "$OUTPUT_DIR/logs/step2_purity.log"
   echo "  → $PURITY_OUT"
@@ -94,11 +103,16 @@ echo ""
 
 # ─── Step 3: P-site Filtering + Final ORF Selection ────────────────────
 echo "=== Step 3: Real P-site Filtering ==="
-quarto render "$SCRIPT_DIR/02_psite_filtering.qmd" \
+RENDER_DIR="$OUTPUT_DIR/render_03"
+mkdir -p "$RENDER_DIR"
+cp "$SCRIPT_DIR/02_psite_filtering.qmd" "$RENDER_DIR/"
+cp "$SCRIPT_DIR/_functions.R" "$RENDER_DIR/"
+(cd "$RENDER_DIR" && quarto render "02_psite_filtering.qmd" \
   -P config:"$CONFIG" \
-  --execute \
-  --output-dir "$OUTPUT_DIR" \
+  --execute) \
   2>&1 | tee "$OUTPUT_DIR/logs/step3_psite_filter.log"
+mv "$RENDER_DIR/02_psite_filtering.html" "$OUTPUT_DIR/" 2>/dev/null || true
+rm -rf "$RENDER_DIR"
 echo "  → $OUTPUT_DIR/02_psite_filtering.html"
 echo ""
 
@@ -107,11 +121,16 @@ ORF_LIST="$OUTPUT_DIR/final_orfs_for_ggribo.tsv"
 if [ -f "$ORF_LIST" ]; then
   N_ORFS=$(tail -n +2 "$ORF_LIST" | wc -l)
   echo "=== Step 4: ggRibo Coverage Plots ($N_ORFS ORFs) ==="
-  quarto render "$SCRIPT_DIR/03_generate_ggribo.qmd" \
+  RENDER_DIR="$OUTPUT_DIR/render_04"
+  mkdir -p "$RENDER_DIR"
+  cp "$SCRIPT_DIR/03_generate_ggribo.qmd" "$RENDER_DIR/"
+  cp "$SCRIPT_DIR/_functions.R" "$RENDER_DIR/"
+  (cd "$RENDER_DIR" && quarto render "03_generate_ggribo.qmd" \
     -P config:"$CONFIG" \
-    --execute \
-    --output-dir "$OUTPUT_DIR" \
+    --execute) \
     2>&1 | tee "$OUTPUT_DIR/logs/step4_ggribo.log"
+  mv "$RENDER_DIR/03_generate_ggribo.html" "$OUTPUT_DIR/" 2>/dev/null || true
+  rm -rf "$RENDER_DIR"
   echo "  → $OUTPUT_DIR/ggribo_plots/"
 else
   echo ""
