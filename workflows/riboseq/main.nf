@@ -1408,7 +1408,7 @@ workflow RIBOSEQ {
 
         COLLECT_QC_STATS(
             ch_qc_star_logs.collect().ifEmpty([]),
-            ch_qc_sorf_stats.collect(),
+            ch_qc_sorf_stats.collect().ifEmpty([]),
             ch_qc_psites_calcs.collect().ifEmpty([]),
             ch_qc_ribotish_all.collect().ifEmpty([]),
             ch_qc_ribotricer_orfs.collect().ifEmpty([]),

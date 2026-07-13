@@ -63,8 +63,37 @@ gtf_in = sys.argv[1]
 gtf_out = sys.argv[2]
 
 level_re = re.compile(r'(?:^|;\\s*)level\\s+"[^"]*"\\s*;')
+gene_id_re = re.compile(r'gene_id\\s+"([^"]+)"')
+tx_id_re = re.compile(r'transcript_id\\s+"([^"]+)"')
 
-with open(gtf_in, 'rt', encoding='utf-8', errors='replace') as fin, open(gtf_out, 'wt', encoding='utf-8') as fout:
+# Pass 1: collect all registered gene IDs from 'gene' features,
+# and all transcript IDs from 'transcript' features
+valid_genes = set()
+valid_transcripts = set()
+tx_to_gene = {}  # transcript_id -> gene_id
+with open(gtf_in, 'rt', encoding='utf-8', errors='replace') as fin:
+    for line in fin:
+        if line.startswith('#'): continue
+        parts = line.split('\\t')
+        if len(parts) < 9: continue
+        if parts[2] == 'gene':
+            m = gene_id_re.search(parts[8])
+            if m: valid_genes.add(m.group(1))
+        elif parts[2] == 'transcript':
+            m = tx_id_re.search(parts[8])
+            gm = gene_id_re.search(parts[8])
+            if m:
+                valid_transcripts.add(m.group(1))
+                if gm: tx_to_gene[m.group(1)] = gm.group(1)
+
+# Pass 2: write normalized GTF, adding synthetic transcript entries for
+# exon/CDS features that lack a parent transcript line (common in GENCODE
+# for protein_coding_CDS_not_defined transcripts)
+synth_added = set()
+skipped = 0
+written = 0
+with open(gtf_in, 'rt', encoding='utf-8', errors='replace') as fin, \\
+     open(gtf_out, 'wt', encoding='utf-8') as fout:
     for line in fin:
         if line.startswith('#') or not line.strip():
             fout.write(line)
@@ -74,12 +103,33 @@ with open(gtf_in, 'rt', encoding='utf-8', errors='replace') as fin, open(gtf_out
             fout.write(line)
             continue
         attrs = parts[8].strip()
+        gm = gene_id_re.search(attrs)
+        # Drop features whose parent gene is not registered
+        if gm and gm.group(1) not in valid_genes:
+            skipped += 1
+            continue
+        # Add synthetic transcript entry for exon/CDS/UTR features that
+        # belong to a transcript without a transcript feature line
+        tm = tx_id_re.search(attrs)
+        if tm and tm.group(1) not in valid_transcripts and parts[2] in ('exon','CDS','start_codon','stop_codon','UTR'):
+            tid = tm.group(1)
+            gid = gm.group(1) if gm else tid
+            if tid not in synth_added:
+                synth_added.add(tid)
+                # Synthesize a transcript entry
+                synth_attrs = f'gene_id "{gid}"; transcript_id "{tid}"; level "NA";'
+                synth = '\\t'.join([parts[0], 'RiboCode', 'transcript',
+                    parts[3], parts[4], '.', parts[6], '.', synth_attrs])
+                fout.write(synth + '\\n')
+                valid_transcripts.add(tid)
         if not level_re.search(attrs):
             if attrs and not attrs.endswith(';'):
                 attrs += ';'
             attrs += ' level "NA";'
             parts[8] = attrs
         fout.write('\\t'.join(parts) + '\\n')
+        written += 1
+print(f"GTF normalized: {written} lines, {skipped} orphan, {len(synth_added)} synth transcripts", file=sys.stderr)
 PY
 
     # Run RiboCode, capture exit status

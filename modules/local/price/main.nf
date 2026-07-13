@@ -42,8 +42,9 @@ process PRICE {
         // codon model estimation, even if shorter/longer reads have weaker
         // periodicity.  The margin values are derived from the parameter
         // sweep (see docs/devlog/PRICE_PARAMETER_SWEEP_2026-07-10.md).
-        def rlmin = params.sorf_read_len_min ?: 28
-        def rlmax = params.sorf_read_len_max ?: 30
+        // Params from CLI are strings in Nextflow 26.x; coerce to int.
+        def rlmin = (params.sorf_read_len_min ?: 28).toString().toInteger()
+        def rlmax = (params.sorf_read_len_max ?: 30).toString().toInteger()
         def auto_min = Math.max(rlmin - 2, 18)
         def auto_max = Math.min(rlmax + 4, 60)
         filter_arg = "-filter ${auto_min}:${auto_max}"
