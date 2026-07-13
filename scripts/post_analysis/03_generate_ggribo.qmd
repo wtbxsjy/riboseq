@@ -22,21 +22,41 @@ library(R6)
 library(scales)
 library(furrr)
 
-source(here::here("scripts/post_analysis/_functions.R"))
+if (file.exists("_functions.R")) {
+  source("_functions.R")
+} else if (file.exists("../../scripts/post_analysis/_functions.R")) {
+  source("../../scripts/post_analysis/_functions.R")
+} else {
+  stop("Cannot find _functions.R")
+}
 
 cfg <- load_config(params$config)
 ggc <- cfg$ggribo
 
-# Load final ORF list (from 01_filtering_analysis)
+# Apply defaults
+if (is.null(ggc$top_n_samples)) ggc$top_n_samples <- 10
+if (is.null(ggc$sort_metric)) ggc$sort_metric <- "p_site_GSE"
+
+# Load final ORF list (from 02_psite_filtering)
 orf_list_file <- file.path(cfg$input$output_dir, "final_orfs_for_ggribo.tsv")
 if (!file.exists(orf_list_file)) {
-  stop("final_orfs_for_ggribo.tsv not found — run 01_filtering_analysis.qmd first")
+  stop("final_orfs_for_ggribo.tsv not found — run 02_psite_filtering.qmd first")
 }
 orfs <- read_tsv(orf_list_file, show_col_types = FALSE)
 message(sprintf("Loaded %d ORFs for ggRibo plotting", nrow(orfs)))
 
 # Load expression for sample lookups
 expr <- read_tsv(cfg$input$expression, show_col_types = FALSE)
+
+# Load P-site purity if available (for sorting and title metrics)
+psite_file <- file.path(cfg$input$output_dir, "psite_purity.tsv")
+psite_data <- NULL
+if (file.exists(psite_file)) {
+  psite_data <- read_tsv(psite_file, show_col_types = FALSE)
+  message(sprintf("Loaded P-site purity data for %d ORFs", nrow(psite_data)))
+} else {
+  message("P-site purity data not found — sorting by reads only")
+}
 
 # Setup output directories
 plot_base <- file.path(cfg$input$output_dir, "ggribo_plots")
@@ -49,7 +69,7 @@ plan(multisession, workers = ggc$workers)
 
 # 1. ORF Summary
 
-```{r orf-summary}
+```{r orf-summary, echo=FALSE}
 orfs |>
   count(orf_biotype, sort = TRUE) |>
   mutate(pct = 100 * n / sum(n)) |>
@@ -57,6 +77,12 @@ orfs |>
     col.names = c("Biotype", "Count", "%"),
     caption = "ORFs to plot by biotype")
 ```
+
+**Plot parameters:**
+- Top N samples: `r ggc$top_n_samples`
+- Sort metric: `r ggc$sort_metric`
+- Flanking extension: `r ggc$extend_bp` bp
+- Workers: `r ggc$workers`
 
 # 2. Generate ggRibo Plots
 
@@ -66,7 +92,7 @@ org_species <- cfg$project$species
 org_id      <- cfg$project$name
 
 # ── Single-ORF plotter (used by furrr) ──
-plot_one <- function(i, orfs, expr, cfg, tmp_gtf_dir, plot_base,
+plot_one <- function(i, orfs, expr, psite_data, cfg, tmp_gtf_dir, plot_base,
                      org_id, org_label, org_species) {
   r <- orfs[i, ]
   biotype_dir <- file.path(plot_base, r$orf_biotype)
@@ -88,18 +114,20 @@ plot_one <- function(i, orfs, expr, cfg, tmp_gtf_dir, plot_base,
                   error = function(e) NULL)
   if (is.null(ids)) return(tibble(orf_id = r$orf_id, status = "gtf_error", file = NA_character_))
 
-  # Top samples
-  top <- find_top_samples(expr, r$orf_id, n = cfg$ggribo$top_n_samples)
+  # Top samples sorted by configured metric
+  sort_by <- cfg$ggribo$sort_metric
+  if (is.null(sort_by)) sort_by <- "reads"
+  top <- find_top_samples(expr, r$orf_id, n = cfg$ggribo$top_n_samples,
+                          psite_data = psite_data, sort_by = sort_by)
   if (is.null(top) || length(top) == 0)
     return(tibble(orf_id = r$orf_id, status = "no_samples", file = NA_character_))
 
-  bg_list <- list(); sn_list <- c(); sr_list <- c()
+  bg_list <- list(); sn_list <- c()
   for (s in top) {
     bg <- find_bedgraph_files(cfg, s$sample)
     if (!is.null(bg)) {
       bg_list[[length(bg_list) + 1]] <- bg
       sn_list <- c(sn_list, s$sample)
-      sr_list <- c(sr_list, s$reads)
     }
   }
   if (length(bg_list) == 0)
@@ -115,9 +143,27 @@ plot_one <- function(i, orfs, expr, cfg, tmp_gtf_dir, plot_base,
     assign("inputs_full", seq_result, envir = .GlobalEnv)
 
     orf_len <- r$end - r$start
-    title_str <- sprintf("%s | %s | %s | %dnt | reads=%s pN=%.1f",
-      org_label, r$orf_id, r$orf_biotype, orf_len,
-      format(r$total_reads_expr, big.mark = ","), r$max_pN)
+
+    # Build title with available metrics
+    title_parts <- c(
+      org_label,
+      r$orf_id,
+      r$orf_biotype,
+      sprintf("%dnt", orf_len)
+    )
+    if (!is.null(r$total_reads_expr)) {
+      title_parts <- c(title_parts, sprintf("reads=%s", format(r$total_reads_expr, big.mark = ",")))
+    }
+    if (!is.null(r$max_pN)) {
+      title_parts <- c(title_parts, sprintf("pN=%.1f", r$max_pN))
+    }
+    if (!is.null(r$total_psites_real) && r$total_psites_real > 0) {
+      title_parts <- c(title_parts, sprintf("GSE=%s", format(round(r$total_psites_real), big.mark = ",")))
+    }
+    if (!is.null(r$mean_p_site_pct) && !is.na(r$mean_p_site_pct)) {
+      title_parts <- c(title_parts, sprintf("pct=%.2f", r$mean_p_site_pct))
+    }
+    title_str <- paste(title_parts, collapse = " | ")
 
     p <- ggRibo(
       gene_id    = ids$gene_id,
@@ -134,7 +180,8 @@ plot_one <- function(i, orfs, expr, cfg, tmp_gtf_dir, plot_base,
       ribo_linewidth = 0.6
     )
 
-    ggsave(out_file, p, width = 14, height = max(5, ns * 2.5),
+    # Height scales with number of sample panels
+    ggsave(out_file, p, width = 14, height = max(6, ns * 2.5),
            dpi = 150, limitsize = FALSE, bg = "white")
 
     tibble(orf_id = r$orf_id, status = "ok", file = out_file)
@@ -145,11 +192,11 @@ plot_one <- function(i, orfs, expr, cfg, tmp_gtf_dir, plot_base,
 }
 
 # ── Batch execution ──
-message(sprintf("Generating %d ggRibo plots with %d workers ...",
-        nrow(orfs), ggc$workers))
+message(sprintf("Generating %d ggRibo plots with %d workers (top %d samples by %s) ...",
+        nrow(orfs), ggc$workers, ggc$top_n_samples, ggc$sort_metric))
 
 results <- future_map_dfr(seq_len(nrow(orfs)), plot_one,
-  orfs = orfs, expr = expr, cfg = cfg,
+  orfs = orfs, expr = expr, psite_data = psite_data, cfg = cfg,
   tmp_gtf_dir = tmp_gtf_dir, plot_base = plot_base,
   org_id = org_id, org_label = org_label, org_species = org_species,
   .options = furrr_options(seed = TRUE)
@@ -200,12 +247,14 @@ for (bt in biotypes) {
 }
 ```
 
-```{r final-summary}
+```{r final-summary, echo=FALSE}
 cat(sprintf(
-  "\n### Complete\n\n- **Total ORFs:** %d\n- **Plotted:** %d\n- **Errors:** %d\n- **Output:** %s\n\n",
+  "\n### Complete\n\n- **Total ORFs:** %d\n- **Plotted:** %d\n- **Errors:** %d\n- **Sort metric:** %s\n- **Top N samples:** %d\n- **Output:** %s\n\n",
   nrow(orfs),
   sum(results$status == "ok"),
   sum(results$status != "ok"),
+  ggc$sort_metric,
+  ggc$top_n_samples,
   plot_base
 ))
 ```

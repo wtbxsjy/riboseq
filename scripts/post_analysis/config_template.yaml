@@ -23,19 +23,31 @@ input:
   bedgraph_plus_pattern:  "*_P_sites_plus.bedgraph"
   bedgraph_minus_pattern: "*_P_sites_minus.bedgraph"
 
-# ─── P-site purity filtering ────────────────────────────────────────
+# ─── Two-stage ORF filtering ────────────────────────────────────────
 filtering:
-  p_site_gse_min: 9
-  p_site_pct_min: 0.5
-  p_site_pos_min: 2
-  # cross-sample aggregation strategies to test
-  cross_sample_strategies: ["any", "≥2", "≥3"]
+  # Stage 1: Preliminary (expression-based, cheap)
+  #   Uses {sample}_reads and {sample}_pN from expression summary.
+  #   Purpose: reduce ORF set before expensive bedgraph scan.
+  #   Samples come from heterogeneous datasets — ≥1 sample sufficient.
+  prelim_reads_min: 9          # minimum reads per sample
+  prelim_pN_min: 0.5           # minimum frame periodicity per sample
+  prelim_cross_sample: 1       # any sample with reads+pN
+
+  # Stage 2: Real P-site (bedgraph-based, exact)
+  #   Computed by compute_psite_purity.py backtracking through
+  #   RiboseQC _P_sites_*.bedgraph and _coverage_*.bedgraph files.
+  #   These are EXACT values — no proxies, no approximations.
+  p_site_gse_min: 9            # minimum P-site reads per sample
+  p_site_pct_min: 0.5          # minimum P-site fraction per sample
+  p_site_pos_min: 2            # minimum P-site position offset
+  final_cross_sample: 2        # reproducibility across ≥N samples
 
 # ─── ggRibo plotting ────────────────────────────────────────────────
 ggribo:
   max_per_biotype: 50          # sample at most N per ORF biotype
-  top_n_samples: 3             # show top N samples per ORF
+  top_n_samples: 10            # show top N samples per ORF (was 3)
+  sort_metric: "p_site_GSE"    # sample sort: "reads", "p_site_GSE", "p_site_pct", "pN"
   extend_bp: 200               # flanking bp each side
   workers: 8                   # parallel workers for rendering
   # ORF biotypes to include (null = all non-CDS)
-  biotypes: ["uORF", "dORF", "doORF", "intORF", "uoORF", "lncRNA"]
+  biotypes: ["uORF", "dORF", "doORF", "intORF", "uoORF", "lncRNA", "intergenic"]

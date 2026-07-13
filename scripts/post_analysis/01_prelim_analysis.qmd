@@ -1,0 +1,513 @@
+---
+title: "ORF Preliminary Analysis — `r params$project$label`"
+author: "Ribo-seq Pipeline"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    embed-resources: true
+params:
+  config: "config_template.yaml"
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 6)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(data.table)
+  library(scales)
+  library(yaml)
+  library(R6)
+})
+
+# Look for _functions.R relative to this qmd or in the pipeline root
+if (file.exists("_functions.R")) {
+  source("_functions.R")
+} else if (file.exists("../../scripts/post_analysis/_functions.R")) {
+  source("../../scripts/post_analysis/_functions.R")
+} else {
+  stop("Cannot find _functions.R")
+}
+
+cfg  <- load_config(params$config)
+data <- load_pipeline_data(cfg)
+df   <- data$merged
+df   <- apply_prelim_filters(df, cfg, data$expression)
+```
+
+# 1. GENCODE Classification Overview
+
+## 1.1 Category Breakdown
+
+The GENCODE mapper classifies ORFs by intersecting their coordinates with
+transcript exon chains. ORFs that don't overlap any annotated transcript
+are labelled **"intergenic"** — they are inherently non-CDS since there is
+no transcript CDS to overlap.
+
+```{r gencode-cats, echo=FALSE}
+# Biotype distribution including intergenic
+biotype_all <- df |>
+  count(orf_biotype, sort = TRUE) |>
+  mutate(pct = 100 * n / sum(n),
+         orf_biotype = factor(orf_biotype, levels = rev(unique(orf_biotype))))
+
+biotype_all |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("Biotype", "Count", "%"),
+    caption = "Full ORF biotype distribution (including intergenic)")
+```
+
+```{r gencode-bar, fig.height=5, fig.width=10, echo=FALSE}
+biotype_colors <- c(
+  CDS        = "grey70",
+  intORF     = "#E64B35",
+  dORF       = "#00A087",
+  doORF      = "#7E6148",
+  uORF       = "#4682B4",
+  uoORF      = "#F39B7F",
+  lncRNA     = "#3C5488",
+  intergenic = "#FFDC91"
+)
+
+ggplot(biotype_all, aes(n, orf_biotype, fill = orf_biotype)) +
+  geom_col() +
+  scale_x_log10(labels = comma) +
+  scale_fill_manual(values = biotype_colors, guide = "none") +
+  labs(title = "ORF biotype distribution (GENCODE + intergenic)",
+       subtitle = sprintf("Classified: %s (%.1f%%) | Intergenic: %s (%.1f%%) | Non-CDS: %s",
+         comma(sum(df$is_classified)),
+         100 * mean(df$is_classified),
+         comma(sum(df$orf_biotype == "intergenic")),
+         100 * mean(df$orf_biotype == "intergenic"),
+         comma(sum(df$orf_biotype != "CDS", na.rm = TRUE))),
+       x = "Number of ORFs (log10)", y = NULL) +
+  theme_minimal(base_size = 13)
+```
+
+```{r classified-vs-intergenic, echo=FALSE}
+# Summary table
+data.frame(
+  Category = c("Classified (GENCODE)", "Intergenic (unclassified)", "Total unified"),
+  Count = c(sum(df$is_classified), sum(df$orf_biotype == "intergenic"), nrow(df)),
+  Pct = c(100 * mean(df$is_classified), 100 * mean(df$orf_biotype == "intergenic"), 100)
+) |>
+  knitr::kable(format = "html", digits = 1,
+    caption = "Classification coverage")
+```
+
+## 1.2 ORF Prediction Pipeline
+
+```
+5,479,886 raw → exact-match dedup → 654,837 → frame-aware merge → 394,053 unified
+  → 183,293 GENCODE classified (46.5%) + 210,760 intergenic (53.5%)
+```
+
+| Stage | ORFs | Reduction |
+|-------|-----:|:---:|
+| Raw (5 tools × 23 samples) | 5,479,886 | — |
+| Exact-match merge | 654,837 | -88.0% |
+| Frame-aware merge | **394,053** | -39.8% |
+| GENCODE classified | 183,293 | 46.5% of unified |
+| Intergenic (unclassified) | 210,760 | 53.5% of unified |
+
+# 2. Data Sources & Methodology
+
+## 2.1 Input Data
+
+```{r overview, echo=FALSE}
+data.frame(
+  Source = c("Metadata", "Confidence (OCS)", "Expression (reads + pN)", "GENCODE"),
+  N_ORFs = c(nrow(data$metadata), nrow(data$confidence),
+             nrow(data$expression), nrow(data$gencode))
+) |>
+  knitr::kable(format = "html", caption = "Input data sources")
+
+total_meta <- nrow(data$metadata)
+with_gencode <- sum(df$is_classified)
+with_ocs     <- sum(!is.na(df$tier))
+with_expr    <- sum(!is.na(df$total_reads_expr))
+
+data.frame(
+  Metric = c("Total unified ORFs", "With GENCODE classification",
+             "With OCS score", "With expression data"),
+  Count = c(total_meta, with_gencode, with_ocs, with_expr),
+  Pct   = round(100 * c(total_meta, with_gencode, with_ocs, with_expr) / total_meta, 1)
+) |>
+  knitr::kable(format = "html", caption = "Cross-source match rates")
+```
+
+## 2.2 ORF Confidence Score (OCS) Methodology
+
+The ORF Confidence Score (OCS) is a composite metric computed from four
+independent sub-scores, each normalized to [0, 1]:
+
+| Component | Source | Description |
+|-----------|--------|-------------|
+| **S_translation** | Tool-specific significance | Normalized p-value / score from the detecting tool |
+| **S_agreement** | Cross-tool overlap | Number of tools detecting the ORF |
+| **S_coverage** | Expression breadth | Fraction of samples with reads > 0 |
+| **S_periodicity** | Read-level 3-nt periodicity | Aggregate periodicity score from RiboseQC |
+| **S_readlevel** | Sample-wide QC modifier | Penalty factor for low-quality samples |
+
+**Tier thresholds:**
+- **High**: OCS ≥ 0.8 — strong evidence, multiple tools, reproducible
+- **Medium**: OCS ≥ 0.5 — moderate evidence
+- **Low**: OCS ≥ 0.2 — weak but detectable signal
+- **Uncertain**: OCS < 0.2 — likely noise
+
+## 2.3 Two-Stage Filtering Strategy
+
+This analysis implements a **two-stage filtering** pipeline:
+
+### Stage 1: Preliminary (expression-based, this report)
+Uses `{sample}_reads` and `{sample}_pN` from the expression summary as
+computationally cheap filters to eliminate ORFs with insufficient signal
+before running the expensive bedgraph scan:
+
+| Filter | Column | Threshold | Rationale |
+|--------|--------|:---------:|-----------|
+| Signal presence | `{sample}_reads` | > `r cfg$filtering$prelim_reads_min` | Validated r=0.99 vs real `p_site_GSE` |
+| Periodicity | `{sample}_pN` | > `r cfg$filtering$prelim_pN_min` | Frame periodicity quality (NOT P-site fraction proxy; r=-0.20 vs real `p_site_pct`) |
+| Cross-sample | — | ≥`r cfg$filtering$prelim_cross_sample` sample | Samples from heterogeneous datasets — any sample sufficient |
+
+### Stage 2: Real P-site (bedgraph-based, next step)
+`compute_psite_purity.py` backtracks through actual RiboseQC bedgraph
+files to compute exact `p_site_GSE`, `p_site_pct`, and `p_site_pos`
+per ORF per sample — no proxies, no approximations. This runs on the
+**reduced ORF set** from Stage 1, dramatically cutting runtime.
+
+# 3. ORF Biotype Distribution
+
+```{r biotype-dist, fig.height=6, fig.width=10, echo=FALSE}
+ggplot(biotype_all, aes(n, orf_biotype, fill = orf_biotype)) +
+  geom_col() +
+  scale_x_log10(labels = comma) +
+  scale_fill_manual(values = biotype_colors, guide = "none") +
+  labs(title = "ORF biotype distribution",
+       subtitle = sprintf("Non-CDS (incl. intergenic): %s ORFs",
+         comma(sum(df$orf_biotype != "CDS", na.rm = TRUE))),
+       x = "Number of ORFs (log10)", y = NULL) +
+  theme_minimal(base_size = 13)
+```
+
+# 4. OCS Tier Distribution
+
+```{r ocs-tier, echo=FALSE}
+df |>
+  filter(!is.na(tier)) |>
+  count(tier) |>
+  mutate(tier = factor(tier, levels = c("High", "Medium", "Low", "Uncertain")),
+         pct = n / sum(n)) |>
+  ggplot(aes(tier, n, fill = tier)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%s\n(%.1f%%)", comma(n), 100 * pct)), vjust = -0.2) +
+  scale_fill_manual(values = c(High = "#00A087", Medium = "#7E6148",
+                                Low = "#E64B35", Uncertain = "grey70"), guide = "none") +
+  labs(title = "OCS tier distribution", x = NULL, y = "Count") +
+  theme_minimal(base_size = 13)
+```
+
+# 5. Expression Distributions
+
+```{r expr-dist, fig.height=10, fig.width=12, echo=FALSE}
+read_cols <- grep("_reads$", names(data$expression), value = TRUE)
+pN_cols   <- grep("_pN$", names(data$expression), value = TRUE)
+
+expr_agg <- data$expression |>
+  reframe(
+    max_reads = do.call(pmax, c(pick(all_of(read_cols)), na.rm = TRUE)),
+    max_pN    = do.call(pmax, c(pick(all_of(pN_cols)), na.rm = TRUE)),
+    n_samples = rowSums(pick(all_of(read_cols)) > 0, na.rm = TRUE)
+  )
+
+# Reads histogram
+p1 <- ggplot(expr_agg, aes(max_reads)) +
+  geom_histogram(bins = 100, fill = "#4682B4", alpha = 0.8) +
+  geom_vline(xintercept = cfg$filtering$prelim_reads_min, color = "#E64B35",
+             linewidth = 1, linetype = "dashed") +
+  scale_x_log10(labels = comma) +
+  labs(title = "Max reads per ORF (signal presence)",
+       subtitle = sprintf("Red line: reads > %d", cfg$filtering$prelim_reads_min),
+       x = "max reads across samples (log10)", y = "Count") +
+  theme_minimal(base_size = 12)
+
+# pN histogram
+p2 <- ggplot(expr_agg, aes(max_pN)) +
+  geom_histogram(bins = 100, fill = "#7E6148", alpha = 0.8) +
+  geom_vline(xintercept = cfg$filtering$prelim_pN_min, color = "#E64B35",
+             linewidth = 1, linetype = "dashed") +
+  labs(title = "Max pN per ORF (frame periodicity)",
+       subtitle = sprintf("Red line: pN > %.1f  — NOT a P-site fraction proxy (r=-0.20 vs p_site_pct)",
+         cfg$filtering$prelim_pN_min),
+       x = "max pN across samples", y = "Count") +
+  theme_minimal(base_size = 12)
+
+# Sample coverage
+p3 <- ggplot(expr_agg, aes(n_samples)) +
+  geom_histogram(binwidth = 1, fill = "#00A087", alpha = 0.8) +
+  labs(title = "Samples with reads per ORF",
+       subtitle = "Heterogeneous datasets — any sample with signal is informative",
+       x = "N samples with reads > 0", y = "Count") +
+  theme_minimal(base_size = 12)
+
+print(p1); print(p2); print(p3)
+```
+
+# 6. Preliminary Filter Comparison
+
+```{r filter-matrix, echo=FALSE}
+filter_matrix <- build_filter_matrix(df, filter_pattern = "^prelim_pass_")
+
+filter_matrix |>
+  select(filter_label, n_retained, pct_total, n_OCS_High, n_OCS_Medium,
+         n_nonCDS, n_intergenic, n_multi_tool) |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("Strategy", "Retained", "% Total", "High OCS",
+                  "Medium OCS", "Non-CDS", "Intergenic", "≥2 tools"),
+    caption = "Preliminary filter strategy comparison")
+
+# Visual
+filter_matrix |>
+  mutate(filter_label = factor(filter_label, levels = filter_label[order(n_retained)])) |>
+  ggplot(aes(n_retained, n_OCS_High)) +
+  geom_point(aes(size = n_nonCDS, color = pct_total), alpha = 0.8) +
+  geom_text(aes(label = filter_label), size = 3, hjust = -0.1, vjust = 0.5) +
+  scale_x_log10(labels = comma) +
+  scale_color_viridis_c() +
+  labs(title = "Preliminary filters: retention vs OCS High overlap",
+       x = "ORFs retained (log10)", y = "High OCS retained",
+       size = "Non-CDS", color = "% Total") +
+  theme_minimal(base_size = 12)
+```
+
+# 7. Orthogonality: Expression Filters × OCS
+
+```{r orthog, echo=FALSE}
+# Filter status for all ORFs
+ct <- df |>
+  mutate(
+    filter_status = case_when(
+      prelim_pass_combined_3 ~ "reads+pN (≥3 samples)",
+      prelim_pass_combined_2 ~ "reads+pN (≥2 samples)",
+      prelim_pass_combined ~ "reads+pN (≥1 sample)",
+      prelim_pass_reads ~ "reads only (≥1)",
+      TRUE ~ "Not passed"
+    ),
+    ocs_group = case_when(
+      tier == "High"               ~ "OCS High",
+      tier %in% c("High","Medium") ~ "OCS Medium+",
+      TRUE                          ~ "OCS Low/Uncertain"
+    )
+  ) |>
+  count(filter_status, ocs_group) |>
+  tidyr::pivot_wider(names_from = ocs_group, values_from = n, values_fill = 0)
+
+knitr::kable(ct, format = "html",
+  caption = "All ORFs: expression filter × OCS tier cross-tabulation")
+
+# Tool agreement breakdown for non-CDS
+ct2 <- df |>
+  filter(orf_biotype != "CDS") |>
+  mutate(pass = ifelse(prelim_pass_combined, "Pass prelim filter", "Fail prelim filter")) |>
+  count(pass, n_detecting) |>
+  tidyr::pivot_wider(names_from = n_detecting, values_from = n, values_fill = 0,
+                     names_prefix = "Ntools=")
+
+knitr::kable(ct2, format = "html",
+  caption = "Non-CDS ORFs: prelim filter × number of detecting tools")
+```
+
+# 8. Correlation Between Scoring Dimensions
+
+```{r cor-heatmap, fig.height=6, fig.width=9, echo=FALSE}
+cor_data <- df |>
+  filter(orf_biotype != "CDS") |>
+  select(pN, total_reads_expr, max_pN, n_samples,
+         s_translation, s_agreement, s_coverage, s_periodicity,
+         n_detecting, n_pass_combined) |>
+  rename(
+    `pN (metadata)` = pN,    `Total reads` = total_reads_expr,
+    `Max pN` = max_pN,       `N samples` = n_samples,
+    S_translation = s_translation, S_agreement = s_agreement,
+    S_coverage = s_coverage, S_periodicity = s_periodicity,
+    `N tools` = n_detecting, `N pass filter` = n_pass_combined
+  )
+
+cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
+
+cor_matrix |>
+  as.data.frame() |>
+  mutate(var1 = rownames(cor_matrix)) |>
+  select(var1, everything()) |>
+  pivot_longer(-var1, names_to = "var2", values_to = "r") |>
+  ggplot(aes(var1, var2, fill = r)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.2f", r)), size = 3) +
+  scale_fill_gradient2(low = "#3B4992", mid = "white", high = "#E64B35",
+                       limits = c(-1, 1)) +
+  labs(title = "Correlation: scoring dimensions (non-CDS ORFs incl. intergenic)",
+       subtitle = "Expression metrics (reads, pN) are largely orthogonal to OCS sub-scores",
+       x = NULL, y = NULL, fill = "r") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# 9. Stage 1 Output: ORFs for P-site Computation
+
+**Filter applied:** Non-CDS (incl. intergenic) + reads > `r cfg$filtering$prelim_reads_min` + pN > `r cfg$filtering$prelim_pN_min` (≥`r cfg$filtering$prelim_cross_sample` sample)
+
+```{r prelim-output, echo=FALSE}
+prelim_orfs <- df |>
+  filter(orf_biotype != "CDS",
+         prelim_pass_combined)
+
+message(sprintf("ORFs passing Stage 1 preliminary filter: %s", comma(nrow(prelim_orfs))))
+
+prelim_orfs |>
+  count(orf_biotype, sort = TRUE) |>
+  mutate(pct = 100 * n / sum(n)) |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("Biotype", "Count", "%"),
+    caption = "ORFs per biotype passing preliminary filter")
+
+# Write BED12 for compute_psite_purity.py input
+# We need the full BED12 from the unified BED filtered to prelim ORFs
+unified_bed <- cfg$input$unified_bed
+if (file.exists(unified_bed)) {
+  message("Filtering unified BED to preliminary ORFs ...")
+  prelim_ids <- unique(prelim_orfs$orf_id)
+
+  # Read BED line by line, keep only prelim ORFs
+  out_bed <- file.path(cfg$input$output_dir, "prelim_orfs_for_psite.bed")
+  con_in  <- if (grepl("\\.gz$", unified_bed)) gzfile(unified_bed, "r") else file(unified_bed, "r")
+  con_out <- file(out_bed, "w")
+  n_written <- 0
+  while (length(line <- readLines(con_in, n = 1)) > 0) {
+    # BED12 col4 is the ORF ID
+    parts <- strsplit(line, "\t")[[1]]
+    if (length(parts) >= 4 && parts[4] %in% prelim_ids) {
+      writeLines(line, con_out)
+      n_written <- n_written + 1
+    }
+  }
+  close(con_in); close(con_out)
+  message(sprintf("Wrote %s ORFs to %s", comma(n_written), out_bed))
+} else {
+  message(sprintf("WARNING: unified BED not found at %s — cannot write BED for P-site computation", unified_bed))
+}
+
+# Also write a simple TSV with key columns for downstream use
+out_tsv <- file.path(cfg$input$output_dir, "prelim_orfs.tsv")
+prelim_orfs |>
+  select(orf_id, chrom, start, end, strand, orf_biotype,
+         total_reads_expr, max_pN, tier, n_detecting,
+         length_aa, is_classified) |>
+  mutate(across(where(is.numeric), ~ signif(., 5))) |>
+  fwrite(out_tsv, sep = "\t")
+message(sprintf("Wrote %s ORFs → %s", comma(nrow(prelim_orfs)), out_tsv))
+```
+
+# 10. ORF Length Distribution (Pre-Prelim Filter)
+
+```{r length-dist, fig.height=8, fig.width=12, echo=FALSE}
+# All non-CDS ORFs (including intergenic)
+p1 <- df |>
+  filter(orf_biotype != "CDS") |>
+  ggplot(aes(length_aa, fill = orf_biotype)) +
+  geom_histogram(bins = 80, alpha = 0.7) +
+  geom_vline(xintercept = 50, color = "#E64B35", linewidth = 1, linetype = "dashed") +
+  scale_fill_manual(values = biotype_colors, guide = "none") +
+  scale_x_log10(labels = comma) +
+  labs(title = "ORF length distribution — all non-CDS (pre-filter)",
+       subtitle = sprintf("Red line: 50aa cutoff. %s ORFs ≤ 50aa",
+         comma(sum(df$length_aa <= 50 & df$orf_biotype != "CDS", na.rm = TRUE))),
+       x = "ORF length (amino acids, log10)", y = "Count") +
+  theme_minimal(base_size = 12)
+
+# Prelim-filtered only
+p2 <- prelim_orfs |>
+  ggplot(aes(length_aa, fill = orf_biotype)) +
+  geom_histogram(bins = 50, alpha = 0.8) +
+  facet_wrap(~ orf_biotype, scales = "free_y", ncol = 4) +
+  scale_fill_manual(values = biotype_colors, guide = "none") +
+  geom_vline(xintercept = 50, color = "#E64B35", linewidth = 0.5, linetype = "dashed") +
+  labs(title = "ORF length distribution — prelim-filtered",
+       subtitle = sprintf("reads>%d + pN>%.1f (≥%d sample). %s ORFs",
+         cfg$filtering$prelim_reads_min,
+         cfg$filtering$prelim_pN_min,
+         cfg$filtering$prelim_cross_sample,
+         comma(nrow(prelim_orfs))),
+       x = "ORF length (amino acids)", y = "Count") +
+  theme_minimal(base_size = 12)
+
+# Pre vs post prelim comparison by biotype
+pre_len <- df |>
+  filter(orf_biotype != "CDS") |>
+  select(orf_biotype, length_aa) |>
+  mutate(stage = "Pre-prelim")
+post_len <- prelim_orfs |>
+  select(orf_biotype, length_aa) |>
+  mutate(stage = "Post-prelim")
+biotype_len <- dplyr::bind_rows(pre_len, post_len)
+
+p3 <- biotype_len |>
+  ggplot(aes(stage, length_aa, fill = stage)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  facet_wrap(~ orf_biotype, ncol = 4) +
+  scale_fill_manual(values = c("Pre-prelim" = "grey70", "Post-prelim" = "#00A087"),
+                    guide = "none") +
+  labs(title = "Length distribution: pre vs post prelim filter by biotype",
+       x = NULL, y = "ORF length (amino acids)") +
+  theme_minimal(base_size = 12)
+
+print(p1)
+print(p2)
+print(p3)
+```
+
+# 11. Summary: Stage 1 Filtering Cascade
+
+```{r summary, echo=FALSE}
+data.frame(
+  Stage = c("Total unified ORFs", "With GENCODE classification",
+            "Intergenic (unclassified)", "Non-CDS (incl. intergenic)",
+            sprintf("reads>%d (≥%d sample)", cfg$filtering$prelim_reads_min, cfg$filtering$prelim_cross_sample),
+            sprintf("reads>%d + pN>%.1f (≥%d sample)", cfg$filtering$prelim_reads_min, cfg$filtering$prelim_pN_min, cfg$filtering$prelim_cross_sample),
+            "Prelim + ≤50aa"),
+  Count = c(
+    nrow(data$metadata),
+    sum(df$is_classified),
+    sum(df$orf_biotype == "intergenic"),
+    sum(df$orf_biotype != "CDS", na.rm = TRUE),
+    sum(df$prelim_pass_reads, na.rm = TRUE),
+    sum(df$prelim_pass_combined, na.rm = TRUE),
+    sum(df$prelim_pass_combined & df$length_aa <= 50, na.rm = TRUE)
+  )
+) |>
+  knitr::kable(format = "html",
+    caption = sprintf("Stage 1 filtering cascade — %s", cfg$project$label))
+```
+
+## Next Step
+
+**Run `compute_psite_purity.py`** on the preliminary ORF set:
+
+```bash
+python3 scripts/post_analysis/compute_psite_purity.py \
+  --bed {output_dir}/prelim_orfs_for_psite.bed \
+  --riboseqc-dir {riboseqc_dir} \
+  --output {output_dir}/psite_purity.tsv \
+  --workers 8
+```
+
+This computes **exact** `p_site_GSE`, `p_site_pct`, and `p_site_pos` by
+backtracking through the RiboseQC bedgraph files — no proxies. Running on
+`r comma(nrow(prelim_orfs))` ORFs instead of `r comma(nrow(df))` ORFs.
+
+Then run `02_psite_filtering.qmd` for Stage 2 final ORF selection.

@@ -1,0 +1,353 @@
+---
+title: "ORF P-site Purity Filtering — `r params$project$label`"
+author: "Ribo-seq Pipeline"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    embed-resources: true
+params:
+  config: "config_template.yaml"
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 6)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(data.table)
+  library(scales)
+  library(yaml)
+  library(R6)
+})
+
+if (file.exists("_functions.R")) {
+  source("_functions.R")
+} else if (file.exists("../../scripts/post_analysis/_functions.R")) {
+  source("../../scripts/post_analysis/_functions.R")
+} else {
+  stop("Cannot find _functions.R")
+}
+
+cfg  <- load_config(params$config)
+data <- load_pipeline_data(cfg)
+
+# ── Load prelim ORFs from Stage 1 ──
+prelim_file <- file.path(cfg$input$output_dir, "prelim_orfs.tsv")
+if (file.exists(prelim_file)) {
+  prelim_orfs <- .read_tsv(prelim_file)
+  message(sprintf("Loaded %s prelim ORFs from Stage 1", scales::comma(nrow(prelim_orfs))))
+} else {
+  stop("prelim_orfs.tsv not found — run 01_prelim_analysis.qmd first")
+}
+
+# ── Apply real P-site filters ──
+psite_file <- file.path(cfg$input$output_dir, "psite_purity.tsv")
+if (!file.exists(psite_file)) {
+  stop(sprintf(
+    "psite_purity.tsv not found at %s — run:\n  python3 compute_psite_purity.py --bed %s --riboseqc-dir %s --output %s --workers 8",
+    psite_file,
+    file.path(cfg$input$output_dir, "prelim_orfs_for_psite.bed"),
+    cfg$input$riboseqc_dir,
+    psite_file
+  ))
+}
+
+# Merge: start from merged data, filter to prelim ORFs, apply P-site filters
+df <- data$merged |>
+  semi_join(prelim_orfs |> select(orf_id), by = "orf_id")
+
+df <- apply_psite_filters(df, cfg, psite_file)
+
+# ── Expression filter context (for cross-comparison) ──
+df <- apply_prelim_filters(df, cfg, data$expression)
+
+message(sprintf("Working set: %s ORFs (prelim-filtered)", scales::comma(nrow(df))))
+```
+
+# 1. P-site Purity Data Overview
+
+The P-site purity metrics are computed by `compute_psite_purity.py`,
+which **backtracks through actual RiboseQC bedgraph files** — intersecting
+each ORF's genomic coordinates with `_P_sites_{plus,minus}.bedgraph` and
+`_coverage_{plus,minus}.bedgraph` intervals. No proxies, no approximations.
+
+```{r psite-overview, echo=FALSE}
+psite_data <- data$purity
+if (!is.null(psite_data)) {
+  psite_cols <- grep("_p_site_GSE$", names(psite_data), value = TRUE)
+  pct_cols   <- grep("_p_site_pct$", names(psite_data), value = TRUE)
+  pos_cols   <- grep("_p_site_pos$", names(psite_data), value = TRUE)
+  n_samples  <- length(psite_cols)
+
+  data.frame(
+    Metric = c("ORFs with P-site data", "Samples processed", "Columns per sample",
+               "Median p_site_GSE", "Median p_site_pct", "Median p_site_pos"),
+    Value = c(
+      scales::comma(nrow(psite_data)),
+      as.character(n_samples),
+      "p_site_GSE, p_site_pct, p_site_pos, reads_GSE, not_p_site_GSE",
+      sprintf("%.1f", median(rowSums(psite_data[, psite_cols, drop = FALSE], na.rm = TRUE))),
+      sprintf("%.3f", median(rowMeans(psite_data[, pct_cols, drop = FALSE], na.rm = TRUE), na.rm = TRUE)),
+      sprintf("%.1f", median(rowMeans(psite_data[, pos_cols, drop = FALSE], na.rm = TRUE), na.rm = TRUE))
+    )
+  ) |>
+    knitr::kable(format = "html", caption = "P-site purity data summary")
+} else {
+  cat("**ERROR: P-site purity data not loaded.** Check psite_purity.tsv.\n")
+}
+```
+
+# 2. P-site Metric Distributions
+
+```{r psite-dist, fig.height=12, fig.width=12, echo=FALSE}
+if (!is.null(psite_data)) {
+  psite_cols <- grep("_p_site_GSE$", names(psite_data), value = TRUE)
+  pct_cols   <- grep("_p_site_pct$", names(psite_data), value = TRUE)
+  pos_cols   <- grep("_p_site_pos$", names(psite_data), value = TRUE)
+
+  # Max per ORF across samples
+  psite_agg <- psite_data |>
+    reframe(
+      max_gse = do.call(pmax, c(pick(all_of(psite_cols)), na.rm = TRUE)),
+      max_pct = do.call(pmax, c(pick(all_of(pct_cols)), na.rm = TRUE)),
+      max_pos = do.call(pmax, c(pick(all_of(pos_cols)), na.rm = TRUE)),
+      n_psite_samples = rowSums(pick(all_of(psite_cols)) > 0, na.rm = TRUE)
+    )
+
+  filt <- cfg$filtering
+
+  p1 <- ggplot(psite_agg, aes(max_gse)) +
+    geom_histogram(bins = 100, fill = "#4682B4", alpha = 0.8) +
+    geom_vline(xintercept = filt$p_site_gse_min, color = "#E64B35",
+               linewidth = 1, linetype = "dashed") +
+    scale_x_log10(labels = comma) +
+    labs(title = "Max p_site_GSE per ORF (P-site reads)",
+         subtitle = sprintf("Red line: GSE > %d | Pass: %s ORFs (%.1f%%)",
+           filt$p_site_gse_min,
+           comma(sum(psite_agg$max_gse > filt$p_site_gse_min)),
+           100 * mean(psite_agg$max_gse > filt$p_site_gse_min)),
+         x = "max p_site_GSE across samples (log10)", y = "Count") +
+    theme_minimal(base_size = 12)
+
+  p2 <- ggplot(psite_agg, aes(max_pct)) +
+    geom_histogram(bins = 100, fill = "#00A087", alpha = 0.8) +
+    geom_vline(xintercept = filt$p_site_pct_min, color = "#E64B35",
+               linewidth = 1, linetype = "dashed") +
+    labs(title = "Max p_site_pct per ORF (P-site fraction)",
+         subtitle = sprintf("Red line: pct > %.1f | Pass: %s ORFs (%.1f%%)",
+           filt$p_site_pct_min,
+           comma(sum(psite_agg$max_pct > filt$p_site_pct_min)),
+           100 * mean(psite_agg$max_pct > filt$p_site_pct_min)),
+         x = "max p_site_pct across samples", y = "Count") +
+    theme_minimal(base_size = 12)
+
+  p3 <- ggplot(psite_agg, aes(max_pos)) +
+    geom_histogram(bins = 100, fill = "#7E6148", alpha = 0.8) +
+    geom_vline(xintercept = filt$p_site_pos_min, color = "#E64B35",
+               linewidth = 1, linetype = "dashed") +
+    labs(title = "Max p_site_pos per ORF (P-site position offset)",
+         subtitle = sprintf("Red line: pos > %d | Pass: %s ORFs (%.1f%%)",
+           filt$p_site_pos_min,
+           comma(sum(psite_agg$max_pos > filt$p_site_pos_min)),
+           100 * mean(psite_agg$max_pos > filt$p_site_pos_min)),
+         x = "max p_site_pos across samples", y = "Count") +
+    theme_minimal(base_size = 12)
+
+  p4 <- ggplot(psite_agg, aes(n_psite_samples)) +
+    geom_histogram(binwidth = 1, fill = "#F39B7F", alpha = 0.8) +
+    geom_vline(xintercept = filt$final_cross_sample, color = "#E64B35",
+               linewidth = 1, linetype = "dashed") +
+    labs(title = "Samples with P-site reads per ORF",
+         subtitle = sprintf("Red line: ≥%d samples required",
+           filt$final_cross_sample),
+         x = "N samples with p_site_GSE > 0", y = "Count") +
+    theme_minimal(base_size = 12)
+
+  print(p1); print(p2); print(p3); print(p4)
+}
+```
+
+# 3. Proxy Validation: Expression vs Real P-site
+
+This section confirms the proxy validation from earlier analysis:
+`reads` is an excellent proxy for `p_site_GSE` (r ≈ 0.99), while
+`pN` is NOT a proxy for `p_site_pct` (r ≈ -0.20).
+
+```{r proxy-validation, fig.height=6, fig.width=12, echo=FALSE}
+if (!is.null(psite_data)) {
+  # Merge P-site data with expression data
+  comp <- df |>
+    filter(!is.na(total_reads_expr), !is.na(psite_pass_gse)) |>
+    select(orf_id, total_reads_expr, max_pN, total_psites_real, mean_p_site_pct,
+           n_pass_gse, n_pass_pct, n_pass_triple)
+
+  if (nrow(comp) > 0) {
+    comp <- comp |> filter(!is.na(total_psites_real), total_reads_expr > 0)
+
+    # Reads vs p_site_GSE
+    p1 <- ggplot(comp |> filter(total_psites_real > 0),
+           aes(total_reads_expr, total_psites_real)) +
+      geom_point(alpha = 0.1, size = 0.5, color = "#4682B4") +
+      geom_smooth(method = "lm", color = "#E64B35", se = FALSE) +
+      scale_x_log10(labels = comma) +
+      scale_y_log10(labels = comma) +
+      labs(title = sprintf("Expression reads vs Real P-site GSE (r=%.3f)",
+             cor(log10(comp$total_reads_expr + 1), log10(comp$total_psites_real + 1))),
+           x = "Total reads (expression summary, log10)",
+           y = "Total p_site_GSE (bedgraph, log10)") +
+      theme_minimal(base_size = 12)
+
+    # pN vs p_site_pct
+    p2 <- ggplot(comp, aes(max_pN, mean_p_site_pct)) +
+      geom_point(alpha = 0.1, size = 0.5, color = "#00A087") +
+      geom_smooth(method = "lm", color = "#E64B35", se = FALSE) +
+      labs(title = sprintf("pN (periodicity) vs Real P-site fraction (r=%.3f)",
+             cor(comp$max_pN, comp$mean_p_site_pct, use = "pairwise.complete.obs")),
+           subtitle = "pN measures frame periodicity, NOT P-site fraction — pN is NOT a valid proxy for p_site_pct",
+           x = "max pN (expression summary)", y = "Mean p_site_pct (bedgraph)") +
+      theme_minimal(base_size = 12)
+
+    print(p1); print(p2)
+  }
+}
+```
+
+# 4. Real P-site Filter Comparison
+
+```{r psite-filter-matrix, echo=FALSE}
+# Combine prelim and psite filter columns
+filter_matrix <- build_filter_matrix(df, filter_pattern = "^(prelim_pass_|psite_pass_)")
+
+filter_matrix |>
+  select(filter_label, n_retained, pct_total, n_OCS_High, n_OCS_Medium,
+         n_nonCDS, n_intergenic, n_multi_tool) |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("Strategy", "Retained", "% Total", "High OCS",
+                  "Medium OCS", "Non-CDS", "Intergenic", "≥2 tools"),
+    caption = "Prelim + P-site filter strategy comparison")
+
+filter_matrix |>
+  mutate(filter_label = factor(filter_label, levels = filter_label[order(n_retained)])) |>
+  ggplot(aes(n_retained, n_OCS_High)) +
+  geom_point(aes(size = n_nonCDS, color = pct_total), alpha = 0.8) +
+  geom_text(aes(label = filter_label), size = 3, hjust = -0.1, vjust = 0.5) +
+  scale_x_log10(labels = comma) +
+  scale_color_viridis_c() +
+  labs(title = "Filter strategies (prelim + P-site): retention vs OCS High",
+       x = "ORFs retained (log10)", y = "High OCS retained",
+       size = "Non-CDS", color = "% Total") +
+  theme_minimal(base_size = 12)
+```
+
+# 5. Final ORF Selection
+
+**Filter:** Non-CDS (incl. intergenic) + real P-site GSE > `r cfg$filtering$p_site_gse_min`
++ p_site_pct > `r cfg$filtering$p_site_pct_min` + p_site_pos > `r cfg$filtering$p_site_pos_min`
+(≥`r cfg$filtering$final_cross_sample` samples) + length ≤ 50 amino acids.
+
+```{r final-selection, echo=FALSE}
+# Apply final filter
+final_orfs <- df |>
+  filter(orf_biotype != "CDS",
+         psite_pass_triple,
+         length_aa <= 50)
+
+message(sprintf("Final ggRibo candidates: %s ORFs", scales::comma(nrow(final_orfs))))
+
+final_orfs |>
+  count(orf_biotype, sort = TRUE) |>
+  mutate(pct = 100 * n / sum(n)) |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("Biotype", "Count", "%"),
+    caption = "Per-biotype ORF counts passing all filters")
+
+# Write final ORF list for ggRibo
+out_tsv <- file.path(cfg$input$output_dir, "final_orfs_for_ggribo.tsv")
+final_orfs |>
+  select(orf_id, chrom, start, end, strand, orf_biotype, gencode_biotype,
+         total_reads_expr, max_pN, total_psites_real, mean_p_site_pct,
+         tier, ocs, n_detecting, length_aa, is_classified) |>
+  mutate(across(where(is.numeric), ~ signif(., 5))) |>
+  fwrite(out_tsv, sep = "\t")
+
+message(sprintf("Wrote %s ORFs → %s", scales::comma(nrow(final_orfs)), out_tsv))
+```
+
+# 6. Final Candidate Summary
+
+```{r final-summary, fig.height=8, fig.width=12, echo=FALSE}
+# OCS boxplot by biotype
+boxplot(ocs ~ orf_biotype, data = final_orfs,
+        col = c(intORF = "#E64B35", dORF = "#00A087", doORF = "#7E6148",
+                uORF = "#4682B4", uoORF = "#F39B7F", lncRNA = "#3C5488",
+                intergenic = "#FFDC91")[unique(final_orfs$orf_biotype)],
+        main = "OCS Distribution by ORF Biotype (Final Candidates)",
+        xlab = NULL, ylab = "ORF Confidence Score (OCS)",
+        las = 2, cex.axis = 0.9)
+abline(h = c(0.2, 0.5, 0.8), lty = 2, col = "grey60")
+
+# Tier composition
+tt <- as.data.frame(table(final_orfs$orf_biotype, final_orfs$tier))
+names(tt) <- c("biotype", "tier", "n")
+tt$tier <- factor(tt$tier, levels = c("High", "Medium", "Low", "Uncertain"))
+
+ggplot(tt, aes(biotype, n, fill = tier)) +
+  geom_col(position = "fill") +
+  scale_fill_manual(values = c(High = "#00A087", Medium = "#7E6148",
+                                Low = "#E64B35", Uncertain = "grey70"),
+                    name = "OCS Tier") +
+  labs(title = "OCS tier composition by ORF biotype",
+       subtitle = sprintf("Final candidates: %s ORFs", scales::comma(nrow(final_orfs))),
+       x = NULL, y = "Proportion") +
+  theme_minimal(base_size = 12)
+
+# Multi-tool support
+final_orfs |>
+  count(n_detecting) |>
+  mutate(pct = 100 * n / sum(n)) |>
+  knitr::kable(format = "html", digits = 1,
+    col.names = c("N detecting tools", "Count", "%"),
+    caption = "Multi-tool support for final candidates")
+```
+
+# 7. Final Filtering Cascade
+
+```{r cascade, echo=FALSE}
+data.frame(
+  Stage = c(
+    "Total unified ORFs",
+    "Non-CDS (incl. intergenic)",
+    "Stage 1: Prelim filter (reads+pN)",
+    sprintf("Stage 2: Real p_site_GSE > %d", cfg$filtering$p_site_gse_min),
+    sprintf("Stage 2: + p_site_pct > %.1f", cfg$filtering$p_site_pct_min),
+    sprintf("Stage 2: + p_site_pos > %d", cfg$filtering$p_site_pos_min),
+    sprintf("Stage 2: Triple (≥%d samples)", cfg$filtering$final_cross_sample),
+    "Final: + length ≤ 50aa"
+  ),
+  Count = c(
+    nrow(data$merged),
+    sum(data$merged$orf_biotype != "CDS", na.rm = TRUE),
+    sum(df$prelim_pass_combined, na.rm = TRUE),
+    sum(df$psite_pass_gse, na.rm = TRUE),
+    sum(df$psite_pass_gse & df$psite_pass_pct, na.rm = TRUE),
+    sum(df$psite_pass_gse & df$psite_pass_pct & df$psite_pass_pos, na.rm = TRUE),
+    sum(df$psite_pass_triple, na.rm = TRUE),
+    nrow(final_orfs)
+  )
+) |>
+  knitr::kable(format = "html",
+    caption = sprintf("Two-stage filtering cascade — %s", cfg$project$label))
+```
+
+## Next Step
+
+Run `03_generate_ggribo.qmd` to generate ggRibo coverage plots for
+the `r scales::comma(nrow(final_orfs))` final candidates,
+with top `r cfg$ggribo$top_n_samples` samples per ORF sorted by
+`r cfg$ggribo$sort_metric`.
