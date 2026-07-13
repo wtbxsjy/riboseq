@@ -565,6 +565,27 @@
           "fa_icon": "fas fa-tachometer-alt",
           "description": "MAPQ threshold used when sorf_unique_mode is 'mapq' (or in 'auto' mode when NH is not available)."
         },
+        "sorf_unique_mode_transcriptome": {
+          "type": "string",
+          "default": "off",
+          "fa_icon": "fas fa-fingerprint",
+          "description": "Unique-mapping mode for transcriptome BAM filtering (RiboCode, riboWaltz).",
+          "help_text": "Transcriptome multi-mapping is biologically real (isoforms share exons), so unique-mapping is disabled by default. Supported modes: off (no unique-mapping filter, all primary alignments pass), auto (prefer NH tag; fall back to MAPQ), nh (require NH==1), mapq (require MAPQ>=sorf_unique_mapq_transcriptome).",
+          "enum": [
+            "off",
+            "auto",
+            "nh",
+            "mapq"
+          ]
+        },
+        "sorf_unique_mapq_transcriptome": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 0,
+          "maximum": 255,
+          "fa_icon": "fas fa-tachometer-alt",
+          "description": "MAPQ threshold for transcriptome BAM filtering when mode is 'mapq' (or 'auto' when NH absent)."
+        },
         "sorf_read_len_min": {
           "type": [
             "integer",

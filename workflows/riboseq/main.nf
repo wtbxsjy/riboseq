@@ -726,11 +726,16 @@ workflow RIBOSEQ {
     //
     if (!is_bam_input) {
         if (params.sorf_filter) {
+            // Transcriptome BAMs use separate unique-mapping params because
+            // multi-mapping is biologically meaningful in transcriptome
+            // space (isoforms share exons).  Default: mode='off' skips
+            // the NH/MAPQ filter entirely, keeping contig exclusion and
+            // read-length filtering only.
             SORF_BAM_FILTER_TRANSCRIPTOME(
                 ch_riboseq_transcriptome_bam,
                 ch_fai,
-                params.sorf_unique_mode,
-                params.sorf_unique_mapq,
+                params.sorf_unique_mode_transcriptome,
+                params.sorf_unique_mapq_transcriptome,
                 params.sorf_read_len_min,
                 params.sorf_read_len_max,
                 params.sorf_exclude_contigs_regex,   // Also used to extract MT/Pt transcript IDs from GTF below

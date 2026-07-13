@@ -117,7 +117,9 @@ process SORF_BAM_FILTER {
             if (rlmin > 0 && seqlen < rlmin) next
             if (rlmax > 0 && seqlen > rlmax) next
 
-            if (mode == "mapq") {
+            if (mode == "off") {
+              # Skip unique-mapping filter entirely — all reads pass
+            } else if (mode == "mapq") {
               if (\$5 < mapq) next
             } else if (mode == "nh" || mode == "auto") {
               nh=""
