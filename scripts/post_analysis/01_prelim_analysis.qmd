@@ -478,17 +478,17 @@ print(p3)
 data.frame(
   Stage = c("Total unified ORFs", "With GENCODE classification",
             "Intergenic (unclassified)", "Non-CDS (incl. intergenic)",
-            sprintf("reads>%d (≥%d sample)", cfg$filtering$prelim_reads_min, cfg$filtering$prelim_cross_sample),
-            sprintf("reads>%d + pN>%.1f (≥%d sample)", cfg$filtering$prelim_reads_min, cfg$filtering$prelim_pN_min, cfg$filtering$prelim_cross_sample),
-            "Prelim + ≤50aa"),
+            sprintf("Non-CDS + reads>%d (≥%d sample)", cfg$filtering$prelim_reads_min, cfg$filtering$prelim_cross_sample),
+            sprintf("Non-CDS + reads>%d + pN>%.1f (≥%d sample)", cfg$filtering$prelim_reads_min, cfg$filtering$prelim_pN_min, cfg$filtering$prelim_cross_sample),
+            "Non-CDS + prelim + ≤50aa"),
   Count = c(
     nrow(data$metadata),
     sum(df$is_classified),
     sum(df$orf_biotype == "intergenic"),
     sum(df$orf_biotype != "CDS", na.rm = TRUE),
-    sum(df$prelim_pass_reads, na.rm = TRUE),
-    sum(df$prelim_pass_combined, na.rm = TRUE),
-    sum(df$prelim_pass_combined & df$length_aa <= 50, na.rm = TRUE)
+    sum(df$orf_biotype != "CDS" & df$prelim_pass_reads, na.rm = TRUE),
+    sum(df$orf_biotype != "CDS" & df$prelim_pass_combined, na.rm = TRUE),
+    sum(df$orf_biotype != "CDS" & df$prelim_pass_combined & df$length_aa <= 50, na.rm = TRUE)
   )
 ) |>
   knitr::kable(format = "html",

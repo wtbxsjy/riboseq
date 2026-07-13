@@ -334,8 +334,8 @@ data.frame(
   Stage = c(
     "Total unified ORFs",
     "Non-CDS (incl. intergenic)",
-    "Stage 1: Prelim filter (reads+pN)",
-    sprintf("Stage 2: Real p_site_GSE > %d (≥%d samples)", cfg$filtering$p_site_gse_min, cfg$filtering$final_cross_sample),
+    "Stage 1: Non-CDS + reads+pN prelim",
+    sprintf("Stage 2: + p_site_GSE > %d (≥%d samples)", cfg$filtering$p_site_gse_min, cfg$filtering$final_cross_sample),
     sprintf("Stage 2: + p_site_pct > %.1f (≥%d samples)", cfg$filtering$p_site_pct_min, cfg$filtering$final_cross_sample),
     "Final: + length ≤ 50aa"
   ),
