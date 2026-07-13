@@ -383,21 +383,22 @@ if (file.exists(unified_bed)) {
   message("Filtering unified BED to preliminary ORFs ...")
   prelim_ids <- unique(prelim_orfs$orf_id)
 
-  # Read BED line by line, keep only prelim ORFs
+  # Write ORF IDs to temp file, then use awk for fast filtering
   out_bed <- file.path(cfg$input$output_dir, "prelim_orfs_for_psite.bed")
-  con_in  <- if (grepl("\\.gz$", unified_bed)) gzfile(unified_bed, "r") else file(unified_bed, "r")
-  con_out <- file(out_bed, "w")
-  n_written <- 0
-  while (length(line <- readLines(con_in, n = 1)) > 0) {
-    # BED12 col4 is the ORF ID
-    parts <- strsplit(line, "\t")[[1]]
-    if (length(parts) >= 4 && parts[4] %in% prelim_ids) {
-      writeLines(line, con_out)
-      n_written <- n_written + 1
-    }
+  tmp_ids <- file.path(cfg$input$output_dir, ".prelim_ids_tmp.txt")
+  writeLines(prelim_ids, tmp_ids)
+
+  # awk is orders of magnitude faster than R readLines for large BED files
+  if (grepl("\\.gz$", unified_bed)) {
+    system(sprintf("zcat %s | awk -F'\\t' 'NR==FNR{ids[$1]; next} $4 in ids' %s - > %s",
+           shQuote(unified_bed), shQuote(tmp_ids), shQuote(out_bed)))
+  } else {
+    system(sprintf("awk -F'\\t' 'NR==FNR{ids[$1]; next} $4 in ids' %s %s > %s",
+           shQuote(tmp_ids), shQuote(unified_bed), shQuote(out_bed)))
   }
-  close(con_in); close(con_out)
-  message(sprintf("Wrote %s ORFs to %s", comma(n_written), out_bed))
+  n_written <- length(readLines(out_bed))
+  unlink(tmp_ids)
+  message(sprintf("Wrote %s ORFs to %s", scales::comma(n_written), out_bed))
 } else {
   message(sprintf("WARNING: unified BED not found at %s — cannot write BED for P-site computation", unified_bed))
 }
