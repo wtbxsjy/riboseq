@@ -129,7 +129,8 @@ orfquant_success <- tryCatch({
         write_temp_files = ${write_tmp},
         write_GTF_file = ${write_gtf},
         write_protein_fasta = ${write_fasta},
-        interactive = FALSE
+        interactive = FALSE,
+        parallel_backend = "snow"
     )
     TRUE
 }, error = function(e) {
