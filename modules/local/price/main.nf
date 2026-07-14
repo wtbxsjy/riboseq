@@ -43,10 +43,11 @@ process PRICE {
         // periodicity.  The margin values are derived from the parameter
         // sweep (see docs/devlog/PRICE_PARAMETER_SWEEP_2026-07-10.md).
         // Params from CLI are strings in Nextflow 26.x; coerce to int.
+        // sorf_read_len=0 means "no limit" — use the full allowed range.
         def rlmin = (params.sorf_read_len_min ?: 28).toString().toInteger()
         def rlmax = (params.sorf_read_len_max ?: 30).toString().toInteger()
-        def auto_min = Math.max(rlmin - 2, 18)
-        def auto_max = Math.min(rlmax + 4, 60)
+        def auto_min = rlmin > 0 ? Math.max(rlmin - 2, 18) : 18
+        def auto_max = rlmax > 0 ? Math.min(rlmax + 4, 60) : 60
         filter_arg = "-filter ${auto_min}:${auto_max}"
     }
     def keep_anno_arg = params.price_keep_anno ? '-keepAnno' : ''
