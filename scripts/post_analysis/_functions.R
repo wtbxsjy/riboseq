@@ -104,21 +104,27 @@ load_pipeline_data <- function(cfg) {
   # ── GENCODE classification ──
   message("Loading GENCODE classification ...")
   gencode_path <- cfg$input$gencode
-  gencode <- .read_tsv(gencode_path)
-  gencode <- gencode |>
-    rename_with(~ case_when(
-      . == "chrm"   ~ "chrom",
-      . == "starts" ~ "start",
-      . == "ends"   ~ "end",
-      TRUE ~ .
-    )) |>
-    mutate(
-      across(c(chrom, strand), as.character),
-      coord_key = paste(chrom, start, end, strand, sep = ":")
-    ) |>
-    select(coord_key, orf_biotype, gene_biotype, trans, gene, gene_name,
+  gencode_raw <- .read_tsv(gencode_path)
+  message(sprintf("  %s entries in GENCODE output", scales::comma(nrow(gencode_raw))))
+
+  # Build orf_id → biotype mapping via all_orf_names (contains unified ORF IDs)
+  # GENCODE all_orf_names is semicolon-separated unified ORF IDs (e.g. "ORF_2_Os01g0100100")
+  gencode_map <- gencode_raw |>
+    select(all_orf_names, orf_biotype, gene_biotype, trans, gene, gene_name,
+           phaseI_biotype, pep, orf_length) |>
+    mutate(orf_id_list = strsplit(all_orf_names, ";")) |>
+    tidyr::unnest(cols = c(orf_id_list)) |>
+    rename(orf_id = orf_id_list) |>
+    filter(orf_id != "" & !is.na(orf_id)) |>
+    # If one ORF matches multiple GENCODE entries, prefer non-CDS over CDS
+    # (more informative for downstream analysis)
+    group_by(orf_id) |>
+    arrange(orf_id, orf_biotype == "CDS") |>  # CDS last (FALSE < TRUE)
+    slice_head(n = 1) |>
+    ungroup() |>
+    select(orf_id, orf_biotype, gene_biotype, trans, gene, gene_name,
            phaseI_biotype, pep, orf_length)
-  message(sprintf("  %s ORFs with GENCODE classification", scales::comma(nrow(gencode))))
+  message(sprintf("  Mapped to %s unique ORFs via all_orf_names", scales::comma(nrow(gencode_map))))
 
   # ── P-site purity (real bedgraph-based, not proxies) ──
   purity_file <- file.path(cfg$input$output_dir, "psite_purity.tsv")
@@ -139,12 +145,12 @@ load_pipeline_data <- function(cfg) {
     left_join(conf, by = "orf_id") |>
     left_join(expr_agg, by = "orf_id")
 
-  # Join GENCODE by coordinate (cross-ID format mapping)
+  # Join GENCODE by orf_id (mapped via all_orf_names)
   # Preserve original GENCODE biotype as gencode_biotype
   merged <- merged |>
-    left_join(gencode |> select(coord_key, orf_biotype, gene_biotype,
-                                 phaseI_biotype, pep, orf_length),
-              by = "coord_key") |>
+    left_join(gencode_map |> select(orf_id, orf_biotype, gene_biotype,
+                                     phaseI_biotype, pep, orf_length),
+              by = "orf_id") |>
     rename(gencode_biotype = orf_biotype)
 
   # Assign final biotype: keep GENCODE classification where available,
@@ -182,7 +188,7 @@ load_pipeline_data <- function(cfg) {
     metadata    = meta,
     confidence  = conf,
     expression  = expr,
-    gencode     = gencode,
+    gencode     = gencode_map,
     purity      = purity,
     merged      = merged
   )
