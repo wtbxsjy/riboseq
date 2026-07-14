@@ -1283,6 +1283,13 @@
           "fa_icon": "fas fa-crosshairs",
           "help_text": "When enabled, P-site offsets are extracted from RiboseQC results (rows with max_coverage=TRUE) and used to regenerate the for_ORFquant file. This ensures more accurate P-site positioning for ORF detection."
         },
+        "orfquant_parallel_backend": {
+          "type": "string",
+          "default": "mclapply",
+          "description": "Parallel backend for ORFquant. 'mclapply' uses fork-based parallel (default). 'mirai' uses socket-based daemons via NNG/nanonext+mori shared memory (no fork GC crashes, requires mirai and mori packages).",
+          "fa_icon": "fas fa-microchip",
+          "help_text": "mirai mode eliminates FaFile GC finalizer crashes in forked subprocesses by using independent socket-based daemon processes instead of fork. Requires mirai, mori, and nanonext R packages (auto-installed if missing)."
+        },
         "extra_orfquant_args": {
           "type": "string",
           "description": "Extra arguments to pass to ORFquant (e.g., 'plot_results=TRUE' to generate plots).",

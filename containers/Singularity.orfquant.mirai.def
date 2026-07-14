@@ -1,0 +1,84 @@
+Bootstrap: docker
+From: rocker/r-base:4.4.2
+
+%labels
+    Author nf-core/riboseq
+    Description RiboseQC + PATCHED ORFquant (dev+mirai) container for Ribo-seq analysis (R 4.4.2, Bioc 3.20)
+    Version 1.3.2-mirai
+
+%post
+    # Install system dependencies for BioC packages
+    apt-get update -qq && apt-get install -y -qq \
+        libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
+        libfontconfig1-dev libharfbuzz-dev libfribidi-dev \
+        libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
+        libgsl-dev libnetcdf-dev libhdf5-dev \
+        2>/dev/null || true
+
+    # Install ALL ORFquant dependencies (both CRAN and BioC)
+    R --vanilla -q -e '
+        if (!requireNamespace("BiocManager", quietly=TRUE))
+            install.packages("BiocManager", repos="https://cloud.r-project.org")
+        # CRAN packages first (including mirai stack)
+        install.packages(c(
+            "rmarkdown", "knitr", "reshape2", "ggplot2", "cowplot",
+            "gridExtra", "dplyr", "tidyr", "devtools", "testthat",
+            "remotes", "optparse",
+            "mirai", "mori", "nanonext"
+        ), repos="https://cloud.r-project.org")
+        # BioC packages
+        BiocManager::install(c(
+            "rtracklayer", "BSgenome", "Biostrings", "GenomicFeatures",
+            "multitaper", "GenomicAlignments", "GenomicFiles",
+            "BiocGenerics", "Rsamtools", "GenomicRanges", "BiocParallel",
+            "AnnotationDbi", "txdbmaker"
+        ), update=FALSE, ask=FALSE)
+    '
+
+    # Install RiboseQC from GitHub
+    R --vanilla -q -e '
+        if (!requireNamespace("remotes", quietly=TRUE))
+            install.packages("remotes", repos="https://cloud.r-project.org")
+        remotes::install_github("lcalviell/Ribo-seQC", upgrade="never")
+    '
+
+    # Install patched ORFquant (dev branch with mirai support) from local source
+    cat > /tmp/install_orfquant.R <<'RSCRIPT'
+pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
+if (!dir.exists(pkg_dir)) stop("Patched ORFquant source not found at: ", pkg_dir)
+message("Installing patched ORFquant with mirai support from: ", pkg_dir)
+cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
+message(cmd)
+status <- system(cmd)
+if (status != 0) stop("R CMD INSTALL failed with status ", status)
+library(ORFquant)
+message("ORFquant version: ", packageVersion("ORFquant"))
+message("mirai available: ", requireNamespace("mirai", quietly=TRUE))
+message("mori available: ", requireNamespace("mori", quietly=TRUE))
+message("Installation successful!")
+RSCRIPT
+    R --vanilla -q -f /tmp/install_orfquant.R
+
+%setup
+    ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
+    mkdir -p "${ROOTFS}/etc" "${ROOTFS}/opt/orfquant_patched"
+    rm -f "${ROOTFS}/etc/resolv.conf"
+    : > "${ROOTFS}/etc/resolv.conf"
+
+%files
+    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
+
+%runscript
+    exec "$@"
+
+%help
+    Container with RiboseQC and PATCHED ORFquant (dev+mirai branch) for Ribo-seq analysis.
+    R 4.4.2, Bioconductor 3.20.
+
+    Patches applied:
+    - Bioc 3.20: disjointExons → exonicParts (2 locations in orfquant.R)
+    - Bioc 3.20: txdbmaker pre-installed
+    - ORFquant NAMESPACE: BiocGenerics imported LAST (Position/combine fix)
+    - IRanges empty data protection
+    - P_sites_all validation filter
+    - mirai + mori parallel backend (socket-based daemons, no fork GC crashes)

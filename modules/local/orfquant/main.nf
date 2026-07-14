@@ -39,6 +39,8 @@ process ORFQUANT_RUN {
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
     def use_local_pkg = orfquant_pkg.name != 'NO_FILE'
     def local_pkg_path = "${orfquant_pkg}"
+    // Parallel backend: "mclapply" (fork, default), "mirai" (socket daemon, requires mirai+mori)
+    def parallel_backend = params.orfquant_parallel_backend ?: 'mclapply'
     """
     # Ensure fasta file is available with the expected name (if it was gzipped)
     if [[ "${fasta}" == *.gz ]]; then
@@ -112,6 +114,19 @@ if (!requireNamespace("txdbmaker", quietly = TRUE)) {
 
 	library(ORFquant)
 
+			# Install mirai + mori for socket-based parallel backend (if not in container)
+			if ("${parallel_backend}" == "mirai") {
+			    for (pkg in c("mirai", "mori")) {
+			        if (!requireNamespace(pkg, quietly = TRUE)) {
+			            cat(sprintf("Installing %s for mirai parallel backend...\\n", pkg))
+			            install.packages(pkg, repos = "https://cloud.r-project.org",
+			                             lib = Sys.getenv("R_LIBS_USER"), quiet = TRUE)
+			        }
+			    }
+			    library(mirai)
+			    library(mori)
+			}
+
 			# load_annotation monkey-patch REMOVED (2026-06-28).
 			# The patched ORFquant container now includes fork-safe load_annotation()
 			# with FaFile->DNAStringSet conversion.
@@ -130,7 +145,7 @@ orfquant_success <- tryCatch({
         write_GTF_file = ${write_gtf},
         write_protein_fasta = ${write_fasta},
         interactive = FALSE,
-        parallel_backend = "snow"
+        parallel_backend = "${parallel_backend}"
     )
     TRUE
 }, error = function(e) {
