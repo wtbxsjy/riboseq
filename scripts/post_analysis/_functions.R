@@ -462,11 +462,13 @@ Range_info <- R6::R6Class("Range_info",
 
 #' Import GTF annotation for ggRibo
 gtf_import_custom <- function(annotation, format = "gtf",
-                               dataSource = "", organism = "") {
-  txdb <- suppressWarnings(
-    txdbmaker::makeTxDbFromGFF(file = annotation, format = format,
-                               dataSource = dataSource, organism = organism)
-  )
+                               dataSource = "", organism = NULL) {
+  # Build args list, omit organism if NULL/empty to avoid taxonomy lookup errors
+  txdb_args <- list(file = annotation, format = format, dataSource = dataSource)
+  if (!is.null(organism) && nzchar(organism)) {
+    txdb_args$organism <- organism
+  }
+  txdb <- suppressWarnings(do.call(txdbmaker::makeTxDbFromGFF, txdb_args))
   exonsByTx  <- GenomicFeatures::exonsBy(txdb, by = "tx", use.names = TRUE)
   txByGene   <- GenomicFeatures::transcriptsBy(txdb, by = "gene")
   cdsByTx    <- GenomicFeatures::cdsBy(txdb, by = "tx", use.names = TRUE)
@@ -486,24 +488,71 @@ gtf_import_custom <- function(annotation, format = "gtf",
   assign("Txome_Range", Txome_Range, envir = .GlobalEnv)
 }
 
-#' Create minimal single-ORF GTF for ggRibo
-create_orf_gtf <- function(orf, out_path) {
-  gene_id <- sprintf("AMP_%s_%s_%d_%d",
-                     orf$org, orf$chrom, orf$start, orf$end)
+#' Create ORF GTF for ggRibo — supports multi-exon ORFs and correct CDS frame
+#'
+#' @param orf_meta A list or data.frame row with: orf_id, chrom, start, end,
+#'   strand, exon_blocks, length_aa, org (project id)
+#' @param out_path Output GTF file path
+#' @return List with gene_id and tx_id
+create_orf_gtf <- function(orf_meta, out_path) {
+  # Parse exon blocks: "5457-5560" or "100-200;500-600"
+  blocks_str <- orf_meta$exon_blocks
+  if (is.null(blocks_str) || is.na(blocks_str) || blocks_str == "") {
+    # Fallback: single block from start/end
+    blocks <- list(c(orf_meta$start, orf_meta$end))
+  } else {
+    parts <- strsplit(as.character(blocks_str), ";")[[1]]
+    blocks <- lapply(parts, function(p) {
+      coords <- as.integer(strsplit(p, "-")[[1]])
+      if (length(coords) == 2) coords else NULL
+    })
+    blocks <- blocks[!sapply(blocks, is.null)]
+    if (length(blocks) == 0) {
+      blocks <- list(c(orf_meta$start, orf_meta$end))
+    }
+  }
+
+  # Sort blocks by start position
+  blocks <- blocks[order(sapply(blocks, `[`, 1))]
+
+  # ORF span
+  all_starts <- sapply(blocks, `[`, 1)
+  all_ends   <- sapply(blocks, `[`, 2)
+  orf_start  <- min(all_starts)
+  orf_end    <- max(all_ends)
+  strand     <- as.character(orf_meta$strand)
+
+  org  <- if (!is.null(orf_meta$org)) orf_meta$org else "ORF"
+  chrom <- as.character(orf_meta$chrom)
+
+  gene_id <- sprintf("AMP_%s_%s_%d_%d", org, chrom, orf_start, orf_end)
   tx_id   <- paste0(gene_id, "_T001")
-  exon_id <- paste0(gene_id, "_E001")
   prot_id <- paste0(gene_id, "_P001")
 
   lines <- c(
     sprintf('%s\tAMP\tgene\t%d\t%d\t.\t%s\t.\tgene_id "%s"; gene_source "AMP"; gene_biotype "protein_coding";',
-            orf$chrom, orf$start, orf$end, orf$strand, gene_id),
+            chrom, orf_start, orf_end, strand, gene_id),
     sprintf('%s\tAMP\ttranscript\t%d\t%d\t.\t%s\t.\tgene_id "%s"; transcript_id "%s"; gene_source "AMP"; gene_biotype "protein_coding"; transcript_source "AMP"; transcript_biotype "protein_coding";',
-            orf$chrom, orf$start, orf$end, orf$strand, gene_id, tx_id),
-    sprintf('%s\tAMP\tCDS\t%d\t%d\t.\t%s\t0\tgene_id "%s"; transcript_id "%s"; exon_number "1"; gene_source "AMP"; gene_biotype "protein_coding"; transcript_source "AMP"; transcript_biotype "protein_coding"; protein_id "%s";',
-            orf$chrom, orf$start, orf$end, orf$strand, gene_id, tx_id, prot_id),
-    sprintf('%s\tAMP\texon\t%d\t%d\t.\t%s\t.\tgene_id "%s"; transcript_id "%s"; exon_number "1"; gene_source "AMP"; gene_biotype "protein_coding"; transcript_source "AMP"; transcript_biotype "protein_coding"; exon_id "%s";',
-            orf$chrom, orf$start, orf$end, orf$strand, gene_id, tx_id, exon_id)
+            chrom, orf_start, orf_end, strand, gene_id, tx_id)
   )
+
+  # CDS + exon lines per block, with correct frame
+  for (idx in seq_along(blocks)) {
+    bs <- blocks[[idx]][1]  # block start
+    be <- blocks[[idx]][2]  # block end
+    exon_id  <- sprintf("%s_E%03d", gene_id, idx)
+
+    # CDS frame: (start - 1) %% 3 per GTF spec
+    cds_frame <- (bs - 1) %% 3
+
+    lines <- c(lines,
+      sprintf('%s\tAMP\tCDS\t%d\t%d\t.\t%s\t%d\tgene_id "%s"; transcript_id "%s"; exon_number "%d"; gene_source "AMP"; gene_biotype "protein_coding"; transcript_source "AMP"; transcript_biotype "protein_coding"; protein_id "%s";',
+              chrom, bs, be, strand, cds_frame, gene_id, tx_id, idx, prot_id),
+      sprintf('%s\tAMP\texon\t%d\t%d\t.\t%s\t.\tgene_id "%s"; transcript_id "%s"; exon_number "%d"; gene_source "AMP"; gene_biotype "protein_coding"; transcript_source "AMP"; transcript_biotype "protein_coding"; exon_id "%s";',
+              chrom, bs, be, strand, gene_id, tx_id, idx, exon_id)
+    )
+  }
+
   writeLines(lines, out_path)
   list(gene_id = gene_id, tx_id = tx_id)
 }
