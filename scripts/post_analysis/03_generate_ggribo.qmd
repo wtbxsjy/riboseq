@@ -57,6 +57,10 @@ message(sprintf("Loaded %d ORFs for ggRibo plotting", nrow(orfs)))
 # Load expression for sample lookups
 expr <- .read_tsv_gg(cfg$input$expression)
 
+# Load metadata for exon_blocks and ORF details (needed for proper GTF generation)
+meta <- .read_tsv_gg(cfg$input$metadata)
+message(sprintf("Loaded metadata for %d ORFs", nrow(meta)))
+
 # Load P-site purity if available (for sorting and title metrics)
 psite_file <- file.path(cfg$input$output_dir, "psite_purity.tsv")
 psite_data <- NULL
@@ -98,8 +102,8 @@ org_label   <- cfg$project$label
 org_species <- cfg$project$species
 org_id      <- cfg$project$name
 
-# ── Single-ORF plotter (used by furrr) ──
-plot_one <- function(i, orfs, expr, psite_data, cfg, tmp_gtf_dir, plot_base,
+# ── Single-ORF plotter (used by mclapply) ──
+plot_one <- function(i, orfs, meta, expr, psite_data, cfg, tmp_gtf_dir, plot_base,
                      org_id, org_label, org_species) {
   r <- orfs[i, ]
   biotype_dir <- file.path(plot_base, r$orf_biotype)
@@ -113,11 +117,15 @@ plot_one <- function(i, orfs, expr, psite_data, cfg, tmp_gtf_dir, plot_base,
     return(tibble(orf_id = r$orf_id, status = "cached", file = out_file))
   }
 
-  # GTF
-  orf_spec <- list(org = org_id, chrom = as.character(r$chrom),
-                   start = r$start, end = r$end, strand = r$strand)
+  # GTF: build from full ORF metadata (incl. exon_blocks, strand, etc.)
+  m <- meta[meta$orf_id == r$orf_id, ]
+  if (nrow(m) == 0) {
+    return(tibble(orf_id = r$orf_id, status = "no_metadata", file = NA_character_))
+  }
+  orf_meta <- as.list(m[1, ])
+  orf_meta$org <- org_id
   gtf_path <- file.path(tmp_gtf_dir, paste0("ggribo_", i, ".gtf"))
-  ids <- tryCatch(create_orf_gtf(orf_spec, gtf_path),
+  ids <- tryCatch(create_orf_gtf(orf_meta, gtf_path),
                   error = function(e) NULL)
   if (is.null(ids)) return(tibble(orf_id = r$orf_id, status = "gtf_error", file = NA_character_))
 
@@ -204,7 +212,7 @@ message(sprintf("Generating %d ggRibo plots with %d workers (top %d samples by %
 
 # Use parallel::mclapply (base R, no furrr dependency)
 results_list <- parallel::mclapply(seq_len(nrow(orfs)), plot_one,
-  orfs = orfs, expr = expr, psite_data = psite_data, cfg = cfg,
+  orfs = orfs, meta = meta, expr = expr, psite_data = psite_data, cfg = cfg,
   tmp_gtf_dir = tmp_gtf_dir, plot_base = plot_base,
   org_id = org_id, org_label = org_label, org_species = org_species,
   mc.cores = ggc$workers
