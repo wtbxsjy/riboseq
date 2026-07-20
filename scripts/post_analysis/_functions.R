@@ -293,9 +293,13 @@ apply_psite_filters <- function(data, cfg, purity_tsv_path) {
   filt <- cfg$filtering
 
   # Discover sample names from column suffixes
+  # Must exclude _not_p_site_GSE columns (which also end with _p_site_GSE)
   psite_cols <- grep("_p_site_GSE$", names(purity), value = TRUE)
+  psite_cols <- grep("_not_", psite_cols, value = TRUE, invert = TRUE)
   pct_cols   <- grep("_p_site_pct$", names(purity), value = TRUE)
+  pct_cols   <- grep("^global", pct_cols, value = TRUE, invert = TRUE)
   pos_cols   <- grep("_p_site_pos$", names(purity), value = TRUE)
+  pos_cols   <- grep("^global", pos_cols, value = TRUE, invert = TRUE)
 
   # Use the orf_id column for joining — psite_purity.tsv uses the same orf_id
   # Per-sample pass/fail
