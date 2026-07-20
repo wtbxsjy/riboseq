@@ -407,9 +407,9 @@ def main():
             for s in sample_list:
                 psite = metrics.get(f"{s}_p_site_GSE", 0.0)
                 reads = metrics.get(f"{s}_reads_GSE", 0.0)
-                pct = round(psite / max(reads, 1.0), 4)
+                pct = round(psite / reads, 4) if reads > 0 else 0.0
                 pos_wt = metrics.get(f"{s}_p_site_pos_wt", 0.0)
-                pos_avg = round(pos_wt / max(psite, 1.0), 2) if psite > 0 else 0.0
+                pos_avg = round(pos_wt / psite, 2) if psite > 0 else 0.0
                 not_psite = max(0.0, reads - psite)
 
                 row.extend([
@@ -425,7 +425,7 @@ def main():
                     n_samples_psites += 1
 
             # Global aggregates
-            global_pct = round(total_psites / max(total_reads, 1.0), 4)
+            global_pct = round(total_psites / total_reads, 4) if total_reads > 0 else 0.0
             global_pos = round(global_pos_sum / max(global_pos_wt, 1.0), 2)
             # Stddev of per-sample p_site_pos values
             sample_positions = []

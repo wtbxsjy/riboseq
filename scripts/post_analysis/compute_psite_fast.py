@@ -101,7 +101,7 @@ def process_sample(sample, bed_file, riboseqc_dir, bedtools_path):
     for orf_id in orf_data:
         reads = orf_data[orf_id]['reads_GSE']
         psite = orf_data[orf_id]['p_site_GSE']
-        orf_data[orf_id]['p_site_pct'] = round(psite / max(reads, 1.0), 4)
+        orf_data[orf_id]['p_site_pct'] = round(psite / reads, 4) if reads > 0 else 0.0
         orf_data[orf_id]['not_p_site_GSE'] = max(0.0, reads - psite)
 
     return sample, orf_data
