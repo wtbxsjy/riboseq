@@ -3,29 +3,33 @@ From: rocker/r-base:4.4.2
 
 %labels
     Author nf-core/riboseq
-    Description RiboseQC + PATCHED ORFquant (dev+mirai) container for Ribo-seq analysis (R 4.4.2, Bioc 3.20)
+    Description ORFquant with mirai parallel backend.  R 4.4.2, Bioc 3.20.
+               RiboseQC + patched ORFquant + mirai/mori/nanonext.
     Version 1.3.2-mirai
 
 %post
-    # Install system dependencies for BioC packages
+    # Install system dependencies for BioC packages + nanonext/libuv
     apt-get update -qq && apt-get install -y -qq \
         libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
         libfontconfig1-dev libharfbuzz-dev libfribidi-dev \
         libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
         libgsl-dev libnetcdf-dev libhdf5-dev \
+        libuv1-dev \
         2>/dev/null || true
 
     # Install ALL ORFquant dependencies (both CRAN and BioC)
     R --vanilla -q -e '
         if (!requireNamespace("BiocManager", quietly=TRUE))
             install.packages("BiocManager", repos="https://cloud.r-project.org")
-        # CRAN packages first (including mirai stack)
+        # CRAN packages first (mirai brings in nanonext automatically)
         install.packages(c(
             "rmarkdown", "knitr", "reshape2", "ggplot2", "cowplot",
             "gridExtra", "dplyr", "tidyr", "devtools", "testthat",
-            "remotes", "optparse",
-            "mirai", "mori", "nanonext"
+            "remotes", "optparse", "mirai", "mori"
         ), repos="https://cloud.r-project.org")
+        cat("mirai:",  as.character(packageVersion("mirai")), "\n")
+        cat("mori:",   as.character(packageVersion("mori")),  "\n")
+        cat("nanonext:", as.character(packageVersion("nanonext")), "\n")
         # BioC packages
         BiocManager::install(c(
             "rtracklayer", "BSgenome", "Biostrings", "GenomicFeatures",
@@ -72,13 +76,13 @@ RSCRIPT
     exec "$@"
 
 %help
-    Container with RiboseQC and PATCHED ORFquant (dev+mirai branch) for Ribo-seq analysis.
-    R 4.4.2, Bioconductor 3.20.
+    Complete ORFquant container with mirai parallel backend support.
+    Built from rocker/r-base:4.4.2 (Ubuntu Noble, R 4.4.2, Bioconductor 3.20).
 
-    Patches applied:
-    - Bioc 3.20: disjointExons → exonicParts (2 locations in orfquant.R)
-    - Bioc 3.20: txdbmaker pre-installed
-    - ORFquant NAMESPACE: BiocGenerics imported LAST (Position/combine fix)
-    - IRanges empty data protection
-    - P_sites_all validation filter
-    - mirai + mori parallel backend (socket-based daemons, no fork GC crashes)
+    Contains:
+    - All Bioconductor 3.20 packages (rtracklayer, BSgenome, Biostrings,
+      GenomicFeatures, GenomicRanges, Rsamtools, BiocParallel, txdbmaker, etc.)
+    - All CRAN packages (ggplot2, cowplot, rmarkdown, devtools, etc.)
+    - RiboseQC (from GitHub: lcalviell/Ribo-seQC)
+    - mirai + mori + nanonext (NNG async daemon framework)
+    - Updated ORFquant with parallel_backend="mirai" support
