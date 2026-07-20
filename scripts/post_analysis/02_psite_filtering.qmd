@@ -62,10 +62,10 @@ if (!file.exists(psite_file)) {
 df <- data$merged |>
   semi_join(prelim_orfs |> select(orf_id), by = "orf_id")
 
-df <- apply_psite_filters(df, cfg, psite_file)
+# P-site filters: GSE from bedgraph, pct = GSE / expression_reads
+df <- apply_psite_filters(df, cfg, psite_file, data$expression)
 
 # ── Expression filter context (for cross-comparison) ──
-# Filter expression to match the working set
 expr_filtered <- data$expression |> semi_join(df |> select(orf_id), by = "orf_id")
 df <- apply_prelim_filters(df, cfg, expr_filtered)
 
@@ -187,7 +187,7 @@ if (!is.null(psite_data)) {
   comp <- df |>
     filter(!is.na(total_reads_expr), !is.na(psite_pass_gse)) |>
     select(orf_id, total_reads_expr, max_pN, total_psites_real, mean_p_site_pct,
-           n_pass_gse, n_pass_pct, n_pass_triple)
+           n_pass_gse, n_pass_pct, n_pass_combined)
 
   if (nrow(comp) > 0) {
     comp <- comp |> filter(!is.na(total_psites_real), total_reads_expr > 0)
@@ -253,16 +253,15 @@ filter_matrix |>
 + p_site_pct > `r cfg$filtering$p_site_pct_min`
 (≥`r cfg$filtering$final_cross_sample` samples) + length ≤ 50 amino acids.
 
-> **Note:** `p_site_pos` is not computed by the fast bedtools-based P-site computation.
-> The position filter is excluded — it is the least discriminating criterion anyway
-> (>97% pass rate in prior validation).
+> **p_site_pct = GSE / expression_reads** — both are integer counts from the same unit.
+> GSE comes from P-site bedgraph, reads from expression summary (`{sample}_reads`).
+> This replaces the previous RPKM-normalized coverage denominator which made pct meaningless.
 
 ```{r final-selection, echo=FALSE}
-# Apply final filter (GSE + pct; pos not computed by fast bedtools mode)
+# Apply final filter: GSE + pct (pct = GSE / expression_reads, same unit)
 final_orfs <- df |>
   filter(orf_biotype != "CDS",
-         psite_pass_gse,
-         psite_pass_pct,
+         psite_pass_combined,
          length_aa <= 50)
 
 message(sprintf("Final ggRibo candidates: %s ORFs", scales::comma(nrow(final_orfs))))
@@ -344,7 +343,7 @@ data.frame(
     sum(data$merged$orf_biotype != "CDS", na.rm = TRUE),
     sum(df$prelim_pass_combined, na.rm = TRUE),
     sum(df$psite_pass_gse, na.rm = TRUE),
-    sum(df$psite_pass_gse & df$psite_pass_pct, na.rm = TRUE),
+    sum(df$psite_pass_combined, na.rm = TRUE),
     nrow(final_orfs)
   )
 ) |>

@@ -279,7 +279,7 @@ apply_prelim_filters <- function(data, cfg, expr_raw) {
 #' The P-site purity data is computed by backtracking through RiboseQC
 #' _P_sites_{plus,minus}.bedgraph and _coverage_{plus,minus}.bedgraph
 #' files — exact per-ORF per-sample values, not proxies.
-apply_psite_filters <- function(data, cfg, purity_tsv_path) {
+apply_psite_filters <- function(data, cfg, purity_tsv_path, expr_raw = NULL) {
   if (!file.exists(purity_tsv_path)) {
     warning("P-site purity file not found: ", purity_tsv_path,
             " — run compute_psite_purity.py first")
@@ -292,80 +292,90 @@ apply_psite_filters <- function(data, cfg, purity_tsv_path) {
 
   filt <- cfg$filtering
 
-  # Discover sample names from column suffixes
-  # Must exclude _not_p_site_GSE columns (which also end with _p_site_GSE)
+  # Per-sample P-site GSE columns (exclude _not_p_site_GSE)
   psite_cols <- grep("_p_site_GSE$", names(purity), value = TRUE)
   psite_cols <- grep("_not_", psite_cols, value = TRUE, invert = TRUE)
-  pct_cols   <- grep("_p_site_pct$", names(purity), value = TRUE)
-  pct_cols   <- grep("^global", pct_cols, value = TRUE, invert = TRUE)
-  pos_cols   <- grep("_p_site_pos$", names(purity), value = TRUE)
-  pos_cols   <- grep("^global", pos_cols, value = TRUE, invert = TRUE)
+  sample_names <- sub("_p_site_GSE$", "", psite_cols)
 
-  # Use the orf_id column for joining — psite_purity.tsv uses the same orf_id
-  # Per-sample pass/fail
+  # Per-sample GSE pass/fail
   n_pass_gse <- purity |>
     reframe(across(all_of(psite_cols), ~ . > filt$p_site_gse_min)) |>
     as.matrix() |> rowSums(na.rm = TRUE)
 
-  n_pass_pct <- purity |>
-    reframe(across(all_of(pct_cols), ~ . > filt$p_site_pct_min)) |>
-    as.matrix() |> rowSums(na.rm = TRUE)
+  # ── p_site_pct: GSE / expression_reads (both integer counts, same unit) ──
+  # Use expression summary {sample}_reads as denominator instead of
+  # coverage bedgraph (RPKM-normalized floats — incompatible units).
+  if (!is.null(expr_raw)) {
+    # Build per-ORF pct matrix: pct = GSE / reads, 0 if reads==0
+    expr_read_cols <- paste0(sample_names, "_reads")
+    expr_read_cols <- intersect(expr_read_cols, names(expr_raw))
 
-  n_pass_pos <- purity |>
-    reframe(across(all_of(pos_cols), ~ . > filt$p_site_pos_min)) |>
-    as.matrix() |> rowSums(na.rm = TRUE)
+    pct_mat <- matrix(0, nrow = nrow(purity), ncol = length(sample_names))
+    colnames(pct_mat) <- sample_names
+
+    # Match purity rows to expression rows by orf_id
+    expr_idx <- match(purity$orf_id, expr_raw$orf_id)
+    for (j in seq_along(sample_names)) {
+      sn <- sample_names[j]
+      gse_col <- psite_cols[j]
+      read_col <- paste0(sn, "_reads")
+      if (read_col %in% names(expr_raw)) {
+        reads_vec <- expr_raw[[read_col]][expr_idx]
+        reads_vec[is.na(reads_vec)] <- 0
+        gse_vec <- purity[[gse_col]]
+        gse_vec[is.na(gse_vec)] <- 0
+        pct_vec <- ifelse(reads_vec > 0, gse_vec / reads_vec, 0)
+        pct_mat[, j] <- pct_vec
+      }
+    }
+
+    # Per-sample pct pass/fail and per-ORF mean_pct
+    n_pass_pct <- rowSums(pct_mat > filt$p_site_pct_min, na.rm = TRUE)
+    mean_p_site_pct <- rowMeans(pct_mat, na.rm = TRUE)
+
+    # GSE + pct combined pass (both criteria in same sample)
+    combined_pass <- rep(0L, nrow(purity))
+    for (j in seq_along(sample_names)) {
+      gse_col <- psite_cols[j]
+      gse_vec <- purity[[gse_col]]
+      gse_vec[is.na(gse_vec)] <- 0
+      combined_pass <- combined_pass +
+        (gse_vec > filt$p_site_gse_min & pct_mat[, j] > filt$p_site_pct_min)
+    }
+  } else {
+    n_pass_pct <- rep(0L, nrow(purity))
+    mean_p_site_pct <- rep(NA_real_, nrow(purity))
+    combined_pass <- rep(0L, nrow(purity))
+  }
 
   # Per-ORF aggregates
   purity_agg <- purity |>
     mutate(
       n_pass_gse = n_pass_gse,
       n_pass_pct = n_pass_pct,
-      n_pass_pos = n_pass_pos,
-      # Total P-site reads across all samples
+      n_pass_combined = combined_pass,
       total_psites_real = rowSums(pick(all_of(psite_cols)), na.rm = TRUE),
-      # Mean P-site fraction across samples with signal
-      mean_p_site_pct = rowMeans(
-        pick(all_of(pct_cols)) |> mutate(across(everything(), ~ if_else(. > 0, ., NA_real_))),
-        na.rm = TRUE
-      )
+      mean_p_site_pct = mean_p_site_pct
     )
 
-  # Triple: all three criteria simultaneously
-  sample_names <- intersect(
-    intersect(sub("_p_site_GSE$", "", psite_cols),
-              sub("_p_site_pct$", "", pct_cols)),
-    sub("_p_site_pos$", "", pos_cols)
-  )
-  triple_pass <- rep(0L, nrow(purity))
-  for (s in sample_names) {
-    gse_col <- paste0(s, "_p_site_GSE")
-    pct_col <- paste0(s, "_p_site_pct")
-    pos_col <- paste0(s, "_p_site_pos")
-    if (all(c(gse_col, pct_col, pos_col) %in% names(purity))) {
-      triple_pass <- triple_pass +
-        (purity[[gse_col]] > filt$p_site_gse_min &
-         purity[[pct_col]] > filt$p_site_pct_min &
-         purity[[pos_col]] > filt$p_site_pos_min)
-    }
-  }
-  purity_agg$n_pass_triple <- triple_pass
-
-  cs <- filt$final_cross_sample  # default 2
+  cs <- filt$final_cross_sample
 
   purity_agg <- purity_agg |>
     mutate(
       psite_pass_gse   = coalesce(n_pass_gse, 0) >= cs,
       psite_pass_pct   = coalesce(n_pass_pct, 0) >= cs,
-      psite_pass_pos   = coalesce(n_pass_pos, 0) >= cs,
-      psite_pass_triple = coalesce(n_pass_triple, 0) >= cs,
+      psite_pass_combined = coalesce(n_pass_combined, 0) >= cs,
       psite_pass_gse_any   = coalesce(n_pass_gse, 0) >= 1,
       psite_pass_gse_2     = coalesce(n_pass_gse, 0) >= 2,
       psite_pass_gse_3     = coalesce(n_pass_gse, 0) >= 3,
-      psite_pass_triple_any = coalesce(n_pass_triple, 0) >= 1,
-      psite_pass_triple_2   = coalesce(n_pass_triple, 0) >= 2,
-      psite_pass_triple_3   = coalesce(n_pass_triple, 0) >= 3
+      psite_pass_pct_any   = coalesce(n_pass_pct, 0) >= 1,
+      psite_pass_pct_2     = coalesce(n_pass_pct, 0) >= 2,
+      psite_pass_pct_3     = coalesce(n_pass_pct, 0) >= 3,
+      psite_pass_combined_any = coalesce(n_pass_combined, 0) >= 1,
+      psite_pass_combined_2   = coalesce(n_pass_combined, 0) >= 2,
+      psite_pass_combined_3   = coalesce(n_pass_combined, 0) >= 3
     ) |>
-    select(orf_id, n_pass_gse, n_pass_pct, n_pass_pos, n_pass_triple,
+    select(orf_id, n_pass_gse, n_pass_pct, n_pass_combined,
            total_psites_real, mean_p_site_pct,
            starts_with("psite_pass_"))
 
