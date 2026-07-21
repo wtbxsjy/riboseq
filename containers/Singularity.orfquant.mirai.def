@@ -1,49 +1,19 @@
-Bootstrap: docker
-From: rocker/r-base:4.4.2
+Bootstrap: localimage
+From: /media/home/renzhe/projects/Lishuqi/containers/orfquant_patched.sif
 
 %labels
     Author nf-core/riboseq
-    Description ORFquant with mirai parallel backend.  R 4.4.2, Bioc 3.20.
-               RiboseQC + patched ORFquant + mirai/mori/nanonext.
+    Description ORFquant with mirai parallel backend.  Extends orfquant_patched.sif
+               by adding mirai + mori + nanonext and the updated ORFquant package.
     Version 1.3.2-mirai
 
 %post
-    # Install system dependencies for BioC packages + nanonext/libuv
-    apt-get update -qq && apt-get install -y -qq \
-        libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
-        libfontconfig1-dev libharfbuzz-dev libfribidi-dev \
-        libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
-        libgsl-dev libnetcdf-dev libhdf5-dev \
-        libuv1-dev \
-        2>/dev/null || true
-
-    # Install ALL ORFquant dependencies (both CRAN and BioC)
+    # Install mirai + mori (nanonext comes as a dependency)
     R --vanilla -q -e '
-        if (!requireNamespace("BiocManager", quietly=TRUE))
-            install.packages("BiocManager", repos="https://cloud.r-project.org")
-        # CRAN packages first (mirai brings in nanonext automatically)
-        install.packages(c(
-            "rmarkdown", "knitr", "reshape2", "ggplot2", "cowplot",
-            "gridExtra", "dplyr", "tidyr", "devtools", "testthat",
-            "remotes", "optparse", "mirai", "mori"
-        ), repos="https://cloud.r-project.org")
-        cat("mirai:",  as.character(packageVersion("mirai")), "\n")
-        cat("mori:",   as.character(packageVersion("mori")),  "\n")
-        cat("nanonext:", as.character(packageVersion("nanonext")), "\n")
-        # BioC packages
-        BiocManager::install(c(
-            "rtracklayer", "BSgenome", "Biostrings", "GenomicFeatures",
-            "multitaper", "GenomicAlignments", "GenomicFiles",
-            "BiocGenerics", "Rsamtools", "GenomicRanges", "BiocParallel",
-            "AnnotationDbi", "txdbmaker"
-        ), update=FALSE, ask=FALSE)
-    '
-
-    # Install RiboseQC from GitHub
-    R --vanilla -q -e '
-        if (!requireNamespace("remotes", quietly=TRUE))
-            install.packages("remotes", repos="https://cloud.r-project.org")
-        remotes::install_github("lcalviell/Ribo-seQC", upgrade="never")
+      install.packages(c("mirai", "mori"), repos = "https://cloud.r-project.org")
+      cat("mirai:",  as.character(packageVersion("mirai")),  "\n")
+      cat("mori:",   as.character(packageVersion("mori")),   "\n")
+      cat("nanonext:", as.character(packageVersion("nanonext")), "\n")
     '
 
     # Install patched ORFquant (dev branch with mirai support) from local source
@@ -68,21 +38,21 @@ RSCRIPT
     mkdir -p "${ROOTFS}/etc" "${ROOTFS}/opt/orfquant_patched"
     rm -f "${ROOTFS}/etc/resolv.conf"
     : > "${ROOTFS}/etc/resolv.conf"
-
-%files
-    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
+    # Remove old ORFquant source and copy updated version with mirai support
+    rm -rf "${ROOTFS}/opt/orfquant_patched/ORFquant-1.1"
+    cp -r /localhdd/home/renzhe/riboseq/riboseq/patched_packages/ORFquant-1.1 "${ROOTFS}/opt/orfquant_patched/ORFquant-1.1"
+    echo "=== Copied ORFquant source ==="
+    ls -la "${ROOTFS}/opt/orfquant_patched/ORFquant-1.1/R/"
 
 %runscript
     exec "$@"
 
 %help
-    Complete ORFquant container with mirai parallel backend support.
-    Built from rocker/r-base:4.4.2 (Ubuntu Noble, R 4.4.2, Bioconductor 3.20).
+    Extended ORFquant container with mirai parallel backend support.
+    Built on top of orfquant_patched.sif (R 4.4.2, Bioconductor 3.20).
 
-    Contains:
-    - All Bioconductor 3.20 packages (rtracklayer, BSgenome, Biostrings,
-      GenomicFeatures, GenomicRanges, Rsamtools, BiocParallel, txdbmaker, etc.)
-    - All CRAN packages (ggplot2, cowplot, rmarkdown, devtools, etc.)
-    - RiboseQC (from GitHub: lcalviell/Ribo-seQC)
-    - mirai + mori + nanonext (NNG async daemon framework)
+    Adds:
+    - mirai  (NNG/nanonext async daemon framework)
+    - mori   (shared memory for read-only objects)
+    - nanonext (NNG transport layer)
     - Updated ORFquant with parallel_backend="mirai" support
