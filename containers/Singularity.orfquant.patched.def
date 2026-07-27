@@ -11,7 +11,7 @@ From: rocker/r-base:4.4.2
         libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
         libfontconfig1-dev libharfbuzz-dev libfribidi-dev \
         libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
-        libgsl-dev libnetcdf-dev libhdf5-dev \
+        libgsl-dev libnetcdf-dev libhdf5-dev libuv1-dev \
         2>/dev/null || true
 
     # Install ALL ORFquant dependencies (both CRAN and BioC)
