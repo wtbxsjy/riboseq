@@ -4261,10 +4261,10 @@ run_ORFquant <- function(
         sep = ""
     ))
 
-    # socket backends (mirai, snow) re-open FaFile in each worker/daemon —
-    # skip the expensive DNAStringSet conversion and keep disk-backed FaFile.
+    # Only fork backend needs DNAStringSet (C++ pointers crash in child processes).
+    # All other backends (mirai, snow, serial) can use disk-backed FaFile (~0 MB RAM).
     load_annotation(annotation_file,
-                    keep_fafile = (parallel_backend %in% c("mirai", "snow")))
+                    keep_fafile = (parallel_backend != "fork"))
 
     ##If we have only one object specified, use that, otherwise combine them all
     message('loading p site data')
