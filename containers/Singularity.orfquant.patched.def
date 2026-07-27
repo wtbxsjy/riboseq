@@ -16,13 +16,14 @@ From: rocker/r-base:4.4.2
 
     # Install ALL ORFquant dependencies (both CRAN and BioC)
     R --vanilla -q -e '
+        options(timeout = 600)  # avoid download timeouts on large packages
         if (!requireNamespace("BiocManager", quietly=TRUE))
             install.packages("BiocManager", repos="https://cloud.r-project.org")
-        # CRAN packages first
+        # CRAN packages first — also include RiboseQC deps (ggpubr) explicitly
         install.packages(c(
-            "rmarkdown", "knitr", "reshape2", "ggplot2", "cowplot",
-            "gridExtra", "dplyr", "tidyr", "devtools", "testthat",
-            "remotes", "optparse"
+            "jsonlite", "rmarkdown", "knitr", "reshape2", "ggplot2",
+            "cowplot", "gridExtra", "dplyr", "tidyr", "devtools",
+            "testthat", "remotes", "optparse", "ggpubr"
         ), repos="https://cloud.r-project.org")
         # BioC packages
         BiocManager::install(c(
