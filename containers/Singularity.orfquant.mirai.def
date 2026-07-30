@@ -1,58 +1,152 @@
-Bootstrap: localimage
-From: /media/home/renzhe/projects/Lishuqi/containers/orfquant_patched.sif
+Bootstrap: docker
+From: rocker/r-base:4.4.3
 
 %labels
     Author nf-core/riboseq
-    Description ORFquant with mirai parallel backend.  Extends orfquant_patched.sif
-               by adding mirai + mori + nanonext and the updated ORFquant package.
-    Version 1.3.2-mirai
+    Description Patched ORFquant + mirai parallel backend for Ribo-seq (R 4.4.3)
+    Version 2.1
 
 %post
-    # Install mirai + mori (nanonext comes as a dependency)
+    # ── System dependencies ──
+    apt-get update -qq && apt-get install -y -qq \
+        libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
+        libfontconfig1-dev libharfbuzz-dev libfribidi-dev \
+        libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
+        libgsl-dev libnetcdf-dev libhdf5-dev libuv1-dev \
+        2>/dev/null || true
+
+    # ── CRAN packages (minimal set for ORFquant + its NAMESPACE) ──
+    # ORFquant Imports:  dplyr, tidyr (data.table-ish ops), GenomicRanges, Rsamtools (BioC)
+    # ORFquant NAMESPACE: ggplot2, gridExtra (for plot_ORFquant_results), GenomicFeatures
+    # Also needed:       BiocManager (for BioC installs), remotes (for GH installs if any)
     R --vanilla -q -e '
-      install.packages(c("mirai", "mori"), repos = "https://cloud.r-project.org")
-      cat("mirai:",  as.character(packageVersion("mirai")),  "\n")
-      cat("mori:",   as.character(packageVersion("mori")),   "\n")
-      cat("nanonext:", as.character(packageVersion("nanonext")), "\n")
+        options(timeout = 600)
+        if (!requireNamespace("BiocManager", quietly=TRUE))
+            install.packages("BiocManager", repos="https://cloud.r-project.org")
+
+        # Core CRAN deps — only what ORFquant needs, NOT the RiboseQC plotting stack
+        cran_pkgs <- c(
+            "dplyr", "tidyr", "ggplot2", "cowplot", "gridExtra",
+            "reshape2", "data.table", "jsonlite",
+            "rmarkdown", "knitr", "devtools", "remotes", "optparse"
+        )
+        for (pkg in cran_pkgs) {
+            if (requireNamespace(pkg, quietly=TRUE)) {
+                cat(sprintf("%-20s already installed\n", pkg))
+                next
+            }
+            cat(sprintf("%-20s installing...\n", pkg))
+            install.packages(pkg, repos="https://cloud.r-project.org")
+            if (!requireNamespace(pkg, quietly=TRUE))
+                stop(sprintf("FAILED to install %s", pkg))
+        }
+
+        # ── Bioconductor packages ──
+        BiocManager::install(c(
+            "rtracklayer", "BSgenome", "Biostrings", "GenomicFeatures",
+            "multitaper", "GenomicAlignments", "GenomicFiles",
+            "BiocGenerics", "Rsamtools", "GenomicRanges", "BiocParallel",
+            "AnnotationDbi", "txdbmaker"
+        ), update=FALSE, ask=FALSE)
+
+        # ── mirai parallel backend (socket-based, no fork) ──
+        for (pkg in c("nanonext", "mirai")) {
+            if (requireNamespace(pkg, quietly=TRUE)) next
+            cat(sprintf("%-20s installing...\n", pkg))
+            install.packages(pkg, repos="https://cloud.r-project.org")
+            if (!requireNamespace(pkg, quietly=TRUE))
+                stop(sprintf("FAILED to install %s", pkg))
+        }
     '
 
-    # Install patched ORFquant (dev branch with mirai support) from local source
-    cat > /tmp/install_orfquant.R <<'RSCRIPT'
-pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
-if (!dir.exists(pkg_dir)) stop("Patched ORFquant source not found at: ", pkg_dir)
-message("Installing patched ORFquant with mirai support from: ", pkg_dir)
-cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
-message(cmd)
-status <- system(cmd)
-if (status != 0) stop("R CMD INSTALL failed with status ", status)
-library(ORFquant)
-message("ORFquant version: ", packageVersion("ORFquant"))
-message("mirai available: ", requireNamespace("mirai", quietly=TRUE))
-message("mori available: ", requireNamespace("mori", quietly=TRUE))
-message("Installation successful!")
-RSCRIPT
-    R --vanilla -q -f /tmp/install_orfquant.R
+    # ── Patched ORFquant from local source ──
+    R --vanilla -q -e '
+        pkg_dir <- "/opt/orfquant_patched/ORFquant-1.1"
+        if (!dir.exists(pkg_dir)) stop("Patched ORFquant source not found at: ", pkg_dir)
+        message("Installing patched ORFquant from: ", pkg_dir)
+        cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir))
+        message(cmd)
+        status <- system(cmd)
+        if (status != 0) stop("R CMD INSTALL failed with status ", status)
+        library(ORFquant)
+        message("ORFquant version: ", packageVersion("ORFquant"))
+    '
+
+    # ── Stub RiboseQC (namespace only, for deserializing Rannot files) ──
+    # The _Rannot file records RiboseQC namespace in serialized objects.
+    # ORFquant doesn't call any RiboseQC functions — it only needs the
+    # namespace to exist so R's load() can resolve references.
+    R --vanilla -q -e '
+        pkg_dir <- "/tmp/RiboseQC_stub"
+        dir.create(file.path(pkg_dir, "R"), recursive = TRUE, showWarnings = FALSE)
+        writeLines(c(
+            "Package: RiboseQC", "Type: Package",
+            "Title: Stub RiboseQC namespace for ORFquant",
+            "Version: 0.99.0", "Author: stub",
+            "Description: Minimal namespace stub for loading Rannot files.",
+            "License: GPL-3"
+        ), file.path(pkg_dir, "DESCRIPTION"))
+        writeLines("exportPattern(\"^[[:alpha:]]+\")", file.path(pkg_dir, "NAMESPACE"))
+        writeLines("# Stub — no real functions needed", file.path(pkg_dir, "R", "stub.R"))
+        system(sprintf("R CMD INSTALL %s", shQuote(pkg_dir)))
+        unlink(pkg_dir, recursive = TRUE)
+        library(RiboseQC)
+        cat("Stub RiboseQC:", as.character(packageVersion("RiboseQC")), "\n")
+    '
+
+    # ── Verify ──
+    R --vanilla -q -e '
+        for (pkg in c("ORFquant", "mirai", "nanonext", "txdbmaker",
+                      "GenomicFeatures", "Rsamtools", "GenomicRanges",
+                      "ggplot2", "dplyr", "tidyr", "RiboseQC")) {
+            cat(sprintf("%-25s %s\n", pkg,
+                tryCatch(as.character(packageVersion(pkg)), error=function(e) "MISSING")))
+        }
+    '
 
 %setup
     ROOTFS="${SINGULARITY_ROOTFS:-${APPTAINER_ROOTFS}}"
     mkdir -p "${ROOTFS}/etc" "${ROOTFS}/opt/orfquant_patched"
     rm -f "${ROOTFS}/etc/resolv.conf"
     : > "${ROOTFS}/etc/resolv.conf"
-    # Remove old ORFquant source and copy updated version with mirai support
-    rm -rf "${ROOTFS}/opt/orfquant_patched/ORFquant-1.1"
-    cp -r /localhdd/home/renzhe/riboseq/riboseq/patched_packages/ORFquant-1.1 "${ROOTFS}/opt/orfquant_patched/ORFquant-1.1"
-    echo "=== Copied ORFquant source ==="
-    ls -la "${ROOTFS}/opt/orfquant_patched/ORFquant-1.1/R/"
+
+%files
+    patched_packages/ORFquant-1.1 /opt/orfquant_patched/ORFquant-1.1
+    patched_packages/ORFquant-1.1/R/orfquant_mirai_optimized.R /opt/orfquant_mirai_optimized.R
+
+%environment
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export GOTO_NUM_THREADS=1
 
 %runscript
     exec "$@"
 
 %help
-    Extended ORFquant container with mirai parallel backend support.
-    Built on top of orfquant_patched.sif (R 4.4.2, Bioconductor 3.20).
+    Minimal ORFquant + mirai parallel backend for Ribo-seq analysis.
+    R 4.4.3, Bioconductor 3.20.
 
-    Adds:
-    - mirai  (NNG/nanonext async daemon framework)
-    - mori   (shared memory for read-only objects)
-    - nanonext (NNG transport layer)
-    - Updated ORFquant with parallel_backend="mirai" support
+    This container is for ORFquant only — RiboseQC runs in a separate container.
+
+    Patches applied:
+    - Bioc 3.20+: makeTxDb() → txdbmaker::makeTxDb()
+    - Bioc 3.20+: makeTxDbFromGFF() → txdbmaker::makeTxDbFromGFF()
+    - NA handling: sum(pcd, na.rm=TRUE)
+    - NAMESPACE: BiocGenerics selective imports (Position/combine fix)
+    - Mirai v3: FaFile disk-backed genome (orfquant_mirai_optimized.R)
+    - Mirai v3: RDS streaming result collection
+
+    Key packages (pre-installed):
+    - ORFquant 1.3.3 (patched)
+    - mirai, nanonext — socket-based parallel backend
+    - txdbmaker — Bioc 3.20+ compatibility
+
+    BLAS threading is automatically limited to 1 thread per process.
+
+    Usage:
+      apptainer run orfquant_mirai.sif Rscript -e '
+        source("/opt/orfquant_mirai_optimized.R")
+        library(ORFquant)
+        run_ORFquant(..., n_cores=32, parallel_backend="mirai")
+      '

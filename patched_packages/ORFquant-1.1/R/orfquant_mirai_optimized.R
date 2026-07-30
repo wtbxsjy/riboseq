@@ -64,8 +64,11 @@ orfquant_mirai_parallel_v3 <- function(
             format(file.size(genome_rds), units = "MB")))
     } else {
         use_genome_ref <- TRUE
-        genome_path_or_rds <- genome_ref$path
+        # Normalize to absolute path — daemons may run from a different working dir
+        genome_path_or_rds <- normalizePath(genome_ref$path, mustWork = TRUE)
         genome_ref_obj <- genome_ref
+        # Also update the path in genome_ref_obj so .orfquant_open_genome_ref opens correctly
+        genome_ref_obj$path <- genome_path_or_rds
         cat(sprintf("[mirai v3] Genome reference: %s (daemons open FaFile, ~0MB each)\n",
             genome_ref$path))
     }
@@ -150,6 +153,10 @@ orfquant_mirai_parallel_v3 <- function(
 
         # ── Load P-sites data ──
         for_ORFquant_data <<- get(load(FOR_ORFQUANT_FILE))
+        cat(sprintf("[daemon %d] P-sites loaded: class=%s fields=%s psites_len=%d\n",
+            Sys.getpid(), class(for_ORFquant_data)[1],
+            paste(names(for_ORFquant_data), collapse=","),
+            length(for_ORFquant_data$P_sites_all)))
 
         cat(sprintf("[daemon %d] Ready: annot=%.0fMB genome=%.0fMB psites=%.0fMB (total %.0fMB)\n",
             Sys.getpid(),
@@ -179,13 +186,27 @@ orfquant_mirai_parallel_v3 <- function(
         stn.orf_quant.cutoff_P_sites     = stn.orf_quant.cutoff_P_sites
     )
 
-    # ---- Step 5: Parallel computation ----
-    cat(sprintf("[mirai v3] Processing %d gene regions with %d daemons... %s\n",
+    # ---- Step 5: Parallel computation with DISK-BACKED streaming ----
+    # Each daemon writes its result to an RDS file immediately.
+    # The main process only collects file paths (~100 bytes each), NOT GRanges objects.
+    # This avoids the ~150 GB memory explosion from collecting all ORF results in RAM.
+    cat(sprintf("[mirai v3] Processing %d gene regions with %d daemons (disk-backed)... %s\n",
         n_regions, n_cores, date()))
 
-    results <- mirai::mirai_map(
+    result_dir <- tempfile("orfq_mirai_results_")
+    dir.create(result_dir)
+    cat(sprintf("[mirai v3] Results directory: %s\n", result_dir))
+
+    result_paths <- mirai::mirai_map(
         seq_along(genes_red),
         function(g) {
+            # Resolve from daemon .GlobalEnv — closure's lexical scope is main process,
+            # but everywhere() created these in the daemon's global env.
+            GTF_annotation <- get("GTF_annotation", envir = .GlobalEnv)
+            for_ORFquant_data <- get("for_ORFquant_data", envir = .GlobalEnv)
+            genome_seq <- get("genome_seq", envir = .GlobalEnv)
+
+            outfile <- file.path(RESULT_DIR, sprintf("gene_%06d.rds", g))
             tryCatch({
                 gen_region <- genes_red[g]
                 chr_name <- as.character(seqnames(gen_region))
@@ -201,7 +222,7 @@ orfquant_mirai_parallel_v3 <- function(
                     )
                 }
 
-                ORFquant(
+                res <- ORFquant(
                     region = gen_region,
                     for_ORFquant = for_ORFquant_data,
                     genetic_code_region = genetcd,
@@ -215,33 +236,50 @@ orfquant_mirai_parallel_v3 <- function(
                     orf_quant.cutoff_P_sites = stn.orf_quant.cutoff_P_sites,
                     unique_reads = unique_reads_only
                 )
+                saveRDS(res, outfile, compress = FALSE)
+                outfile  # Return file path (~100 bytes) instead of GRanges (~many MB)
             }, error = function(e) {
                 message(sprintf(
                     "\n[mirai v3] Gene region %d (%s) error: %s",
                     g, as.character(genes_red[g]), conditionMessage(e)
                 ))
-                NULL
+                # Write error marker
+                saveRDS(structure(list(error=conditionMessage(e)), class="orfquant_gene_error"), outfile, compress=FALSE)
+                outfile
             })
-        }
+        },
+        RESULT_DIR = result_dir
     )[]
 
     # ---- Step 6: Filter results ----
-    is_invalid <- vapply(results, function(x) {
-        inherits(x, "try-error") ||
-            is.null(x) ||
-            (is.list(x) && length(x) == 0)
+    # result_paths is a list of file paths (tiny, ~100 bytes each)
+    # Read and filter lazily — metadata only
+    is_valid <- vapply(result_paths, function(f) {
+        if (!file.exists(f)) return(FALSE)
+        # Peek at the first few bytes to check for errors without deserializing fully
+        x <- tryCatch(readRDS(f), error = function(e) NULL)
+        !inherits(x, "orfquant_gene_error") && !is.null(x) && !(is.list(x) && length(x) == 0)
     }, logical(1L))
-    n_failed <- sum(is_invalid)
+
+    n_failed <- sum(!is_valid)
+    n_succeeded <- sum(is_valid)
     if (n_failed > 0) {
         cat(sprintf(
             "\n[mirai v3] %d / %d gene regions failed or empty, %d succeeded\n",
-            n_failed, n_regions, n_regions - n_failed
+            n_failed, n_regions, n_succeeded
         ))
-        results <- results[!is_invalid]
     }
 
-    cat(sprintf("[mirai v3] Processing complete. %d regions successful. %s\n",
-        length(results), date()))
+    cat(sprintf("[mirai v3] Processing complete. %d regions → %d RDS files in %s. %s\n",
+        n_regions, n_succeeded, result_dir, date()))
 
-    return(results)
+    # Return validated file paths + result_dir for later cleanup
+    attr(result_paths, "result_dir") <- result_dir
+    attr(result_paths, "is_valid") <- is_valid
+    result_paths <- result_paths[is_valid]
+    # Subsetting drops attributes; re-attach
+    attr(result_paths, "result_dir") <- result_dir
+    attr(result_paths, "is_valid") <- is_valid[is_valid]
+    return(result_paths)
 }
+# DEBUG PATCH - remove after testing

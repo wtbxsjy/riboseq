@@ -2,19 +2,16 @@ process ORFQUANT_RUN {
     tag "$meta.id"
     label 'process_high'
 
-    conda "${moduleDir}/environment.yml"
-    // Use custom container with ORFquant pre-installed
-    // Build from: containers/Singularity.orfquant.def
-    // Or specify via params.orfquant_container
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        (params.orfquant_container ?: 'https://depot.galaxyproject.org/singularity/riboseqc:1.1--r36_1') :
-        'quay.io/biocontainers/riboseqc:1.1--r36_1' }"
+    // Dual-mode: Nextflow picks the right backend based on active profile
+    //   -profile conda      → uses pre-built conda environment
+    //   -profile singularity → uses SIF container (portable, self-contained)
+    conda "${params.orfquant_conda_env ?: "${moduleDir}/environment.yml"}"
+    container "${params.orfquant_mirai_container}"
 
     input:
     tuple val(meta), path(for_orfquant)   // *_for_ORFquant file from RiboseQC
     path annotation                        // *_Rannot file from RiboseQC/ORFquant annotation
     path fasta                             // Genome fasta file
-    path orfquant_pkg                      // Pre-downloaded ORFquant R package (tar.gz) - optional
 
     output:
     tuple val(meta), path("*_final_ORFquant_results")  , emit: results
@@ -31,201 +28,132 @@ process ORFQUANT_RUN {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
-    def n_cores = task.cpus ?: 1
+    def n_cores = params.orfquant_mirai_daemons ?: task.cpus ?: 32
     // Parse optional arguments
     def write_gtf = args.contains('write_GTF_file=FALSE') ? 'FALSE' : 'TRUE'
     def write_fasta = args.contains('write_protein_fasta=FALSE') ? 'FALSE' : 'TRUE'
     def write_tmp = args.contains('write_temp_files=FALSE') ? 'FALSE' : 'TRUE'
     def plot_results = args.contains('plot_results=TRUE') ? 'TRUE' : 'FALSE'
-    def use_local_pkg = orfquant_pkg.name != 'NO_FILE'
-    def local_pkg_path = "${orfquant_pkg}"
-    // Parallel backend: "mclapply" (fork, default), "mirai" (socket daemon, requires mirai+mori)
-    def parallel_backend = params.orfquant_parallel_backend ?: 'mclapply'
+    // Parallel backend: "mirai" (socket daemon, default) or "mclapply" (fork, legacy)
+    def parallel_backend = params.orfquant_parallel_backend ?: 'mirai'
     """
     # Ensure fasta file is available with the expected name (if it was gzipped)
     if [[ "${fasta}" == *.gz ]]; then
         gunzip -c ${fasta} > \$(basename ${fasta} .gz)
     fi
 
-    # Append a task-local Rlibs directory instead of replacing R_LIBS_USER, so that
-    # packages pre-installed in the container (e.g. ORFquant) remain accessible.
-    _local_rlibs="${task.workDir}/Rlibs"
-    mkdir -p "\$_local_rlibs"
-    export R_LIBS_USER="\${_local_rlibs}\${R_LIBS_USER:+:\${R_LIBS_USER}}"
+    # BLAS thread control — prevent each R process from spawning threads_per_core threads
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export GOTO_NUM_THREADS=1
 
-    # Write R script - ORFquant should be pre-installed in custom container
+    # Write R script — ORFquant, mirai, and all dependencies are pre-installed
     cat > run_orfquant.R <<'RSCRIPTEOF'
-install_orfquant <- function(local_pkg_tgz = NULL, tag = "1.02", local_src = NULL) {
-    if (!is.null(local_src) && dir.exists(local_src) && file.exists(file.path(local_src, "DESCRIPTION"))) {
-        message("Installing ORFquant from local source: ", local_src)
-        cmd <- sprintf("R CMD INSTALL %s", shQuote(local_src))
-        status <- system(cmd)
-        if (status == 0) return(invisible(TRUE))
-    }
-    work <- file.path(getwd(), "orfquant_src")
-    dir.create(work, showWarnings = FALSE, recursive = TRUE)
+    # Suppress BLAS threading inside R (belt + suspenders with shell exports)
+    Sys.setenv(OMP_NUM_THREADS="1"); Sys.setenv(OPENBLAS_NUM_THREADS="1")
+    Sys.setenv(MKL_NUM_THREADS="1"); Sys.setenv(GOTO_NUM_THREADS="1")
+    options(mc.cores = 1)
+    tryCatch(BiocParallel::register(BiocParallel::SerialParam()), error = function(e) NULL)
 
-    tgz <- local_pkg_tgz
-    if (!is.null(tgz) && nzchar(tgz) && file.exists(tgz) && file.info(tgz)[1, "size"] > 0) {
-        message("Installing ORFquant from local tar.gz: ", tgz)
-    } else {
-        url <- sprintf("https://github.com/lcalviell/ORFquant/archive/refs/tags/%s.tar.gz", tag)
-        tgz <- file.path(work, sprintf("ORFquant-%s.tar.gz", tag))
-        message("Downloading ORFquant from GitHub: ", url)
-        utils::download.file(url, tgz, mode = "wb", quiet = FALSE)
-    }
+    # Load mirai-optimized parallel backend (disk-backed FaFile streaming)
+    source("/opt/orfquant_mirai_optimized.R")
+    library(ORFquant)
 
-    utils::untar(tgz, exdir = work, tar = "internal")
-    pkg_dir <- list.dirs(work, recursive = FALSE, full.names = TRUE)
-    if (length(pkg_dir) != 1) {
-        stop("Unexpected ORFquant source layout in: ", work)
-    }
-
-    cmd <- sprintf("R CMD INSTALL %s", shQuote(pkg_dir[[1]]))
-    message(cmd)
-    status <- system(cmd)
-    if (status != 0) stop("R CMD INSTALL failed with status ", status)
-}
-
-# Ensure ORFquant is available
-if (!requireNamespace("ORFquant", quietly = TRUE)) {
-    local_pkg <- if (${use_local_pkg ? 'TRUE' : 'FALSE'}) "${local_pkg_path}" else NULL
-    tryCatch({
-        install_orfquant(local_pkg_tgz = local_pkg, tag = "1.02", local_src = "/opt/ORFquant")
-    }, error = function(e) {
-        stop(
-            "ORFquant is not installed and automatic installation failed: ", conditionMessage(e), "\n",
-            "Provide a pre-downloaded tarball with --orfquant_pkg (e.g. ORFquant_1.02.0.tar.gz from lcalviell/ORFquant), ",
-            "or use a container with ORFquant pre-installed (e.g. --orfquant_container)."
-        )
-    })
-
-    if (!requireNamespace("ORFquant", quietly = TRUE)) {
-        stop("ORFquant install completed but package is still not available on library paths.")
-    }
-}
-
-# Install txdbmaker if missing (Bioc 3.20+)
-if (!requireNamespace("txdbmaker", quietly = TRUE)) {
-    if (!requireNamespace("BiocManager", quietly = TRUE))
-        install.packages("BiocManager", repos = "https://cloud.r-project.org", quiet = TRUE)
-    BiocManager::install("txdbmaker", update = FALSE, ask = FALSE, quiet = TRUE)
-}
-
-	library(ORFquant)
-
-			# Install mirai + mori for socket-based parallel backend (if not in container)
-			if ("${parallel_backend}" == "mirai") {
-			    for (pkg in c("mirai", "mori")) {
-			        if (!requireNamespace(pkg, quietly = TRUE)) {
-			            cat(sprintf("Installing %s for mirai parallel backend...\\n", pkg))
-			            install.packages(pkg, repos = "https://cloud.r-project.org",
-			                             lib = Sys.getenv("R_LIBS_USER"), quiet = TRUE)
-			        }
-			    }
-			    library(mirai)
-			    library(mori)
-			}
-
-			# load_annotation monkey-patch REMOVED (2026-06-28).
-			# The patched ORFquant container now includes fork-safe load_annotation()
-			# with FaFile->DNAStringSet conversion.
-
-
-
-# Run ORFquant with error handling for low-quality samples
-cat("Running ORFquant on sample ${prefix}...\\n")
-orfquant_success <- tryCatch({
-    run_ORFquant(
-        for_ORFquant_file = "${for_orfquant}",
-        annotation_file = "${annotation}",
-        n_cores = ${n_cores},
-        prefix = "${prefix}",
-        write_temp_files = ${write_tmp},
-        write_GTF_file = ${write_gtf},
-        write_protein_fasta = ${write_fasta},
-        interactive = FALSE,
-        parallel_backend = "${parallel_backend}"
-    )
-    TRUE
-}, error = function(e) {
-    error_msg <- conditionMessage(e)
-    cat("\\n=== ORFquant Error ===\\n")
-    cat(error_msg, "\\n")
-    
-    # Check for common low-signal/quality errors that should allow pipeline to continue
-    is_low_signal_error <- (
-        grepl("unable to find an inherited method.*summarizeOverlaps", error_msg, ignore.case = TRUE) ||
-        grepl("no method.*coercing.*NULL.*GRanges", error_msg, ignore.case = TRUE) ||
-        grepl("summarizeOverlaps.*GRanges.*NULL", error_msg, ignore.case = TRUE) ||
-        grepl("Not enough P_sites signal", error_msg, ignore.case = TRUE) ||
-        grepl("Not enough P.sites signal", error_msg, ignore.case = TRUE) ||
-        grepl("insufficient.*signal", error_msg, ignore.case = TRUE) ||
-        grepl("no ORFs? (were |was )?detected", error_msg, ignore.case = TRUE)
-    )
-    
-    if (is_low_signal_error) {
-        cat("\\nWARNING: ORFquant failed due to insufficient signal/ORF predictions.\\n")
-        cat("This typically occurs when:\\n")
-        cat("  - Sample has low ribosome profiling signal\\n")
-        cat("  - Not enough P-sites signal over genomic regions\\n")
-        cat("  - Very few or no ORFs meet the detection thresholds\\n")
-        cat("  - P-site positioning is poor\\n")
-        cat("\\nCreating empty output files to allow pipeline continuation...\\n")
-        
-        # Create empty output files so downstream processes can handle gracefully
-        writeLines("# No ORFs detected - insufficient signal", "${prefix}_final_ORFquant_results")
-        
-        if (${write_gtf}) {
-            writeLines("# No ORFs detected", "${prefix}_Detected_ORFs.gtf")
-        }
-        if (${write_fasta}) {
-            writeLines("", "${prefix}_Protein_sequences.fasta")  # Empty FASTA
-        }
-        if (${write_tmp}) {
-            writeLines("# No ORFs detected", "${prefix}_tmp_ORFquant_results")
-        }
-        
-        return(FALSE)
-    } else {
-        # For other errors, re-throw
-        cat("\\nUnexpected ORFquant error. Re-throwing...\\n")
-        stop(e)
-    }
-})
-
-if (orfquant_success) {
-    cat("ORFquant completed successfully\\n")
-} else {
-    cat("ORFquant skipped due to insufficient data\\n")
-}
-
-# Optionally generate plots (only if ORFquant succeeded)
-if (${plot_results} && orfquant_success) {
-    tryCatch({
-        plot_ORFquant_results(
+    # Run ORFquant with error handling for low-quality samples
+    cat("Running ORFquant on sample ${prefix}...\\n")
+    orfquant_success <- tryCatch({
+        run_ORFquant(
             for_ORFquant_file = "${for_orfquant}",
-            ORFquant_output_file = paste0("${prefix}", "_final_ORFquant_results"),
-            annotation_file = "${annotation}",
-            output_plots_path = paste0("${prefix}", "_plots"),
-            prefix = "${prefix}"
+            annotation_file   = "${annotation}",
+            n_cores           = ${n_cores},
+            prefix            = "${prefix}",
+            write_temp_files  = ${write_tmp},
+            write_GTF_file    = ${write_gtf},
+            write_protein_fasta = ${write_fasta},
+            interactive       = FALSE,
+            parallel_backend  = "${parallel_backend}"
         )
+        TRUE
     }, error = function(e) {
-        message("Warning: Could not generate ORFquant plots: ", conditionMessage(e))
-    })
-} else if (${plot_results} && !orfquant_success) {
-    cat("Skipping plot generation - ORFquant did not produce results\\n")
-}
+        error_msg <- conditionMessage(e)
+        cat("\\n=== ORFquant Error ===\\n")
+        cat(error_msg, "\\n")
 
-# Write versions
-writeLines(
-    c(
-        '"${task.process}":',
-        paste0('    orfquant: "', packageVersion("ORFquant"), '"'),
-        paste0('    r-base: "', R.Version()[["major"]], ".", R.Version()[["minor"]], '"')
-    ),
-    "versions.yml"
-)
+        # Check for common low-signal/quality errors that should allow pipeline to continue
+        is_low_signal_error <- (
+            grepl("unable to find an inherited method.*summarizeOverlaps", error_msg, ignore.case = TRUE) ||
+            grepl("no method.*coercing.*NULL.*GRanges", error_msg, ignore.case = TRUE) ||
+            grepl("summarizeOverlaps.*GRanges.*NULL", error_msg, ignore.case = TRUE) ||
+            grepl("Not enough P_sites signal", error_msg, ignore.case = TRUE) ||
+            grepl("Not enough P.sites signal", error_msg, ignore.case = TRUE) ||
+            grepl("insufficient.*signal", error_msg, ignore.case = TRUE) ||
+            grepl("no ORFs? (were |was )?detected", error_msg, ignore.case = TRUE)
+        )
+
+        if (is_low_signal_error) {
+            cat("\\nWARNING: ORFquant failed due to insufficient signal/ORF predictions.\\n")
+            cat("This typically occurs when:\\n")
+            cat("  - Sample has low ribosome profiling signal\\n")
+            cat("  - Not enough P-sites signal over genomic regions\\n")
+            cat("  - Very few or no ORFs meet the detection thresholds\\n")
+            cat("  - P-site positioning is poor\\n")
+            cat("\\nCreating empty output files to allow pipeline continuation...\\n")
+
+            # Create empty output files so downstream processes can handle gracefully
+            writeLines("# No ORFs detected - insufficient signal", "${prefix}_final_ORFquant_results")
+
+            if (${write_gtf}) {
+                writeLines("# No ORFs detected", "${prefix}_Detected_ORFs.gtf")
+            }
+            if (${write_fasta}) {
+                writeLines("", "${prefix}_Protein_sequences.fasta")  // Empty FASTA
+            }
+            if (${write_tmp}) {
+                writeLines("# No ORFs detected", "${prefix}_tmp_ORFquant_results")
+            }
+
+            return(FALSE)
+        } else {
+            # For other errors, re-throw
+            cat("\\nUnexpected ORFquant error. Re-throwing...\\n")
+            stop(e)
+        }
+    })
+
+    if (orfquant_success) {
+        cat("ORFquant completed successfully\\n")
+    } else {
+        cat("ORFquant skipped due to insufficient data\\n")
+    }
+
+    # Optionally generate plots (only if ORFquant succeeded)
+    if (${plot_results} && orfquant_success) {
+        tryCatch({
+            plot_ORFquant_results(
+                for_ORFquant_file = "${for_orfquant}",
+                ORFquant_output_file = paste0("${prefix}", "_final_ORFquant_results"),
+                annotation_file = "${annotation}",
+                output_plots_path = paste0("${prefix}", "_plots"),
+                prefix = "${prefix}"
+            )
+        }, error = function(e) {
+            message("Warning: Could not generate ORFquant plots: ", conditionMessage(e))
+        })
+    } else if (${plot_results} && !orfquant_success) {
+        cat("Skipping plot generation - ORFquant did not produce results\\n")
+    }
+
+    # Write versions
+    writeLines(
+        c(
+            '"${task.process}":',
+            paste0('    orfquant: "', packageVersion("ORFquant"), '"'),
+            paste0('    mirai: "', as.character(packageVersion("mirai")), '"'),
+            paste0('    r-base: "', R.Version()[["major"]], ".", R.Version()[["minor"]], '"')
+        ),
+        "versions.yml"
+    )
 RSCRIPTEOF
 
     # Run using Rscript
@@ -277,8 +205,9 @@ RSCRIPTEOF
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        orfquant: "1.02"
-        r-base: "4.3"
+        orfquant: "1.3.3"
+        mirai: "2.7.2"
+        r-base: "4.4"
     END_VERSIONS
     """
 }

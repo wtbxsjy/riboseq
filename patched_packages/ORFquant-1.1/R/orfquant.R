@@ -1781,7 +1781,7 @@ select_quantify_ORFs <- function(
         tx_strand = as.character(unique(strand(orfs[[1]])))
     )
     df_genes <- data.frame(tx_name = as.character(names(orfs)), gene_id = "OFF")
-    orfann <- suppressWarnings(makeTxDb(
+    orfann <- suppressWarnings(txdbmaker::makeTxDb(
         transcripts = df_orfs,
         splicings = df_orfs_ex,
         genes = df_genes
@@ -3466,7 +3466,7 @@ annotate_ORFs <- function(
                     Annotation$trann$transcript_id
                 )]
                 pcd <- btps == "protein_coding"
-                if (sum(pcd) > 0) {
+                if (sum(pcd, na.rm = TRUE) > 0) {
                     c(sort(x[pcd])[1], sort(txs[pcd])[1], "protein_coding")
                 } else {
                     c(x[1], txs[1], btps[1])
@@ -3526,7 +3526,7 @@ annotate_ORFs <- function(
                         Annotation$trann$transcript_id
                     )]
                     pcd <- btps == "protein_coding"
-                    if (sum(pcd) > 0) {
+                    if (sum(pcd, na.rm = TRUE) > 0) {
                         c(sort(x[pcd])[1], sort(txs[pcd])[1], "protein_coding")
                     } else {
                         c(x[1], txs[1], btps[1])
@@ -4647,14 +4647,32 @@ run_ORFquant <- function(
             recursive = FALSE
         )
     } else if (parallel_backend == "mirai") {
-        cat(paste("Starting mirai parallel processing (v3, disk-backed FaFile) with", n_cores, "cores ...\n"))
-        ORFs_found <- orfquant_mirai_parallel_v3(
+        cat(paste("Starting mirai parallel processing (v4, disk-backed streaming) with", n_cores, "cores ...\n"))
+
+        # ── Quick-test mode: limit genes via env var ──
+        test_n <- as.integer(Sys.getenv("ORFQ_MIRAI_TEST_N", "0"))
+        if (test_n > 0 && test_n < length(genes_red)) {
+            cat(sprintf("TEST MODE: limiting genes_red from %d to %d\n", length(genes_red), test_n))
+            genes_red <- head(genes_red, test_n)
+        }
+
+        # ── Memory optimization: free annotation+P-sites before mirai_map ──
+        # The daemons load GTF_annotation and for_ORFquant_data independently
+        # from disk files (ANNOTATION_FILE, FOR_ORFQUANT_FILE). The main process
+        # only needs genes_red + genome_seq(→FaFile path) during computation.
+        # This frees ~25 GB for maize, dropping peak memory from ~100 GB to ~40 GB.
+        saved_annotation_file <- annotation_file
+        suppressWarnings(rm(GTF_annotation, for_ORFquant_data, envir = .GlobalEnv))
+        gc()
+        cat(sprintf("Freed annotation + P-sites from main process. %s\n", date()))
+
+        result_paths <- orfquant_mirai_parallel_v3(
             genes_red = genes_red,
-            for_ORFquant_data = for_ORFquant_data,
-            GTF_annotation = GTF_annotation,
+            for_ORFquant_data = NULL,       # daemons load from disk
+            GTF_annotation = NULL,           # daemons load from disk
             genome_seq = genome_seq,
             for_ORFquant_file = for_ORFquant_file,
-            annotation_file = annotation_file,
+            annotation_file = saved_annotation_file,
             n_cores = n_cores,
             canonical_start_only = canonical_start_only,
             stn.orf_find.all_starts = stn.orf_find.all_starts,
@@ -4667,6 +4685,39 @@ run_ORFquant <- function(
             stn.orf_quant.cutoff_P_sites = stn.orf_quant.cutoff_P_sites,
             unique_reads_only = unique_reads_only
         )
+        # ── Incremental load from RDS files to avoid memory explosion ──
+        result_dir <- attr(result_paths, "result_dir")
+        # mirai_map()[] returns a list; flatten to character vector for indexing
+        if (is.list(result_paths)) result_paths <- unlist(result_paths)
+        n_paths <- length(result_paths)
+        cat(sprintf("Loading %d gene results from disk (one-at-a-time to limit RAM)... %s\n",
+            n_paths, date()))
+        ORFs_found <- vector("list", n_paths)
+        for (i in seq_len(n_paths)) {
+            x <- tryCatch(readRDS(result_paths[i]), error = function(e) NULL)
+            if (inherits(x, "orfquant_gene_error") || is.null(x) ||
+                (is.list(x) && length(x) == 0)) {
+                ORFs_found[[i]] <- simpleError(
+                    if (inherits(x, "orfquant_gene_error")) x$error else "empty gene result"
+                )
+            } else {
+                ORFs_found[[i]] <- x
+            }
+            if (i %% 100 == 0) {
+                gc()
+                cat(sprintf("  Loaded %d/%d genes (%.0f MB used)...\n",
+                    i, n_paths, sum(gc()[, "(Mb)"])))
+            }
+        }
+        # Clean up RDS temp directory
+        unlink(result_dir, recursive = TRUE)
+        cat(sprintf("Loaded all %d gene results. %s\n", n_paths, date()))
+
+        # ── Reload annotation for post-processing ──
+        cat(sprintf("Reloading annotation for post-processing... %s\n", date()))
+        load_annotation(saved_annotation_file, keep_fafile = TRUE)
+        gc()
+        cat(sprintf("Annotation reloaded. %s\n", date()))
     } else if (parallel_backend == "fork") {
         if (.Platform$OS.type != "unix") {
             stop("parallel_backend = 'fork' is only available on Unix-like systems")
@@ -4695,8 +4746,10 @@ run_ORFquant <- function(
     }
 
     # Check for errors/NULL results in parallel execution and filter them out
+    cat(sprintf("DEBUG0 Pre-filter: ORFs_found length=%d\n", length(ORFs_found)))
     is_error_or_null <- sapply(ORFs_found, function(x) {
         inherits(x, "try-error") ||
+            inherits(x, "simpleError") ||
             inherits(x, "orfquant_gene_error") ||
             is.null(x) ||
             (is.list(x) && length(x) == 0)
@@ -4721,7 +4774,7 @@ run_ORFquant <- function(
                     "  gene %s: %s\n",
                     x$gene_idx, x$error_msg
                 ))
-            } else if (inherits(x, "try-error")) {
+            } else if (inherits(x, "try-error") || inherits(x, "simpleError")) {
                 cat(sprintf("  element %d: %s\n", i, conditionMessage(x)))
             }
         }
@@ -5356,7 +5409,7 @@ prepare_annotation_files <- function(
     if (create_TxDb) {
         cat(paste("Creating the TxDb object ... ", date(), "\n", sep = ""))
 
-        annotation <- makeTxDbFromGFF(
+        annotation <- txdbmaker::makeTxDbFromGFF(
             file = gtf_file,
             format = "gtf",
             chrominfo = seqinfo_genome
