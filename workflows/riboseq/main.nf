@@ -1432,50 +1432,41 @@ workflow RIBOSEQ {
     // update, run a clean start or manually invoke scripts in bin/ instead.
     // See docs/orf_qc_usage.md for manual execution.
     if (!params.skip_orf_qc) {
-        // ORF_QC inputs via Channel.value() using published files.
-        // Channels consumed by upstream processes (CLASSIFY, COLLECT_QC_STATS)
-        // cannot be reused — use publishDir files directly instead.
-        def orf_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
-        def out = params.outdir
-        ch_orf_qc_unified_final = Channel.value([
-            [ id: orf_prefix ],
-            file("${out}/orf_unification/${orf_prefix}.bed.gz"),
-            file("${out}/orf_unification/${orf_prefix}.metadata.tsv")
-        ])
-        ch_orf_qc_ribocode_f = Channel.value(
-            file("${out}/orf_predictions/ribocode/*_collapsed.txt").toList()
+        // ORF_QC inputs use pre-collected Nextflow channels (not publishDir paths).
+        // This creates proper DAG dependencies: each upstream process → channel clone → ORF_QC.
+        // Previously, Channel.value(file(publishDir)) had no DAG edge, so ORF_QC could
+        // start before UNIFY_ORF_PREDICTIONS finished → file-not-found failures.
+        //
+        // Pre-collected clones are declared at lines 148-160 and populated from upstream
+        // process outputs (lines 622, 643, 687, 811, 840, 860-861, 904, 920, 1056-1057).
+        // They carry the actual Nextflow-tracked file paths with proper DAG dependencies.
+
+        // Combine unified bed + metadata into single tuple for ORF_QC input
+        ch_orf_qc_unified = ch_unify_bed_val
+            .combine(ch_unify_metadata_val)
+            .map { bed_meta, bed_file, meta_meta, meta_file ->
+                [bed_meta, bed_file, meta_file]
+            }
+
+        // Fallback channels for optional tools (use empty list if tool was skipped)
+        ch_orf_qc_ribocode_safe    = ch_orf_qc_ribocode.ifEmpty([])
+        ch_orf_qc_psites_safe      = ch_orf_qc_psites.ifEmpty([])
+        ch_orf_qc_rw_psite_safe    = ch_orf_qc_rw_psite.ifEmpty([])
+        ch_orf_qc_rw_region_safe   = ch_orf_qc_rw_region.ifEmpty([])
+        ch_orf_qc_ribotricer_safe  = ch_orf_qc_ribotricer.ifEmpty([])
+        ch_orf_qc_ribotish_safe    = ch_orf_qc_ribotish.ifEmpty([])
+        ch_orf_qc_price_safe       = ch_orf_qc_price.ifEmpty([])
+        ch_orf_qc_orfquant_safe    = ch_orf_qc_orfquant.ifEmpty([])
+        ch_orf_qc_ribo_offset_safe = ch_orf_qc_ribotish_offset.ifEmpty(
+            ch_orf_qc_rw_psite.ifEmpty([])
         )
-        ch_orf_qc_psites_f = Channel.value(
-            file("${out}/riboseqc/*_P_sites_calcs").toList()
-        )
-        ch_orf_qc_rw_psite_f = Channel.value(
-            file("${out}/riboseq_qc/ribowaltz/*_psite_offset.tsv").toList()
-        )
-        ch_orf_qc_rw_region_f = Channel.value(
-            file("${out}/riboseq_qc/ribowaltz/*_frame_distribution.tsv").toList()
-        )
-        ch_orf_qc_ribotricer_f = Channel.value(
-            file("${out}/orf_predictions/ribotricer/postfilter/*_translating_ORFs.tsv").toList()
-        )
-        ch_orf_qc_ribotish_f = Channel.value(
-            file("${out}/orf_predictions/ribotish/postfilter/*_pred.txt").toList()
-        )
-        ch_orf_qc_ribotish_offset_f = Channel.value(
-            file("${out}/riboseqc/*_{P_sites_calcs}_offset.tsv").toList()
-        ).ifEmpty( file("${out}/riboseq_qc/ribowaltz/*_psite_offset.tsv").toList() )
-        ch_orf_qc_price_f = Channel.value(
-            file("${out}/orf_predictions/price/*.orfs.tsv").toList()
-        )
-        ch_orf_qc_orfquant_f = Channel.value(
-            file("${out}/orf_predictions/orfquant/postfilter/*_Detected_ORFs.gtf.gz").toList()
-        )
-        ch_orf_qc_rpbp_f = Channel.value([])
+
         ORF_QC(
-            ch_orf_qc_unified_final,
-            ch_orf_qc_ribocode_f, ch_orf_qc_psites_f, ch_orf_qc_rw_psite_f,
-            ch_orf_qc_rw_region_f, ch_orf_qc_ribotricer_f, ch_orf_qc_ribotish_f,
-            ch_orf_qc_ribotish_offset_f, ch_orf_qc_price_f, ch_orf_qc_rpbp_f,
-            ch_orf_qc_orfquant_f
+            ch_orf_qc_unified,
+            ch_orf_qc_ribocode_safe, ch_orf_qc_psites_safe, ch_orf_qc_rw_psite_safe,
+            ch_orf_qc_rw_region_safe, ch_orf_qc_ribotricer_safe, ch_orf_qc_ribotish_safe,
+            ch_orf_qc_ribo_offset_safe, ch_orf_qc_price_safe, Channel.value([]),
+            ch_orf_qc_orfquant_safe
         )
     }
 
