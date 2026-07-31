@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -28,16 +29,15 @@ def run_bedtools_map(bed_file, bedgraph_file, bedtools_path):
     """Run bedtools map to sum column 4 of bedgraph over BED intervals.
 
     Uses zero-padding (-null 0) so ORFs with no overlap get 0 instead of '.'.
+    Bedgraph is sorted via sort -k1,1 -k2,2n for consistent chromosome order.
     """
-    cmd = [
-        bedtools_path, 'map',
-        '-a', bed_file,
-        '-b', bedgraph_file,
-        '-c', '4',          # column 4 (value)
-        '-o', 'sum',         # sum over all overlapping intervals
-        '-null', '0'         # ORFs with no overlap → 0
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    cmd = (
+        f"sort -k1,1 -k2,2n {shlex.quote(bedgraph_file)} | "
+        f"{shlex.quote(bedtools_path)} map "
+        f"-a {shlex.quote(bed_file)} -b - "
+        f"-c 4 -o sum -null 0"
+    )
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0 and result.stderr:
         print(f"  WARNING: bedtools map failed for {bedgraph_file}: {result.stderr.strip()[:200]}",
               file=sys.stderr, flush=True)
