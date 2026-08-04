@@ -114,8 +114,8 @@ process CLASSIFY_ORFS_ORFQUANT {
     publishDir { "${params.outdir}/${classify_output_dir}" }, mode: params.publish_dir_mode
 
     conda "${moduleDir}/environment_orfquant.yml"
-    container "${ params.orfquant_container ?
-        params.orfquant_container :
+    container "${ params.orfquant_mirai_container ?: params.orfquant_container ?
+        (params.orfquant_mirai_container ?: params.orfquant_container) :
         (workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
             'https://depot.galaxyproject.org/singularity/orfquant:1.1.0--r40_1' :
             'quay.io/biocontainers/orfquant:1.1.0--r40_1') }"

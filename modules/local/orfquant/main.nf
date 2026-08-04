@@ -107,7 +107,7 @@ process ORFQUANT_RUN {
                 writeLines("# No ORFs detected", "${prefix}_Detected_ORFs.gtf")
             }
             if (${write_fasta}) {
-                writeLines("", "${prefix}_Protein_sequences.fasta")  // Empty FASTA
+                writeLines("", "${prefix}_Protein_sequences.fasta")  # Empty FASTA
             }
             if (${write_tmp}) {
                 writeLines("# No ORFs detected", "${prefix}_tmp_ORFquant_results")
@@ -167,7 +167,7 @@ RSCRIPTEOF
     if [ -f ${prefix}_final_ORFquant_results ] && [ -s ${prefix}_final_ORFquant_results ]; then
         NEED_FIX=false
         if [ -f ${prefix}_Detected_ORFs.gtf ] && [ -s ${prefix}_Detected_ORFs.gtf ]; then
-            HAS_ATTRS=\$(grep -v '^#' ${prefix}_Detected_ORFs.gtf | head -1 | awk -F'\t' '{print \$9}')
+            HAS_ATTRS=\$(grep -v '^#' ${prefix}_Detected_ORFs.gtf | awk -F'\t' 'NR==1 {print \$9}')
             if [ "\$HAS_ATTRS" = "." ] || [ -z "\$HAS_ATTRS" ]; then
                 NEED_FIX=true
             fi
