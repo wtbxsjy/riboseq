@@ -1297,8 +1297,8 @@ workflow RIBOSEQ {
                 error "ORF classification requires --orf_classify_ensembl_dir to run gencode classification."
             }
             CLASSIFY_ORFS_GENCODE(
-                ch_unify_bed,
-                ch_unify_metadata,
+                ch_unify_bed_val,
+                ch_unify_metadata_val,
                 classify_prefix,
                 classify_wrapper,
                 class_orf_dir,
@@ -1311,7 +1311,7 @@ workflow RIBOSEQ {
             if (!params.skip_orf_classify_orfquant) {
                 CLASSIFY_ORFS_ORFQUANT(
                     ch_unify_gtf,
-                    ch_unify_metadata,
+                    ch_unify_metadata_val,
                     classify_prefix,
                     classify_wrapper,
                     class_orf_dir,
@@ -1322,7 +1322,7 @@ workflow RIBOSEQ {
             }
 
             CLASSIFY_ORFS_ORF_TYPE(
-                ch_unify_metadata,
+                ch_unify_metadata_val,
                 classify_prefix,
                 classify_wrapper,
                 class_orf_dir,
@@ -1441,11 +1441,15 @@ workflow RIBOSEQ {
         // process outputs (lines 622, 643, 687, 811, 840, 860-861, 904, 920, 1056-1057).
         // They carry the actual Nextflow-tracked file paths with proper DAG dependencies.
 
-        // Combine unified bed + metadata into single tuple for ORF_QC input
+        // Combine unified bed + metadata into single tuple for ORF_QC input.
+        // Both channels are value channels wrapping plain paths (not tuples),
+        // so .combine() emits [bed, metadata] — a 2-element list.
+        // ORF_QC expects tuple val(meta), path(bed), path(metadata).
         ch_orf_qc_unified = ch_unify_bed_val
             .combine(ch_unify_metadata_val)
-            .map { bed_meta, bed_file, meta_meta, meta_file ->
-                [bed_meta, bed_file, meta_file]
+            .map { bed_file, meta_file ->
+                def orf_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
+                [ [id: orf_prefix], bed_file, meta_file ]
             }
 
         // Fallback channels for optional tools (use empty list if tool was skipped)
@@ -1482,7 +1486,9 @@ workflow RIBOSEQ {
             ORF_QC.out.confidence.map { meta, f -> f }.collect().ifEmpty([]) :
             Channel.value([])
 
-        if (ch_unify_expression_summary && ch_unify_expression_rpkm_tpm) {
+        // Only run expression quant if UNIFY produced expression data.
+        // Channel.empty() is truthy in Groovy, so guard with a boolean flag.
+        if (!params.skip_unify_orf_predictions) {
             EXPRESSION_QUANT(
                 ch_unify_expression_summary.first(),
                 ch_unify_expression_rpkm_tpm.first(),
