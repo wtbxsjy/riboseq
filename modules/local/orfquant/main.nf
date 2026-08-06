@@ -42,6 +42,9 @@ process ORFQUANT_RUN {
         gunzip -c ${fasta} > \$(basename ${fasta} .gz)
     fi
 
+    # Force re-run: mirai backend rerun marker (invalidate old fork-backend caches)
+    export ORFQUANT_MIRAI_RERUN=1
+
     # BLAS thread control — prevent each R process from spawning threads_per_core threads
     export OMP_NUM_THREADS=1
     export OPENBLAS_NUM_THREADS=1
