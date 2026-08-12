@@ -42,8 +42,8 @@ process ORFQUANT_RUN {
         gunzip -c ${fasta} > \$(basename ${fasta} .gz)
     fi
 
-    # Force re-run: GTF attr fix v2 (invalidate caches with broken GTF attributes)
-    export ORFQUANT_MIRAI_RERUN=2
+    # Force re-run: .safe_field() plain-list fix (2026-08-12)
+    export ORFQUANT_MIRAI_RERUN=3
 
     # BLAS thread control — prevent each R process from spawning threads_per_core threads
     export OMP_NUM_THREADS=1
@@ -62,6 +62,64 @@ process ORFQUANT_RUN {
     # Load mirai-optimized parallel backend (disk-backed FaFile streaming)
     source("/opt/orfquant_mirai_optimized.R")
     library(ORFquant)
+
+    # --- Hotfix: patch .safe_field() to handle plain-list ORFs_tx_position ---
+    # select_quantify_ORFs() uses lapply() at line 2115 which degrades
+    # ORFs_tx_position from GRangesList to a plain list.  The per-gene RDS
+    # files contain valid GRanges elements inside a plain list, but the
+    # original .safe_field() rejects any plain list as an error guard.
+    # This silently discards ALL transcript-space ORFs (ORFs_tx = 0), which
+    # forces run_ORFquant() down the genomic-only GTF export path (no attrs).
+    #
+    # The patch replaces the plain-list guard with a conversion attempt:
+    # if the list is non-empty and contains GRanges objects, wrap it in
+    # GRangesList() instead of returning an empty GRanges.  Empty lists and
+    # unconvertible types still return GRanges() as before.
+    cat("[patch] Applying .safe_field() plain-list fix\\n")
+    ns <- asNamespace("ORFquant")
+    unlockBinding(".safe_field", ns)
+    .safe_field_patched <- function(x, field) {
+        val <- x[[field]]
+        if (is.null(val)) return(GRanges())
+        if (is.list(val) && !is(val, "GRanges") && !is(val, "GRangesList") &&
+            !is(val, "CompressedGRangesList")) {
+            if (length(val) == 0) return(GRanges())
+            val <- tryCatch(GRangesList(val), error = function(e) {
+                cat("[patch] cannot convert", field, "to GRangesList:",
+                    conditionMessage(e), "\\n")
+                return(GRanges())
+            })
+            if (!is(val, "GRangesList") && !is(val, "CompressedGRangesList")) return(GRanges())
+        }
+        val <- unlist(val)
+        if (is.null(val) || length(val) == 0) return(GRanges())
+        val
+    }
+    assign(".safe_field", .safe_field_patched, envir = ns)
+    lockBinding(".safe_field", ns)
+    unlockBinding(".safe_nested", ns)
+    .safe_nested_patched <- function(x, outer, inner) {
+        out <- x[[outer]]
+        if (is.null(out)) return(GRanges())
+        val <- out[[inner]]
+        if (is.null(val)) return(GRanges())
+        if (is.list(val) && !is(val, "GRanges") && !is(val, "GRangesList") &&
+            !is(val, "CompressedGRangesList")) {
+            if (length(val) == 0) return(GRanges())
+            val <- tryCatch(GRangesList(val), error = function(e) {
+                cat("[patch] cannot convert", outer, "/", inner, "to GRangesList:",
+                    conditionMessage(e), "\\n")
+                return(GRanges())
+            })
+            if (!is(val, "GRangesList") && !is(val, "CompressedGRangesList")) return(GRanges())
+        }
+        val <- unlist(val)
+        if (is.null(val) || length(val) == 0) return(GRanges())
+        val
+    }
+    assign(".safe_nested", .safe_nested_patched, envir = ns)
+    lockBinding(".safe_nested", ns)
+    cat("[patch] .safe_field() and .safe_nested() patched\\n")
 
     # Run ORFquant with error handling for low-quality samples
     cat("Running ORFquant on sample ${prefix}...\\n")
