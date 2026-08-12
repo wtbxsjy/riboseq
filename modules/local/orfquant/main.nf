@@ -42,8 +42,8 @@ process ORFQUANT_RUN {
         gunzip -c ${fasta} > \$(basename ${fasta} .gz)
     fi
 
-    # Force re-run: .safe_field() plain-list fix (2026-08-12)
-    export ORFQUANT_MIRAI_RERUN=3
+    # Force re-run: rebuilt container with source fixes (2026-08-12)
+    export ORFQUANT_MIRAI_RERUN=4
 
     # BLAS thread control — prevent each R process from spawning threads_per_core threads
     export OMP_NUM_THREADS=1
