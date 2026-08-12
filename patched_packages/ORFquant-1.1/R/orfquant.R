@@ -2112,7 +2112,10 @@ select_quantify_ORFs <- function(
     results_ORFs <- selected_ORFs
     feats <- results_ORFs$selected_ORFs_features
     orfs_tx <- results_ORFs$ORFs_tx_position
-    orfs_tx <- lapply(orfs_tx, function(x) {
+    # GRangesList() wrapper: lapply() on a GRangesList returns a plain
+    # list, stripping the class.  Without this, ORFs_tx_position degrades
+    # to a plain list and .safe_field() rejects it → ORFs_tx = 0.
+    orfs_tx <- GRangesList(lapply(orfs_tx, function(x) {
         cols <- mcols(x)
         cols[, c("P_sites", "ORF_pct_P_sites", "ORF_pct_P_sites_pN")] <- NA
         cols[, "unique_features_reads"] <- NumericList("")
@@ -2120,7 +2123,7 @@ select_quantify_ORFs <- function(
         cols[, "scaling_factors"] <- NumericList("")
         mcols(x) <- cols
         x
-    })
+    }))
 
     #first round of unq
 
@@ -4800,12 +4803,25 @@ run_ORFquant <- function(
     .safe_field <- function(x, field) {
         val <- x[[field]]
         if (is.null(val)) return(GRanges())
-        # Guard against plain lists that cannot be coerced to GRanges.
-        # ORFquant may return a bare list() for some fields when sequence
-        # extraction fails (e.g. transcript missing from DNAStringSet).
+        # Guard against empty or invalid lists that cannot produce GRanges.
+        # Valid patterns:
+        #   - GRanges / GRangesList / CompressedGRangesList → unlist directly
+        #   - plain list of GRanges-like objects (e.g. ORFs_tx_position) →
+        #     unlist each element then combine
+        #   - bare list() (length 0) → return empty GRanges
         if (is.list(val) && !is(val, "GRanges") && !is(val, "GRangesList") &&
             !is(val, "CompressedGRangesList")) {
-            return(GRanges())
+            if (length(val) == 0) return(GRanges())
+            # Try to unlist each element and combine.  If elements are not
+            # GRanges-like, unlist() will return NULL → fall through to empty.
+            val <- unlist(GRangesList(lapply(val, function(el) {
+                if (is.null(el)) return(GRanges())
+                if (is(el, "GRanges") || is(el, "GRangesList") ||
+                    is(el, "CompressedGRangesList")) return(unlist(el))
+                GRanges()
+            })))
+            if (is.null(val) || length(val) == 0) return(GRanges())
+            return(val)
         }
         val <- unlist(val)
         if (is.null(val) || length(val) == 0) return(GRanges())
@@ -4818,7 +4834,15 @@ run_ORFquant <- function(
         if (is.null(val)) return(GRanges())
         if (is.list(val) && !is(val, "GRanges") && !is(val, "GRangesList") &&
             !is(val, "CompressedGRangesList")) {
-            return(GRanges())
+            if (length(val) == 0) return(GRanges())
+            val <- unlist(GRangesList(lapply(val, function(el) {
+                if (is.null(el)) return(GRanges())
+                if (is(el, "GRanges") || is(el, "GRangesList") ||
+                    is(el, "CompressedGRangesList")) return(unlist(el))
+                GRanges()
+            })))
+            if (is.null(val) || length(val) == 0) return(GRanges())
+            return(val)
         }
         val <- unlist(val)
         if (is.null(val) || length(val) == 0) return(GRanges())
