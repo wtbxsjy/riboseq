@@ -34,6 +34,7 @@ process UNIFY_ORF_PREDICTIONS {
     task.ext.when == null || task.ext.when
 
     script:
+    // RERUN marker: GTF attr fix (2026-08-12) — invalidate cached unified ORFs that used broken GTF
     def prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
     def min_len = params.unify_orf_min_len ?: 6
     def extra_args = params.extra_unify_orf_predictions_args ?: ''
