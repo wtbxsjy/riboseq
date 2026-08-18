@@ -28,10 +28,10 @@ P-site Statistics Options (for unified P-site stats from RiboseQC):
   --sample-list   Comma-separated list of sample names (matching bedgraph file prefixes)
 
 Advanced Merging Options:
-  --merge-tolerance   Base pair tolerance for frame-aware merging (default: 3)
+  --frame-merge-min-overlap  Min overlap fraction for frame-aware merging (default: 0.9)
   --min-overlap       Minimum overlap fraction for grouping ORFs (default: 0.5)
   --no-frame-merge    Disable frame-aware merging (only use exact matches)
-  --no-overlap-group  Disable overlap grouping (treat all ORFs independently)
+  --no-overlap-group  [deprecated] overlap cross-attribution is always on; accepted but ignored
 
 Other Options:
   --min-len    Minimum AA length (default: 10)
@@ -62,7 +62,7 @@ Examples:
   17_unify_predictions.sh \
     --gtf gencode.gtf --fasta genome.fa \
     --ribotish "s1_pred.txt" --orfquant "s1_orfquant.gtf" \
-    --merge-tolerance 5 --min-overlap 0.6 \
+    --frame-merge-min-overlap 0.95 --min-overlap 0.6 \
     --output ./results/unified
 EOF
 }
@@ -76,7 +76,7 @@ ORFQUANT_FILES=""
 BEDGRAPH_DIR=""
 SAMPLE_LIST=""
 MIN_LEN=10
-MERGE_TOLERANCE=3
+FRAME_MERGE_MIN_OVERLAP=0.9
 MIN_OVERLAP=0.5
 NO_FRAME_MERGE=false
 NO_OVERLAP_GROUP=false
@@ -95,7 +95,7 @@ while [[ $# -gt 0 ]]; do
     --bedgraph-dir) BEDGRAPH_DIR="$2"; shift 2;;
     --sample-list) SAMPLE_LIST="$2"; shift 2;;
     --min-len) MIN_LEN="$2"; shift 2;;
-    --merge-tolerance) MERGE_TOLERANCE="$2"; shift 2;;
+    --frame-merge-min-overlap) FRAME_MERGE_MIN_OVERLAP="$2"; shift 2;;
     --min-overlap) MIN_OVERLAP="$2"; shift 2;;
     --no-frame-merge) NO_FRAME_MERGE=true; shift;;
     --no-overlap-group) NO_OVERLAP_GROUP=true; shift;;
@@ -193,13 +193,13 @@ echo "[INFO] Output: $OUTPUT_PREFIX_ABS"
 
 # Construct command args
 CMD_ARGS="--gtf '$GTF' --fasta '$FASTA' --output '$OUTPUT_PREFIX_ABS' --min_len $MIN_LEN --threads $CPUS"
-CMD_ARGS="$CMD_ARGS --merge-tolerance $MERGE_TOLERANCE --min-overlap $MIN_OVERLAP"
+CMD_ARGS="$CMD_ARGS --frame-merge-min-overlap $FRAME_MERGE_MIN_OVERLAP --min-overlap $MIN_OVERLAP"
 
 if [[ "$NO_FRAME_MERGE" == "true" ]]; then
     CMD_ARGS="$CMD_ARGS --no-frame-merge"
 fi
 if [[ "$NO_OVERLAP_GROUP" == "true" ]]; then
-    CMD_ARGS="$CMD_ARGS --no-overlap-group"
+    echo "[WARN] --no-overlap-group is no longer supported by unify_orf_predictions.py (overlap cross-attribution is always on); ignoring."
 fi
 
 if [[ -n "$RIBOTISH_FILES" ]]; then
