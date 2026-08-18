@@ -110,25 +110,29 @@ def build_orf_index(bed_path):
 # Bedgraph streamer — find overlapping ORFs via interval bisect
 # ---------------------------------------------------------------------------
 
-def find_overlapping_orfs(idx, bg_start, bg_end):
+def find_overlapping_orfs(idx, bg_start, bg_end, strand=None):
     """
     Find indices of ORFs overlapping a bedgraph interval [bg_start, bg_end] (1-based).
 
     Uses the fact that ORFs are sorted by start. Finds the range of ORFs whose
     start <= bg_end, then checks which of those have end >= bg_start.
+    If strand is given, filters to only same-strand ORFs.
     """
     starts = idx['starts']
     ends = idx['ends']
+    strands = idx.get('strands', None)
 
     # All ORFs with start <= bg_end
     right = int(bisect.bisect_right(starts, bg_end))
     if right == 0:
         return []
 
-    # Of those, keep ones with end >= bg_start
+    # Of those, keep ones with end >= bg_start (and same strand if specified)
     matched = []
     for i in range(right):
         if ends[i] >= bg_start:
+            if strand is not None and strands is not None and strands[i] != strand:
+                continue
             matched.append(i)
     return matched
 
@@ -215,7 +219,7 @@ def process_samples(worker_args):
                             continue
 
                         idx = orf_index[chrom]
-                        matched = find_overlapping_orfs(idx, bg_start, bg_end)
+                        matched = find_overlapping_orfs(idx, bg_start, bg_end, strand_char)
                         for midx in matched:
                             orf_id = idx['ids'][midx]
                             cur = results[orf_id]
@@ -260,7 +264,7 @@ def process_samples(worker_args):
                             continue
 
                         idx = orf_index[chrom]
-                        matched = find_overlapping_orfs(idx, bg_start, bg_end)
+                        matched = find_overlapping_orfs(idx, bg_start, bg_end, strand_char)
                         for midx in matched:
                             orf_id = idx['ids'][midx]
                             cur = results[orf_id]

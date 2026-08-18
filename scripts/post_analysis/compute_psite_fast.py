@@ -64,8 +64,11 @@ def parse_bedtools_output(output_text):
     return result
 
 
-def process_sample(sample, bed_file, riboseqc_dir, bedtools_path):
+def process_sample(sample, plus_bed, minus_bed, riboseqc_dir, bedtools_path):
     """Process one sample: compute P-site and coverage sums per ORF.
+
+    Strand-aware: plus bedgraph mapped against plus-strand BED;
+    minus bedgraph mapped against minus-strand BED.
 
     Returns:
         sample_name, {orf_id: {'p_site_GSE': float, 'reads_GSE': float}}
@@ -77,8 +80,11 @@ def process_sample(sample, bed_file, riboseqc_dir, bedtools_path):
 
     orf_data = {}
 
-    # P-site: plus + minus
-    for label, bg_file in [('plus', psite_plus_file), ('minus', psite_minus_file)]:
+    # P-site: plus bedgraph → plus BED, minus bedgraph → minus BED
+    for label, bg_file, bed_file in [
+        ('plus',  psite_plus_file,  plus_bed),
+        ('minus', psite_minus_file, minus_bed),
+    ]:
         if os.path.exists(bg_file):
             output = run_bedtools_map(bed_file, bg_file, bedtools_path)
             vals = parse_bedtools_output(output)
@@ -87,8 +93,11 @@ def process_sample(sample, bed_file, riboseqc_dir, bedtools_path):
                     orf_data[orf_id] = {'p_site_GSE': 0.0, 'reads_GSE': 0.0}
                 orf_data[orf_id]['p_site_GSE'] += val
 
-    # Coverage: plus + minus
-    for label, bg_file in [('plus', cov_plus_file), ('minus', cov_minus_file)]:
+    # Coverage: plus bedgraph → plus BED, minus bedgraph → minus BED
+    for label, bg_file, bed_file in [
+        ('plus',  cov_plus_file,  plus_bed),
+        ('minus', cov_minus_file, minus_bed),
+    ]:
         if os.path.exists(bg_file):
             output = run_bedtools_map(bed_file, bg_file, bedtools_path)
             vals = parse_bedtools_output(output)
@@ -148,13 +157,31 @@ def main():
                 orf_order.append(orf_id)
     print(f"  {len(orf_meta)} ORFs", flush=True)
 
+    # Split BED by strand for strand-aware bedtools mapping
+    print("Splitting BED by strand ...", flush=True)
+    plus_bed = args.bed + '.plus.tmp'
+    minus_bed = args.bed + '.minus.tmp'
+    with open(args.bed) as fin, open(plus_bed, 'w') as fp, open(minus_bed, 'w') as fm:
+        for line in fin:
+            parts = line.strip().split('\t')
+            strand = parts[5] if len(parts) > 5 else '+'
+            if strand == '-':
+                fm.write(line)
+            else:
+                fp.write(line)
+    for f in [plus_bed, minus_bed]:
+        if os.path.exists(f):
+            os.system(f"sort -k1,1 -k2,2n {shlex.quote(f)} -o {shlex.quote(f)}")
+    print(f"  Plus: {sum(1 for _ in open(plus_bed))}, Minus: {sum(1 for _ in open(minus_bed))}",
+          flush=True)
+
     # Process samples in parallel
     print(f"Processing {len(sample_list)} samples with {args.workers} workers ...", flush=True)
     all_results = {}
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {}
         for sample in sample_list:
-            fut = executor.submit(process_sample, sample, args.bed,
+            fut = executor.submit(process_sample, sample, plus_bed, minus_bed,
                                   args.riboseqc_dir, args.bedtools)
             futures[fut] = sample
 
@@ -221,6 +248,11 @@ def main():
 
             out.write('\t'.join(row) + '\n')
             n_written += 1
+
+    # Cleanup temp files
+    for f in [plus_bed, minus_bed]:
+        try: os.unlink(f)
+        except: pass
 
     elapsed = time.time() - t0
     print(f"Done. {n_written} ORFs, {len(sample_list)} samples in {elapsed:.1f}s",
