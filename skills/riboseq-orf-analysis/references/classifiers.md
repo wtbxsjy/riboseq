@@ -29,15 +29,53 @@ gencode_results.orfs.{bed,gtf.gz,fa,allframes.bed,frames.bed}
 gencode_results.logs
 ```
 
-`.out` 列：`orf_id version chrm starts ends strand trans gene gene_name
-orf_biotype gene_biotype pep orf_length ...`（第 7 列 = orf_biotype）。
+`.out` 列（**有 header 行**）：`orf_id version chrm starts ends strand trans gene
+gene_name orf_biotype gene_biotype pep orf_length ...`（**orf_biotype = 第 10 列**，
+第 7 列是 trans；统计时先 `tail -n +2`）。
 
 **orf_biotype 取值**：CDS / dORF / uORF / doORF / uoORF / intORF / lncRNA。
 
-**验证**：`zcat gencode_results.orfs.out.gz | cut -f7 | sort | uniq -c`；
-lncRNA >90% = 蛋白 header 不匹配坑（见 riboseq-data-prep）。
+**验证**：`zcat gencode_results.orfs.out.gz | tail -n +2 | cut -f10 | sort | uniq -c`。
+健康参考（本机 rice / maize，7 类齐全）：rice 151,848 ORF → CDS 107K / dORF 19K /
+doORF 13K / intORF 7.5K / uORF 3.2K / uoORF 1.4K / lncRNA 562；maize 232,594 ORF →
+CDS 195K / doORF 11K / intORF 8.5K / uORF 7K / uoORF 4.1K / dORF 3.9K / lncRNA 2.1K。
 未与任何注释转录本重叠的 ORF 归 "intergenic"（下游分析时与非 CDS 一起处理，
 回收约 53% 否则被静默丢弃的 ORFs）。
+
+### ⚠️ 2 类塌缩坑（2026-08-19 修复，commit 7281ecd）
+
+**症状**：biotype 分布只剩 lncRNA/CDS 两类（或 lncRNA >90%）；或分类直接崩溃
+报 duplicate key / ValueError。Arabidopsis 与 Lishuqi 生产均实测塌缩。
+
+**根因**（`functions.py::load_fasta()` 原版直接 `SeqIO.index`，两种失败模式）：
+1. **版本后缀不匹配**：GTF `protein_id` 无版本（`ENSP00000493376`）而 FASTA
+   header 带版本（`ENSP00000493376.2`）→ 查找 KeyError → 绝大多数 ORF 映射失败
+   → 塌缩成 2 类。点号版本的物种（人/拟南芥 Gencode/Ensembl）必踩。
+2. **FASTA 重复 key**：`retrieve_ensembl_data.sh` 旧版 `strip_fasta_versions`
+   用 `FS="."` 取 $1 切掉版本 → `AT1G01020.1` 塌成基因级 `AT1G01020`，
+   isoform 撞 key → SeqIO.index 直接抛 ValueError。
+
+**修复**：
+- `_dual_key_index()`：每个记录同时注册精确 key 与剥版本 key
+  （`_strip_version()` = 去掉 `\.\d+$`，first-wins）；SeqIO.index 抛 ValueError
+  时回退为逐条 parse + `setdefault` 去重（不再崩）。
+- `retrieve_ensembl_data.sh`：`strip_fasta_versions` 改为保留第一个空白分隔
+  token（`>AT1G01020.1 cdna...` 完整保留版本后缀）。
+
+**影响面与重跑安全性**：
+- 无点号版本的物种（rice `Os01t0100100-01`、maize `Zm00001eb000010_P001`）不受
+  影响：剥版本是 no-op，双 key 索引退化为精确索引，**重跑结果不变**（本机
+  2026-08 验证：maize proteome 72,539 条构建 1.3s、0 条剥版本额外键）。
+- 生效路径：pipeline 的 CLASSIFY_ORFS_GENCODE stage 的是仓库 `scripts/` 下的
+  mapper + functions.py（wrapper 从自身目录解析脚本），16 单工具脚本也 `cp`
+  仓库副本 → 两条路径修复都生效；容器内 `/opt/gencode-riboseqORFs` 的 clone
+  不会被用到。
+- **仅 original 实现**：`--gencode_impl fast|indexed_fast`（`scripts/class_orf/`
+  下的 run_gencode_classify_fast/indexed.py）有各自加载器（load_fasta_by_orf_id /
+  load_fasta_records），未经过此修复，用这两种实现时另行验证。
+- 内存注意：`_dual_key_index` 把全部记录物化进内存（比 SeqIO.index 高，maize
+  转录组+蛋白组约几百 MB 级），process_medium 标签够用；超大转录组（人 GENCODE
+  ~250K 条）也实测无碍。
 
 **实现选择**：`--gencode_impl original|fast|indexed_fast`（mouse 用 indexed_fast；
 982K ORFs 时 mapper 崩溃 → 分批 + `csv.field_size_limit(sys.maxsize)`）。

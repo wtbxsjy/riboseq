@@ -111,5 +111,7 @@ TSL/APPRIS 从 BioMart 下载失败时统一填 `NA` 是 mapper 可接受的兜�
 - 5 个文件都存在且非空；GTF 行数、转录本数、蛋白数数量级合理
 - `grep -c ">" PROTEOME_FASTA` 与 GTF `protein_id` 唯一数一致
 - PSITES_BED 行数 ≈ 转录本数（每条转录本 1 行）
-- 分类跑完用 `cut -f7 gencode_results.orfs.out | sort | uniq -c` 检查 biotype
-  分布——lncRNA 占比异常高（>90%）说明坑 1 复发了
+- 分类跑完检查 biotype 分布（⚠️ orf_biotype 是第 10 列且文件有 header，
+  `tail -n +2 | cut -f10`）——lncRNA 占比异常高（>90%）说明坑 1 复发了；只剩
+  lncRNA/CDS 两类则是版本后缀不匹配的 2 类塌缩（2026-08-19 已修，见
+  riboseq-orf-analysis classifiers.md）

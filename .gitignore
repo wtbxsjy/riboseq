@@ -8,6 +8,9 @@ results*
 tmp*
 null/
 
+# skill 参考文件例外（名字以 results 开头，但需要随 skills/ 一起提交）
+!skills/riboseq-pipeline-run/references/results_checklist.md
+
 # Tests & local test outputs
 testing/
 testing*

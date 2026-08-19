@@ -177,7 +177,7 @@ bash skills/riboseq-orf-analysis/scripts/run_orf_in_container.sh \
 2. **ORFquant `library(NULL)` / `GTF_annotation not found`**：非模式生物无 BSgenome → 5 轮 monkey-patch 迭代史与最终 FaFile 方案 → `references/orfquant_saga.md`。
 3. **channel 单消费者死锁**：`.into{}` 在 resume 的缓存任务上不可用；ORF_QC 最终改为磁盘 glob + `optional: true` 占位文件（已修进代码，遇到时按 riboseq-pipeline-run 的 troubleshooting §4 处理）。
 4. **PRICE/GEDI 参数**：v1.0.5 只认 `-reads/-prefix/-genomic`，`-genomic` 要 OML 绝对路径。
-5. **GENCODE 分类结果 lncRNA >90%**：gffread 蛋白 header 不匹配（见 riboseq-data-prep skill）。
+5. **GENCODE 分类结果 lncRNA >90% / 只剩 2 类 biotype**：蛋白 FASTA header 版本后缀与 GTF protein_id 不匹配（`ENSP00000493376.2` vs `ENSP00000493376`）→ 2026-08-19 已修（commit 7281ecd，`_dual_key_index` 双 key 索引；FASTA 重复 key 崩溃同源）。无点号版本的物种（rice/maize）不受影响，重跑结果不变。诊断与细节 → `references/classifiers.md` §1。
 6. **unify 输入路径与后缀**：各工具按后缀推断 sample id（`infer_sample_id_from_prediction_path`），文件名不符合 `{sample}_xxx` 约定时 sample 归属错乱。
 
 ## 完成后

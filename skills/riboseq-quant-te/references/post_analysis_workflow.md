@@ -49,14 +49,18 @@ ggribo:
    → `prelim_orfs_for_psite.bed`（BED12，col4=orf_id）+ `prelim_orfs.tsv`。
    逻辑（`apply_prelim_filters()`）：`orf_biotype != CDS` 且每样本
    `reads > 9 且 pN > 0.5`，≥1 样本满足。
-2. **Step2 P-site 纯度**：
+2. **Step2 P-site 纯度**（2026-08-19 起 run_all.sh 默认走 purity.py）：
    ```bash
-   python3 compute_psite_fast.py --bed prelim_orfs_for_psite.bed \
-     --riboseqc-dir $RIBOSEQC_DIR --output psite_purity.tsv \
-     --bedtools /usr/bin/bedtools --workers 8
+   python3 compute_psite_purity.py --bed prelim_orfs_for_psite.bed \
+     --riboseqc-dir $RIBOSEQC_DIR --output psite_purity.tsv --workers 8
    ```
-   bedtools map 版：`sort -k1,1 -k2,2n bg | bedtools map -a BED -b - -c 4 -o sum -null 0`
-   （strand-aware，plus bedgraph 只映射 plus 链 BED）。**28 秒完成 341K ORF × 23 样本**。
+   纯 Python 精确回溯（bisect + numpy），**无需 bedtools**；`--workers` 默认 8。
+   2026-08-19 起 `find_overlapping_orfs` 已 numpy 向量化（~20-50x，strand 过滤保留、
+   与旧循环语义完全一致）——旧基准 3.1h 已过时。本机 rice（394K ORF×23）与 maize
+   （660K ORF×97 样本）现有 psite_purity.tsv 均已是 purity.py 产出，重跑无行为变化。
+   旧 fast.py 版（bedtools map：`sort -k1,1 -k2,2n bg | bedtools map -a BED -b - -c 4
+   -o sum -null 0`，strand-aware）**28 秒完成 341K ORF × 23 样本**，但 p_site_pos 恒
+   0.00，仅适合快速预检。
    输出列：`orf_id chrom start end strand` + 每样本
    `{s}_p_site_GSE/_reads_GSE/_p_site_pct/_p_site_pos/_not_p_site_GSE` + 全局
    `total_psites total_reads global_p_site_pct global_p_site_pos global_p_site_pos_sd n_samples_with_psites`
@@ -80,10 +84,10 @@ RPM 单位，做分母无意义——曾因此踩坑后弃用）。
 | | compute_psite_fast.py | compute_psite_purity.py |
 |---|---|---|
 | 依赖 | bedtools | 纯 Python（numpy+bisect+ProcessPoolExecutor） |
-| 速度 | 28s / 341K×23 | 3.1h / 207K×23（16 workers） |
+| 速度 | 28s / 341K×23 | 旧版 3.1h / 207K×23；2026-08-19 numpy 向量化后 ~20-50x（新数字未实测） |
 | p_site_pos | **恒 0.00**（不追踪位置） | 真实值（Σvalue×pos/Σvalue，负链从 ORF end 反向） |
 | BED12 外显子块 | 整个区间 | 按 blocks 精确计算 |
-| 适用 | run_all.sh 默认（Stage2 不用 pos 时可接受） | 需要 pos/位置加权时 |
+| 适用 | 快速预检 | **run_all.sh 默认**（2026-08-19 起）；需要 pos/位置加权时 |
 
 ## rice 实测数字（供预期管理）
 

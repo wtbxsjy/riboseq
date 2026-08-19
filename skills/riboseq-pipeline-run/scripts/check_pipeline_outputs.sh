@@ -133,11 +133,12 @@ if [ ! -f "$GENOUT" ] && [ -f "$GENOUT.gz" ]; then
 fi
 if [ -f "$GENOUT" ]; then
   N_GEN=$($CAT_GEN "$GENOUT" | tail -n +2 | wc -l)
-  LNCRNA=$($CAT_GEN "$GENOUT" | cut -f7 | grep -c "^lncRNA$" || true)
+  # orf_biotype 列按 header 名定位（第 10 列；第 7 列是 trans，直接 cut -f7 会永远数出 0）
+  LNCRNA=$($CAT_GEN "$GENOUT" | awk -F'\t' 'NR==1{for(i=1;i<=NF;i++) if($i=="orf_biotype") c=i; next} $c=="lncRNA"' | wc -l)
   ok "gencode_results.orfs.out(.gz): $N_GEN classified"
   if [ "$N_GEN" -gt 0 ]; then
     PCT=$((LNCRNA * 100 / N_GEN))
-    [ "$PCT" -le 90 ] || warn "lncRNA fraction ${PCT}% > 90% — possible protein header mismatch (transcript_id vs protein_id)"
+    [ "$PCT" -le 90 ] || warn "lncRNA fraction ${PCT}% > 90% — 2-class collapse? (FASTA header 版本后缀与 GTF protein_id 不匹配；见 riboseq-orf-analysis classifiers.md)"
   fi
 else
   warn "gencode_results.orfs.out(.gz) missing (GENCODE classification skipped?)"

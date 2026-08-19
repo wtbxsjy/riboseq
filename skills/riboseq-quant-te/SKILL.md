@@ -65,9 +65,10 @@ bash scripts/post_analysis/run_all.sh <project_config.yaml>
 ```
 
 四步：Step1 初筛（quarto render 01_prelim_analysis.qmd → `prelim_orfs_for_psite.bed`）
-→ Step2 P-site 纯度（`compute_psite_fast.py`，bedtools map，28 秒/341K ORF×23 样本）
-→ Step3 P-site 过滤（02_psite_filtering.qmd → `final_orfs_for_ggribo.tsv`）
-→ Step4 ggRibo 批量图（03_generate_ggribo.qmd → `ggribo_plots/{biotype}/{orf_id}.png`）。
+→ Step2 P-site 纯度（`compute_psite_purity.py`，纯 Python 精确回溯，**无需 bedtools**，
+2026-08-19 起为 run_all.sh 默认）→ Step3 P-site 过滤（02_psite_filtering.qmd →
+`final_orfs_for_ggribo.tsv`）→ Step4 ggRibo 批量图（03_generate_ggribo.qmd →
+`ggribo_plots/{biotype}/{orf_id}.png`）。
 
 **两级阈值**（config `filtering:` 段，均 per-sample 且需 ≥ N 样本同时满足）：
 Stage1 `prelim_reads_min: 9`、`prelim_pN_min: 0.5`、`prelim_cross_sample: 1`；
@@ -78,8 +79,12 @@ Stage2 `p_site_gse_min: 9`、`p_site_pct_min: 0.5`、`p_site_pos_min: 2`、
 394,053 unified → 207,413 prelim → **10,255 final**（ggribo_plots/ 10,255 张 PNG）。
 ⚠️ 目录内 README 记录的旧数字（86,375 → 35,073 → 5,843 → 1,590）已过时。
 
-注意：`compute_psite_fast.py` 的 `p_site_pos` 恒为 0.00；需要真实位置信息时改用
-`compute_psite_purity.py`（纯 Python，慢 ~400 倍，3.1 小时 vs 28 秒）。
+注意：`compute_psite_fast.py` 的 `p_site_pos` 恒为 0.00（只适合快速预检）；需要真实
+位置信息用 `compute_psite_purity.py`。2026-08-19 起 purity.py 的 overlap 查找已 numpy
+向量化（~20-50x，strand 过滤保留、语义与旧循环完全一致）——旧基准 rice 3.1h（394K
+ORF×23，向量化之前）已大幅过时；本机 rice（394K ORF）与 maize（660K ORF×97 样本）
+现有 psite_purity.tsv 均已是 purity.py 产出，run_all.sh 的 fast→purity 切换对它们
+重跑无行为变化。
 
 ## 4. 手动定量（pipeline 之外）
 

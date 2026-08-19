@@ -176,4 +176,6 @@ DRY_RUN=0 CPUS=16 ./00_run_order_example.sh
 ## 结果进入 GENCODE 注释链
 
 另一个路径：`14/15_*_to_gencode.sh` 格式转换 → `16_gencode_orf_mapper.sh`
-（需要 5 文件 Ensembl 目录，见 riboseq-data-prep）。
+（需要 5 文件 Ensembl 目录，见 riboseq-data-prep）。16 脚本 `cp` 仓库的
+mapper + functions.py 进工作目录运行，因此 2026-08-19 的双 key 修复
+（commit 7281ecd）同样生效；biotype 塌缩诊断见 classifiers.md §1。
