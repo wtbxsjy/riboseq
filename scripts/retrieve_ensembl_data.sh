@@ -110,8 +110,14 @@ download_file() {
   return 1
 }
 
+# Keep only the accession (first whitespace token) of each FASTA header,
+# preserving the version suffix (e.g. ">AT1G01010.1").  The previous
+# dot-split implementation ("FS=\".\"") collapsed ">AT1G01010.1 cdna ..."
+# to ">AT1G01010", merging isoform transcripts of the same gene into
+# duplicate keys (SeqIO.index crash) and dropping the version needed to
+# match GTF transcript_id/protein_id attributes.
 strip_fasta_versions() {
-  awk 'BEGIN{FS="."} /^>/{print $1; next} {print}' "$1"
+  awk '/^>/{print $1; next} {print}' "$1"
 }
 
 GTF_FILE="${species_caps}.${ASSEMBLY}.${VERSION_SUFFIX}.gtf.gz"

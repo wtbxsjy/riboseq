@@ -3,7 +3,7 @@
 # Usage: bash run_all.sh /path/to/project_config.yaml
 #
 #   Step 1: Preliminary analysis → prelim_orfs_for_psite.bed (R/Quarto)
-#   Step 2: P-site purity (Python) — runs on PRELIMINARY ORFs only
+#   Step 2: P-site purity (Python, exact backtracking) — runs on PRELIMINARY ORFs only
 #   Step 3: P-site filtering + final ORF selection (R/Quarto)
 #   Step 4: Generate ggRibo coverage plots (R/Quarto)
 #
@@ -90,11 +90,11 @@ echo "  RiboseQC dir: $RIBOSEQC_DIR"
 if [ -f "$PURITY_OUT" ]; then
   echo "  psite_purity.tsv already exists — skipping (delete to recompute)"
 else
-  python3 "$SCRIPT_DIR/compute_psite_fast.py" \
+  # Exact P-site purity (pure-Python bisect backtracking, no bedtools needed)
+  python3 "$SCRIPT_DIR/compute_psite_purity.py" \
     --bed "$PRELIM_BED" \
     --riboseqc-dir "$RIBOSEQC_DIR" \
     --output "$PURITY_OUT" \
-    --bedtools /usr/bin/bedtools \
     --workers 8 \
     2>&1 | tee "$OUTPUT_DIR/logs/step2_purity.log"
   echo "  → $PURITY_OUT"

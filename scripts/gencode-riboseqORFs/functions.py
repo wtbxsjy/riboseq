@@ -4,6 +4,7 @@ import string
 import subprocess
 import os
 import random
+import re
 import string
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -144,10 +145,42 @@ def parse_gtf(gtf, field):
     return trans
 
 
+def _strip_version(key):
+    """Strip a trailing .<digits> version suffix from an accession."""
+    return re.sub(r"\.\d+$", "", key)
+
+
+def _dual_key_index(fasta_file):
+    """FASTA index tolerant to duplicate keys and version-suffix mismatches.
+
+    Reference-prep scripts have historically stripped version suffixes
+    inconsistently between the GTF (e.g. protein_id "ENSP00000493376")
+    and the FASTA headers (e.g. ">ENSP00000493376.2"), and dot-splitting
+    headers can collapse transcript IDs to gene IDs, creating duplicate
+    keys that crash SeqIO.index.  Each record is therefore registered
+    under both its exact key and its version-stripped key (first-wins on
+    collision) so lookups work in both directions.
+    """
+    try:
+        idx = SeqIO.index(fasta_file, "fasta")
+        items = list(idx.items())
+    except ValueError:
+        idx = {}
+        with open(fasta_file) as fh:
+            for rec in SeqIO.parse(fh, "fasta"):
+                idx.setdefault(rec.id, rec)
+        items = list(idx.items())
+    out = {}
+    for key, rec in items:
+        out.setdefault(key, rec)
+        out.setdefault(_strip_version(key), rec)
+    return out
+
+
 def load_fasta(orfs_fa_file, transcriptome_fa_file, proteome_fa_file):
     orfs_fa = SeqIO.index(orfs_fa_file, "fasta")
-    transcriptome_fa = SeqIO.index(transcriptome_fa_file, "fasta")
-    proteome_fa = SeqIO.index(proteome_fa_file, "fasta")
+    transcriptome_fa = _dual_key_index(transcriptome_fa_file)
+    proteome_fa = _dual_key_index(proteome_fa_file)
     return orfs_fa, transcriptome_fa, proteome_fa
 
 
