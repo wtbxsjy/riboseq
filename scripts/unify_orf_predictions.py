@@ -2656,9 +2656,9 @@ def main(argv=None):
     all_input_samples = sorted(set(sample_stats.keys()))
     for sample in all_input_samples:
         stats = sample_stats[sample]
-        total = stats['ribotish'] + stats['ribotricer'] + stats['ribocode'] + stats['orfquant']
+        total = stats['ribotish'] + stats['ribotricer'] + stats['ribocode'] + stats['orfquant'] + stats['price']
         if total > 0:
-            print(f"  {sample:20s}: ribotish={stats['ribotish']:6d}, ribotricer={stats['ribotricer']:6d}, ribocode={stats['ribocode']:6d}, orfquant={stats['orfquant']:6d}, total={total:6d}", file=sys.stderr)
+            print(f"  {sample:20s}: ribotish={stats['ribotish']:6d}, ribotricer={stats['ribotricer']:6d}, ribocode={stats['ribocode']:6d}, orfquant={stats['orfquant']:6d}, price={stats['price']:6d}, total={total:6d}", file=sys.stderr)
     
     # Stage 1: Exact match merging (same chrom, strand, and exact block coordinates).
     # Sort first so the same (gid, tid) is always chosen as the representative when
@@ -2746,6 +2746,7 @@ def main(argv=None):
         'Ribotricer': 'ribotricer',
         'RiboCode': 'ribocode',
         'ORFquant': 'orfquant',
+        'PRICE': 'price',
     }
 
     print(f"Final unified ORFs: {len(final_list)}", file=sys.stderr)
@@ -2761,9 +2762,10 @@ def main(argv=None):
         ribotricer_cnt = tool_counts.get('Ribotricer', 0)
         ribocode_cnt   = tool_counts.get('RiboCode', 0)
         orfquant_cnt   = tool_counts.get('ORFquant', 0)
-        total = ribotish_cnt + ribotricer_cnt + ribocode_cnt + orfquant_cnt
+        price_cnt      = tool_counts.get('PRICE', 0)
+        total = ribotish_cnt + ribotricer_cnt + ribocode_cnt + orfquant_cnt + price_cnt
         if total > 0:
-            print(f"  {sample:20s}: ribotish={ribotish_cnt:6d}, ribotricer={ribotricer_cnt:6d}, ribocode={ribocode_cnt:6d}, orfquant={orfquant_cnt:6d}, total={total:6d}", file=sys.stderr)
+            print(f"  {sample:20s}: ribotish={ribotish_cnt:6d}, ribotricer={ribotricer_cnt:6d}, ribocode={ribocode_cnt:6d}, orfquant={orfquant_cnt:6d}, price={price_cnt:6d}, total={total:6d}", file=sys.stderr)
     
     # Calculate statistics from bedgraphs if provided (using optimized indexed version)
     per_sample_data = None
