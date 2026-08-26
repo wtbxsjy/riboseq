@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New local module: `modules/local/samtools_merge/main.nf`
   - `scripts/get_sample_sheet.py`: new `--group-map` option (JSON or two-column CSV) to populate the `group` column
   - `scripts/prepare_workflow.py`: new `--group-map` and `--merge-replicates` options
+- fix: Pathogen dual-genome side scoped to TE/known-gene quantification (design decision: no de novo ORF prediction on pathogen BAMs)
+  - `bin/gtf2bed`: parse unquoted GFF3 `ID=` attributes (Prokka) and fall back to `CDS` blocks when a transcript has no `exon` rows — Prokka/RefSeq prokaryotic annotations now produce valid BED12
+  - TE analysis no longer requires `--contrasts`: counts-only mode runs featureCounts + merged counts matrix and skips DESeq2 deltaTE; deltaTE also auto-skips with a warning when the samplesheet has no `rnaseq` samples
+  - `SPLIT_BAM_BY_CONTIG` errors out when `--pathogen_contig_pattern` matches no contigs (previously warned and passed everything through as host)
+  - Removed dead `ch_pathogen_fasta_gtf` channel; `--skip_te_analysis_pathogen` added to `nextflow_schema.json` (boolean+string enum); pathogen parameter descriptions updated
+  - `docs/usage.md`: new "Pathogen dual-genome analysis" section; `CLAUDE.md` gotchas 17-21 updated
 
 ## v1.1.0 - 2025-01-30
 

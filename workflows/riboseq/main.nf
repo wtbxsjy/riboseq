@@ -387,6 +387,8 @@ workflow RIBOSEQ {
     ch_lncrna_te_bams = Channel.empty()
     // Detect lncRNA samples for conditional TE_ANALYSIS_LNCRNA guard
     has_lncrna_samples = file(params.input, checkIfExists: true).readLines().any { it.split(',')[4]?.trim() == 'lncrna' }
+    // Detect RNA-seq samples: deltaTE (DESeq2 interaction model) requires both RNA-seq and Ribo-seq
+    has_rnaseq_samples = file(params.input, checkIfExists: true).readLines().any { it.split(',')[4]?.trim() == 'rnaseq' }
 
     //
     // Pathogen BAM routing (dual-genome mode)
@@ -406,14 +408,10 @@ workflow RIBOSEQ {
         ch_pathogen_bams_for_analysis = ch_pathogen_bam_by_type.riboseq.join(ch_pathogen_bam_index)
         ch_pathogen_rnaseq_bam_bai = ch_pathogen_bam_by_type.rnaseq.join(ch_pathogen_bam_index)
 
-        // Build pathogen FASTA+GTF channel for ORF prediction tools
-        ch_pathogen_fasta_file = file(params.pathogen_fasta, checkIfExists: true)
-        ch_pathogen_gtf_file   = file(params.pathogen_gtf, checkIfExists: true)
-        ch_pathogen_fasta_gtf  = Channel.value([
-            [id: 'pathogen'],
-            ch_pathogen_fasta_file,
-            ch_pathogen_gtf_file
-        ])
+        // Pathogen GTF feeds the pathogen-side TE quantification (GTF2BED -> featureCounts).
+        // Design decision (2026-08-26): pathogen side is TE/known-gene quantification only -
+        // no de novo ORF prediction tools run on pathogen BAMs.
+        ch_pathogen_gtf_file = file(params.pathogen_gtf, checkIfExists: true)
     }
 
     // Create fasta+gtf tuple with a meaningful meta id for tools that need it (e.g., ribotricer)
@@ -545,7 +543,7 @@ workflow RIBOSEQ {
     // Prepare TE analysis input channel: combine RNA-seq + Ribo-seq BAMs
     // RNA-seq BAMs use unfiltered data; Ribo-seq BAMs use filtered data (post-sORF filter)
     //
-    if (!params.skip_te_analysis && params.contrasts) {
+    if (!params.skip_te_analysis) {
         // Ribo-seq BAMs for TE: use postfilter BAMs (stripping filter_status for consistent meta)
         ch_riboseq_te_bams = ch_bams_for_postfilter
             .map { meta, bam, bai ->
@@ -1337,15 +1335,24 @@ workflow RIBOSEQ {
     // Translational Efficiency (TE) Analysis
     // Integrates RNA-seq and Ribo-seq data to detect differentially translated genes
     //
-    if (!params.skip_te_analysis && params.contrasts) {
-        // Parse contrasts CSV file
-        def contrasts_file = file(params.contrasts, checkIfExists: true)
-        ch_contrasts = Channel.fromPath(params.contrasts, checkIfExists: true)
-            .splitCsv(header: true)
-            .map { row ->
-                def contrast_meta = [id: row.id]
-                [ contrast_meta, row.variable, row.reference, row.target ]
+    if (!params.skip_te_analysis) {
+        // Parse contrasts CSV file (optional: counts-only mode runs without it)
+        if (params.contrasts) {
+            if (!has_rnaseq_samples) {
+                log.warn "TE deltaTE requires both RNA-seq and Ribo-seq samples; no RNA-seq samples found in the samplesheet. Running TE counts-only mode (featureCounts + merged counts matrix, no deltaTE)."
+                ch_contrasts = Channel.empty()
+            } else {
+                ch_contrasts = Channel.fromPath(params.contrasts, checkIfExists: true)
+                    .splitCsv(header: true)
+                    .map { row ->
+                        def contrast_meta = [id: row.id]
+                        [ contrast_meta, row.variable, row.reference, row.target ]
+                    }
             }
+        } else {
+            log.info "TE analysis: no --contrasts provided; running counts-only mode (featureCounts + merged counts matrix, no deltaTE)."
+            ch_contrasts = Channel.empty()
+        }
 
         // Get unified ORFs BED for quantification annotation
         def ch_unified_bed_for_te = params.skip_unify_orf_predictions ?

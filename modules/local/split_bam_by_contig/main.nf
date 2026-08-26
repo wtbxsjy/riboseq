@@ -38,10 +38,10 @@ process SPLIT_BAM_BY_CONTIG {
     echo "Found \${pathogen_count} pathogen contig(s) matching pattern: \${re}"
 
     if [ "\${pathogen_count}" -eq 0 ]; then
-        echo "WARNING: No pathogen contigs found matching pattern '\${re}'"
-        echo "Creating empty pathogen BAM and passing through all reads as host"
-        samtools view -b "\$bam" -o "\${prefix}.host.bam"
-        samtools view -H "\$bam" | samtools view -b -o "\${prefix}.pathogen.bam" -
+        echo "ERROR: No pathogen contigs found in the reference FASTA index matching pattern '\${re}'" >&2
+        echo "  - Confirm the pathogen sequences were concatenated into --fasta (check the .fai)" >&2
+        echo "  - Check contig naming in the FASTA against the regex (POSIX ERE, matched against the first FAI column)" >&2
+        exit 1
     else
         # Extract pathogen-mapped reads
         samtools view -b "\$bam" \$(cat "\${prefix}.pathogen_contigs.txt") -o "\${prefix}.pathogen.bam"

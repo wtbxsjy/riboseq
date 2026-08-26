@@ -353,6 +353,33 @@ This describes how to compare groups of samples between treament groups, and bet
 - `batch`: (optional) specify a variable in the sample sheet that defines sample batches
 - `pair`: (optional) specify a variable in the sample shet that defines sample pairing between RNA-seq and Ribo-seq samples. If not specified, it is assumed that the two types of sample are ordered the same.
 
+### TE analysis without contrasts (counts-only mode)
+
+`--contrasts` is optional: without it the pipeline still runs featureCounts quantification and produces the merged counts matrix, but skips the DESeq2 deltaTE step. The same counts-only mode applies automatically when the samplesheet contains no `rnaseq` samples.
+
+## Pathogen dual-genome analysis (host + pathogen)
+
+For host-pathogen studies (e.g. infection models), the pipeline supports aligning against a combined host + pathogen reference and quantifying known pathogen genes.
+
+### Scope
+
+The pathogen side is **TE/known-gene quantification only**: pathogen BAMs are split from the combined alignment, filtered, and quantified with featureCounts against the pathogen annotation (counts matrix + optional deltaTE). No de novo ORF prediction runs on the pathogen side.
+
+### Parameters
+
+- `--pathogen_fasta`: pathogen genome FASTA (validation reference; see preparation below)
+- `--pathogen_gtf`: pathogen annotation GTF/GFF3
+- `--pathogen_contig_pattern`: POSIX regex matching pathogen contig names, e.g. `'^NC_045512'`
+- `--skip_pathogen_analysis`: skip BAM splitting and pathogen TE quantification entirely
+- `--skip_te_analysis_pathogen`: keep splitting but skip pathogen TE quantification
+
+### Reference preparation
+
+1. **Pre-concatenate** the host and pathogen FASTA files and pass the combined file via `--fasta`. Do not use `--additional_fasta`: its auto-generated GTF (exon-only features) breaks RiboseQC.
+2. Keep `--gtf` host-only so host ORF prediction tools and RiboseQC are not polluted by pathogen transcripts (prokaryotic pathogens do not need splice-aware alignment).
+3. `--pathogen_gtf` must contain `exon` and/or `CDS` features with a transcript-level ID attribute (`transcript_id` for GTF, `ID=` for GFF3). RefSeq GTF and Prokka GFF3 both work; seqnames must exactly match the contigs in the combined `--fasta`.
+4. The pipeline errors out if `--pathogen_contig_pattern` matches no contigs in the reference index.
+
 ## Running the pipeline
 
 The typical command for running the pipeline is as follows:

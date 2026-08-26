@@ -651,22 +651,22 @@
           "type": "string",
           "default": null,
           "fa_icon": "fas fa-virus",
-          "description": "Pathogen genome FASTA file, used as annotation for pathogen-specific ORF prediction.",
-          "help_text": "Provide the pathogen (e.g., virus) FASTA genome to enable pathogen-specific ORF prediction. Must be used together with --pathogen_gtf and --pathogen_contig_pattern."
+          "description": "Pathogen genome FASTA file (validation reference for dual-genome analysis).",
+          "help_text": "The pathogen sequences must already be concatenated into the reference passed via --fasta (pre-concatenate host+pathogen FASTA; see docs). This file validates the pathogen reference and is required when --pathogen_contig_pattern is set. Pathogen side is TE/known-gene quantification only - no de novo ORF prediction."
         },
         "pathogen_gtf": {
           "type": "string",
           "default": null,
           "fa_icon": "fas fa-file-alt",
-          "description": "Pathogen annotation GTF file for ORF quantification and prediction.",
-          "help_text": "Provide the pathogen GTF annotation file. Required when --pathogen_contig_pattern is set."
+          "description": "Pathogen annotation GTF/GFF3 for known-gene quantification (featureCounts counts + optional deltaTE).",
+          "help_text": "Required when --pathogen_contig_pattern is set. Must contain exon and/or CDS features with a transcript-level ID attribute (GTF transcript_id or GFF3 ID), e.g. RefSeq GTF or Prokka GFF3. Seqnames must match the pathogen contigs in the combined --fasta exactly."
         },
         "pathogen_contig_pattern": {
           "type": "string",
           "default": null,
           "fa_icon": "fas fa-filter",
           "description": "Regex pattern to identify pathogen contigs in the combined BAM (e.g. '^NC_045512').",
-          "help_text": "Setting this parameter activates dual-genome analysis. After alignment to the combined host+pathogen reference, reads on contigs matching this pattern are split into pathogen-specific BAMs for separate downstream analysis. The pathogen genome should be included in the reference via --additional_fasta."
+          "help_text": "Setting this parameter activates dual-genome analysis. After alignment to the combined host+pathogen reference, reads on contigs matching this POSIX ERE pattern (matched against the first FAI column) are split into pathogen-specific BAMs for separate TE quantification. Pre-concatenate host+pathogen FASTA and pass via --fasta (the --additional_fasta auto-GTF route breaks RiboseQC). The pipeline errors out if the pattern matches no contigs."
         },
         "skip_pathogen_analysis": {
           "type": [
@@ -675,8 +675,8 @@
           ],
           "default": false,
           "fa_icon": "fas fa-forward",
-          "description": "Skip all pathogen-specific downstream analysis (ORF prediction, TE analysis).",
-          "help_text": "When set, the BAM splitting step is still performed, but pathogen BAMs are not processed further. Useful when only splitting is needed.",
+          "description": "Skip all pathogen-specific analysis (BAM splitting and pathogen TE quantification).",
+          "help_text": "When set, BAM splitting is not performed and the entire BAM is treated as host.",
           "enum": [
             true,
             false,
@@ -1376,6 +1376,22 @@
           ],
           "description": "Skip translational efficiency (TE) analysis with DESeq2 deltaTE.",
           "fa_icon": "fas fa-fast-forward",
+          "enum": [
+            true,
+            false,
+            "true",
+            "false"
+          ]
+        },
+        "skip_te_analysis_pathogen": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "default": false,
+          "fa_icon": "fas fa-fast-forward",
+          "description": "Skip pathogen-side TE quantification in dual-genome mode.",
+          "help_text": "Skips featureCounts counts and deltaTE for pathogen BAMs while keeping BAM splitting and host analysis.",
           "enum": [
             true,
             false,

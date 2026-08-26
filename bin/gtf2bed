@@ -43,6 +43,8 @@ while (<IN>) {
     if ($gff) {
         # most ver 2's stick gene names in the id field
         ($id) = $f[8]=~ /\bID="([^"]+)"/;
+        # GFF3 attributes are unquoted (e.g. Prokka: ID=ABC_00001)
+        ($id) = $f[8]=~ /\bID=([^;"]+)/ if !$id && $gff == 3;
         # most ver 3's stick unquoted names in the name field
         ($id) = $f[8]=~ /\bName=([^";]+)/ if !$id && $gff == 3;
     } else {
@@ -56,7 +58,14 @@ while (<IN>) {
         # gff3 puts :\d in exons sometimes
         $id =~ s/:\d+$// if $gff == 3;
         push @{$exons{$id}}, \@f;
+        $hasexon{$id} = 1;
         # save lowest start
+        $trans{$id} = \@f if !$trans{$id};
+    } elsif ($f[2] eq 'CDS') {
+        # Prokaryotic annotations (e.g. Prokka) often have CDS rows but no exon rows.
+        # Collect CDS blocks as fallback; exon blocks take priority when both exist.
+        $id =~ s/:\d+$// if $gff == 3;
+        push @{$cds_blocks{$id}}, \@f;
         $trans{$id} = \@f if !$trans{$id};
     } elsif ($f[2] eq 'start_codon') {
         #optional, output codon start/stop as "thick" region in bed
@@ -80,10 +89,10 @@ for $id (
         my ($cds, $cde);
         ($cds, $cde) = @{$sc{$id}} if $sc{$id};
 
-        # sort by pos
+        # sort by pos; use exon blocks when present, else CDS blocks (prokaryotic fallback)
         my @ex = sort {
             $a->[3] <=> $b->[3]
-        } @{$exons{$id}};
+        } @{$hasexon{$id} ? $exons{$id} : $cds_blocks{$id}};
 
         my $beg = $ex[0][3];
         my $end = $ex[-1][4];
