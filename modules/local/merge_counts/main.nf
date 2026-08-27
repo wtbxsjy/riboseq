@@ -3,9 +3,12 @@ process MERGE_COUNTS {
     label 'process_low'
 
     conda "${moduleDir}/environment.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'oras://community.wave.seqera.io/library/r-data.table:latest' :
-        'community.wave.seqera.io/library/r-data.table:latest' }"
+    // Reuse the user-provided R container (--deseq2_container) if set; the
+    // Wave `r-data.table:latest` fallback has an unstable tag and is often gone.
+    container "${ params.deseq2_container ?:
+        ( workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+            'oras://community.wave.seqera.io/library/r-data.table:latest' :
+            'community.wave.seqera.io/library/r-data.table:latest') }"
 
     input:
     path count_files          // all *counts.tsv files from featureCounts
