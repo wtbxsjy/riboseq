@@ -76,6 +76,17 @@ plot_fold_change <- function(results_df, prefix, target_level, reference_level,
         ) |>
         filter(regulation_type != "other")
 
+    if (nrow(plot_data) == 0) {
+        # Contrasts with no classified genes (e.g. all "other") would make
+        # max() return -Inf and crash the plot — write a placeholder instead.
+        cat("  No classified genes for this contrast - writing placeholder fold-change plot\\n")
+        p_empty <- ggplot() +
+            annotate("text", x = 0, y = 0, label = "No classified genes for this contrast") +
+            theme_void()
+        ggsave(paste0(prefix, ".fold_change.png"), plot = p_empty, width = 720, height = 720, units = "px", dpi = 72)
+        return(invisible(NULL))
+    }
+
     max_val <- max(abs(c(plot_data\$lfc_rna, plot_data\$lfc_ribo)), na.rm = TRUE)
 
     # Count genes per category for legend
@@ -458,6 +469,40 @@ cat(sprintf("Filtering: %d / %d genes pass (>= %d non-zero in ribo, >= %d in rna
 
 count_table_filt <- count_table[keep, , drop = FALSE]
 if (sum(keep) < 10) stop("Too few genes after filtering — check input data quality")
+
+# Drop samples with zero counts across all filtered genes: their size factors
+# are undefined (poscounts median over an empty set -> NA), which aborts DESeq()
+# at the sizeFactors<- step. Typical for sparse count sets, e.g. pathogen genes
+# with no reads at early infection time points.
+zero_total_samples <- colnames(count_table_filt)[colSums(count_table_filt) == 0]
+if (length(zero_total_samples) > 0) {
+    warning(paste("Dropping", length(zero_total_samples),
+                  "sample(s) with zero counts on all filtered genes:",
+                  paste(zero_total_samples, collapse = ", ")))
+    keep_samples <- !colnames(count_table_filt) %in% zero_total_samples
+    count_table_filt <- count_table_filt[, keep_samples, drop = FALSE]
+    sample_sheet <- sample_sheet[!rownames(sample_sheet) %in% zero_total_samples, , drop = FALSE]
+
+    # Re-apply the gene pre-filter on the reduced sample set
+    ribo_sample_names <- rownames(sample_sheet)[sample_sheet[[opt\$seq_type_col]] == ribo_type]
+    rna_sample_names  <- rownames(sample_sheet)[sample_sheet[[opt\$seq_type_col]] == rna_type]
+    min_ribo_nonzero <- max(prefilter_min_nonzero, ceiling(length(ribo_sample_names) * prefilter_min_frac))
+    min_rna_nonzero  <- max(prefilter_min_nonzero, ceiling(length(rna_sample_names)  * prefilter_min_frac))
+    keep_ribo <- rowSums(count_table_filt[, ribo_sample_names, drop = FALSE] > 0) >= min_ribo_nonzero
+    keep_rna  <- rowSums(count_table_filt[, rna_sample_names, drop = FALSE] > 0) >= min_rna_nonzero
+    count_table_filt <- count_table_filt[keep_ribo & keep_rna, , drop = FALSE]
+    cat(sprintf("After dropping zero-count samples: %d samples, %d genes remain\\n",
+                ncol(count_table_filt), nrow(count_table_filt)))
+}
+
+# Guard: the interaction model needs >= 2 samples in every seq_type x contrast cell
+cell_counts <- table(sample_sheet[[opt\$seq_type_col]], sample_sheet[[opt\$contrast_variable]])
+if (any(cell_counts < 2)) {
+    stop(paste("Degenerate design after sample filtering - each seq_type x",
+               opt\$contrast_variable, "cell needs >= 2 samples, got:\\n",
+               paste(capture.output(print(cell_counts)), collapse = "\\n")))
+}
+if (nrow(count_table_filt) < 10) stop("Too few genes after filtering — check input data quality")
 
 dds_combined <- DESeqDataSetFromMatrix(
     countData = as.matrix(count_table_filt),
