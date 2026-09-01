@@ -65,6 +65,10 @@ workflow TE_ANALYSIS {
                 def meta = [id: 'merged']
                 [meta, samplesheet, counts]
             }
+            // MERGE_COUNTS emits exactly once; .first() converts to a value channel
+            // so the single merged matrix broadcasts to EVERY contrast instead of the
+            // racy queue x queue pairing (which silently formed only the first task).
+            .first()
 
         DESEQ2_DELTATE(
             ch_contrasts,

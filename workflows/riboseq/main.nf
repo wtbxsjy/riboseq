@@ -937,33 +937,33 @@ workflow RIBOSEQ {
             def unify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
 
             ch_ribotish_list = (params.skip_ribotish ? Channel.value([]) : ch_ribotish_predictions.map { meta, file -> file }.collect())
-                .map { it ?: [] }
+                .ifEmpty([])
             ch_ribotricer_list = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
-                .map { it ?: [] }
+                .ifEmpty([])
             ch_ribocode_list = (can_run_ribocode ? ch_ribocode_gtf.map { meta, file -> file }.collect() : Channel.value([]))
-                .map { it ?: [] }
+                .ifEmpty([])
             ch_orfquant_list = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
-                .map { it ?: [] }
+                .ifEmpty([])
             ch_price_list = (params.skip_price ? Channel.value([]) : ch_price_gtf.map { meta, file -> file }.collect())
-                .map { it ?: [] }
+                .ifEmpty([])
 
             // Collect RiboseQC P-site bedgraph files for unified P-site statistics
             // Each sample produces two bedgraph files: *_P_sites_plus.bedgraph and *_P_sites_minus.bedgraph
-            ch_psites_bedgraph = params.skip_riboseqc ? 
+            ch_psites_bedgraph = params.skip_riboseqc ?
                 Channel.value([]) :
                 RIBOSEQC_POSTFILTER.out.psites_bedgraph
                     .map { meta, files -> files }
                     .flatten()
                     .collect()
-                    .map { it ?: [] }
-            
+                    .ifEmpty([])
+
             // Collect sample names from RiboseQC output
             ch_sample_list = params.skip_riboseqc ?
                 Channel.value([]) :
                 RIBOSEQC_POSTFILTER.out.psites_bedgraph
                     .map { meta, files -> meta.id }
                     .collect()
-                    .map { it ?: [] }
+                    .ifEmpty([])
 
             // Combine five channels with robust handling for nested or flat structures
             ch_unify_inputs = ch_ribotish_list
@@ -1079,19 +1079,19 @@ workflow RIBOSEQ {
             } else {
                 // Re-use the same input channel construction as the unified path
                 def ch_ribotish_list_pt = (params.skip_ribotish ? Channel.value([]) : ch_ribotish_predictions.map { meta, file -> file }.collect())
-                    .map { it ?: [] }
+                    .ifEmpty([])
                 def ch_ribotricer_list_pt = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
-                    .map { it ?: [] }
+                    .ifEmpty([])
                 def ch_ribocode_list_pt = (can_run_ribocode ? ch_ribocode_gtf.map { meta, file -> file }.collect() : Channel.value([]))
-                    .map { it ?: [] }
+                    .ifEmpty([])
                 def ch_orfquant_list_pt = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
-                    .map { it ?: [] }
+                    .ifEmpty([])
                 def ch_psites_bedgraph_pt = params.skip_riboseqc ?
                     Channel.value([]) :
-                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> files }.flatten().collect().map { it ?: [] }
+                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> files }.flatten().collect().ifEmpty([])
                 def ch_sample_list_pt = params.skip_riboseqc ?
                     Channel.value([]) :
-                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> meta.id }.collect().map { it ?: [] }
+                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> meta.id }.collect().ifEmpty([])
 
                 def ch_unify_inputs_pt = ch_ribotish_list_pt
                     .combine(ch_ribotricer_list_pt)
