@@ -169,7 +169,7 @@ process UNIFY_ORF_PREDICTIONS {
                 --fasta ${fasta} \\
                 --output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads 2 \\
+                --threads ${task.cpus} \\
                 --frame-merge-min-overlap ${frame_merge_min_overlap} \\
                 ${no_frame_merge} \\
                 ${seq_cluster} \\
@@ -188,7 +188,7 @@ process UNIFY_ORF_PREDICTIONS {
                 --fasta ${fasta} \\
                 --output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads 2 \\
+                --threads ${task.cpus} \\
                 --frame-merge-min-overlap ${frame_merge_min_overlap} \\
                 ${no_frame_merge} \\
                 ${seq_cluster} \\
@@ -415,7 +415,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
                 --output ${prefix} \\
                 --per-tool-output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads 2 \\
+                --threads ${task.cpus} \\
                 --no-frame-merge \\
                 ${ribotish_arg} \\
                 ${ribotricer_arg} \\
@@ -433,7 +433,7 @@ process UNIFY_ORF_PREDICTIONS_PER_TOOL {
                 --output ${prefix} \\
                 --per-tool-output ${prefix} \\
                 --min_len ${min_len} \\
-                --threads 2 \\
+                --threads ${task.cpus} \\
                 --no-frame-merge \\
                 ${ribotish_arg} \\
                 ${ribotricer_arg} \\
