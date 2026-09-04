@@ -949,9 +949,12 @@ workflow RIBOSEQ {
 
             // Collect RiboseQC P-site bedgraph files for unified P-site statistics
             // Each sample produces two bedgraph files: *_P_sites_plus.bedgraph and *_P_sites_minus.bedgraph
+            // Source: RIBOSEQC_PSITES_ALL (readlength_choice_method="all") which always
+            // emits bedgraphs; RIBOSEQC_ANALYSIS ("max_coverage") skips P-sites positions
+            // when the max-coverage read length fails the frame-preference filter.
             ch_psites_bedgraph = params.skip_riboseqc ?
                 Channel.value([]) :
-                RIBOSEQC_POSTFILTER.out.psites_bedgraph
+                RIBOSEQC_POSTFILTER.out.psites_bedgraph_all
                     .map { meta, files -> files }
                     .flatten()
                     .collect()
@@ -960,7 +963,7 @@ workflow RIBOSEQ {
             // Collect sample names from RiboseQC output
             ch_sample_list = params.skip_riboseqc ?
                 Channel.value([]) :
-                RIBOSEQC_POSTFILTER.out.psites_bedgraph
+                RIBOSEQC_POSTFILTER.out.psites_bedgraph_all
                     .map { meta, files -> meta.id }
                     .collect()
                     .ifEmpty([])
@@ -1088,10 +1091,10 @@ workflow RIBOSEQ {
                     .ifEmpty([])
                 def ch_psites_bedgraph_pt = params.skip_riboseqc ?
                     Channel.value([]) :
-                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> files }.flatten().collect().ifEmpty([])
+                    RIBOSEQC_POSTFILTER.out.psites_bedgraph_all.map { meta, files -> files }.flatten().collect().ifEmpty([])
                 def ch_sample_list_pt = params.skip_riboseqc ?
                     Channel.value([]) :
-                    RIBOSEQC_POSTFILTER.out.psites_bedgraph.map { meta, files -> meta.id }.collect().ifEmpty([])
+                    RIBOSEQC_POSTFILTER.out.psites_bedgraph_all.map { meta, files -> meta.id }.collect().ifEmpty([])
 
                 def ch_unify_inputs_pt = ch_ribotish_list_pt
                     .combine(ch_ribotricer_list_pt)

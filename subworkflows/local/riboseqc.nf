@@ -5,6 +5,7 @@
 
 include { RIBOSEQC_PREPAREANNOTATION     } from '../../modules/local/riboseqc/prepareannotation/main'
 include { RIBOSEQC_ANALYSIS              } from '../../modules/local/riboseqc/analysis/main'
+include { RIBOSEQC_PSITES_ALL            } from '../../modules/local/riboseqc/psites_all/main'
 include { EXTRACT_RL_CUTOFF              } from '../../modules/local/extract_rl_cutoff/main'
 include { PREPARE_FOR_ORFQUANT_CORRECTED } from '../../modules/local/prepare_for_orfquant/main'
 
@@ -36,6 +37,22 @@ workflow RIBOSEQC {
         ch_fasta
     )
     ch_versions = ch_versions.mix(RIBOSEQC_ANALYSIS.out.versions)
+
+    //
+    // P-site quantification pass with readlength_choice_method="all".
+    // RIBOSEQC_ANALYSIS ("max_coverage") skips P-sites positions when the
+    // max-coverage read length fails the frame-preference filter, so its
+    // *_P_sites_*.bedgraph output is missing for such samples (e.g. all
+    // PRJEB26593 Ribo-seq samples: RL29 frame_preference 47.1% < 50%).
+    // This pass always emits per-sample P_sites bedgraphs (one plus / one
+    // minus file) for the unified ORF expression statistics.
+    //
+    RIBOSEQC_PSITES_ALL (
+        ch_bam,
+        RIBOSEQC_PREPAREANNOTATION.out.annotation,
+        ch_fasta
+    )
+    ch_versions = ch_versions.mix(RIBOSEQC_PSITES_ALL.out.versions)
 
     // Initialize output channels
     ch_orfquant_final = Channel.empty()
@@ -135,6 +152,7 @@ workflow RIBOSEQC {
     orfquant_orig   = RIBOSEQC_ANALYSIS.out.orfquant             // channel: [ val(meta), path(orfquant) ] - Original
     coverage        = RIBOSEQC_ANALYSIS.out.coverage             // channel: [ val(meta), path(bedgraph) ]
     psites_bedgraph = RIBOSEQC_ANALYSIS.out.psites_bedgraph      // channel: [ val(meta), path(bedgraph) ]
+    psites_bedgraph_all = RIBOSEQC_PSITES_ALL.out.psites_bedgraph // channel: [ val(meta), path(bedgraph) ] - always emitted (all read lengths)
     psites_calcs    = RIBOSEQC_ANALYSIS.out.psites_calcs         // channel: [ val(meta), path(psites_calcs) ]
     rl_cutoff       = ch_rl_cutoff                               // channel: [ val(meta), path(rl_cutoff) ] - Only if correction enabled
     junctions       = RIBOSEQC_ANALYSIS.out.junctions            // channel: [ val(meta), path(junctions) ]
