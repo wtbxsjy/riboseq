@@ -2817,6 +2817,22 @@ def main(argv=None):
             print("Note: per-sample expression outputs not available (preload mode or no bedgraph data).",
                   file=sys.stderr)
 
+    # Ensure expression output files always exist to satisfy the module output
+    # contract: when no per-sample bedgraph data is available (e.g. RiboseQC
+    # success path emits no P_sites bedgraphs), write header-only files so the
+    # UNIFY_ORF_PREDICTIONS task does not fail on missing outputs and downstream
+    # EXPRESSION_QUANT channels do not starve.
+    summary_path = f"{args.output}_expression_summary.tsv"
+    rpkm_path = f"{args.output}_expression_rpkm_tpm.tsv"
+    if not os.path.exists(summary_path):
+        with open(summary_path, 'w') as f:
+            f.write('\t'.join(["orf_id", "chrom", "start", "end", "strand",
+                               "total_reads", "n_expressed_samples"]) + '\n')
+    if not os.path.exists(rpkm_path):
+        with open(rpkm_path, 'w') as f:
+            f.write('\t'.join(["orf_id", "chrom", "start", "end", "strand",
+                               "orf_length", "orf_length_kb"]) + '\n')
+
     if skip_stage3:
         annotate_sequences_and_cds(final_list, use_parallel, num_workers, genome_fasta, gtf_index)
         cds_overlap_count = sum(1 for c in final_list if c.is_cds_overlap)
