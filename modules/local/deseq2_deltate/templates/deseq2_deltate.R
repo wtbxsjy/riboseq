@@ -504,9 +504,15 @@ if (any(cell_counts < 2)) {
 }
 if (nrow(count_table_filt) < 10) stop("Too few genes after filtering — check input data quality")
 
+# Fit the interaction model on THIS contrast's two groups only, so the single
+# interaction coefficient tests this contrast's TE change. With all groups in
+# one model, the first interaction coefficient (the first non-reference group)
+# was reused for every contrast, producing identical DTEG lists across contrasts.
+contrast_levels <- c(opt\$reference_level, opt\$target_level)
+contrast_samples <- rownames(sample_sheet)[sample_sheet[[opt\$contrast_variable]] %in% contrast_levels]
 dds_combined <- DESeqDataSetFromMatrix(
-    countData = as.matrix(count_table_filt),
-    colData = sample_sheet,
+    countData = as.matrix(count_table_filt[, contrast_samples, drop = FALSE]),
+    colData = droplevels(sample_sheet[contrast_samples, , drop = FALSE]),
     design = design_formula
 )
 dds_combined <- DESeq(dds_combined, fitType = opt\$fit_type, parallel = (opt\$cores > 1),
