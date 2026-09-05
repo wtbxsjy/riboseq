@@ -229,16 +229,21 @@ plot_heatmap <- function(dds_combined, gene_lists, res_delta_te, sample_sheet, n
 
     mat_scaled <- t(scale(t(assay(vsd_combined)[top_genes, ])))
 
+    # The combined model is fit on the contrast's two groups only, so the
+    # annotation must match the matrix columns (contrast samples), not the
+    # full sample sheet.
+    hm_samples <- sample_sheet[colnames(mat_scaled), , drop = FALSE]
+
     # Export underlying heatmap data
     export_plot_data(mat_scaled, paste0(prefix, ".heatmap_zscores.tsv"), id_col = "gene_id")
-    sample_annotations <- sample_sheet |>
+    sample_annotations <- hm_samples |>
         rownames_to_column("sample") |>
         select(sample, all_of(c(contrast_variable, seq_type_col)))
     export_plot_data(sample_annotations, paste0(prefix, ".heatmap_annotations.tsv"))
 
     ha <- HeatmapAnnotation(
-        Condition = sample_sheet[[contrast_variable]],
-        SeqType = sample_sheet[[seq_type_col]]
+        Condition = hm_samples[[contrast_variable]],
+        SeqType = hm_samples[[seq_type_col]]
     )
 
     png(paste0(prefix, ".heatmap.png"), width = 1000, height = 1200, units = "px")
