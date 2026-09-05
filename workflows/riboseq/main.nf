@@ -936,16 +936,25 @@ workflow RIBOSEQ {
         } else {
             def unify_prefix = (params.unify_orf_predictions_prefix ?: 'unified_orfs').tokenize('/').last()
 
+            // Sort collected file lists by name: NF task hashes are order-sensitive
+            // to multi-file channel lists, and .collect() order is nondeterministic
+            // per session — without the sort, UNIFY_ORF_PREDICTIONS (and every
+            // downstream consumer) re-runs on every -resume.
             ch_ribotish_list = (params.skip_ribotish ? Channel.value([]) : ch_ribotish_predictions.map { meta, file -> file }.collect())
                 .ifEmpty([])
+                .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
             ch_ribotricer_list = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
                 .ifEmpty([])
+                .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
             ch_ribocode_list = (can_run_ribocode ? ch_ribocode_gtf.map { meta, file -> file }.collect() : Channel.value([]))
                 .ifEmpty([])
+                .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
             ch_orfquant_list = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
                 .ifEmpty([])
+                .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
             ch_price_list = (params.skip_price ? Channel.value([]) : ch_price_gtf.map { meta, file -> file }.collect())
                 .ifEmpty([])
+                .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
 
             // Collect RiboseQC P-site bedgraph files for unified P-site statistics
             // Each sample produces two bedgraph files: *_P_sites_plus.bedgraph and *_P_sites_minus.bedgraph
@@ -959,6 +968,7 @@ workflow RIBOSEQ {
                     .flatten()
                     .collect()
                     .ifEmpty([])
+                    .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
 
             // Collect sample names from RiboseQC output
             ch_sample_list = params.skip_riboseqc ?
@@ -967,6 +977,7 @@ workflow RIBOSEQ {
                     .map { meta, files -> meta.id }
                     .collect()
                     .ifEmpty([])
+                    .map { ids -> (ids instanceof List ? ids : [ids]).sort() }
 
             // Combine five channels with robust handling for nested or flat structures
             ch_unify_inputs = ch_ribotish_list
@@ -1081,20 +1092,27 @@ workflow RIBOSEQ {
                 log.warn "Per-tool ORF classification is enabled but no ORF prediction tool ran; skipping."
             } else {
                 // Re-use the same input channel construction as the unified path
+                // Sorted for hash determinism (see unified-path comment above)
                 def ch_ribotish_list_pt = (params.skip_ribotish ? Channel.value([]) : ch_ribotish_predictions.map { meta, file -> file }.collect())
                     .ifEmpty([])
+                    .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
                 def ch_ribotricer_list_pt = (params.skip_ribotricer ? Channel.value([]) : ch_ribotricer_orfs.map { meta, file -> file }.collect())
                     .ifEmpty([])
+                    .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
                 def ch_ribocode_list_pt = (can_run_ribocode ? ch_ribocode_gtf.map { meta, file -> file }.collect() : Channel.value([]))
                     .ifEmpty([])
+                    .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
                 def ch_orfquant_list_pt = ((params.skip_orfquant || params.skip_riboseqc) ? Channel.value([]) : ch_orfquant_gtf.map { meta, file -> file }.collect())
                     .ifEmpty([])
+                    .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
                 def ch_psites_bedgraph_pt = params.skip_riboseqc ?
                     Channel.value([]) :
                     RIBOSEQC_POSTFILTER.out.psites_bedgraph_all.map { meta, files -> files }.flatten().collect().ifEmpty([])
+                        .map { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
                 def ch_sample_list_pt = params.skip_riboseqc ?
                     Channel.value([]) :
                     RIBOSEQC_POSTFILTER.out.psites_bedgraph_all.map { meta, files -> meta.id }.collect().ifEmpty([])
+                        .map { ids -> (ids instanceof List ? ids : [ids]).sort() }
 
                 def ch_unify_inputs_pt = ch_ribotish_list_pt
                     .combine(ch_ribotricer_list_pt)
@@ -1462,18 +1480,21 @@ workflow RIBOSEQ {
                 [ [id: orf_prefix], bed_file, meta_file ]
             }
 
-        // Fallback channels for optional tools (use empty list if tool was skipped)
-        ch_orf_qc_ribocode_safe    = ch_orf_qc_ribocode.ifEmpty([])
-        ch_orf_qc_psites_safe      = ch_orf_qc_psites.ifEmpty([])
-        ch_orf_qc_rw_psite_safe    = ch_orf_qc_rw_psite.ifEmpty([])
-        ch_orf_qc_rw_region_safe   = ch_orf_qc_rw_region.ifEmpty([])
-        ch_orf_qc_ribotricer_safe  = ch_orf_qc_ribotricer.ifEmpty([])
-        ch_orf_qc_ribotish_safe    = ch_orf_qc_ribotish.ifEmpty([])
-        ch_orf_qc_price_safe       = ch_orf_qc_price.ifEmpty([])
-        ch_orf_qc_orfquant_safe    = ch_orf_qc_orfquant.ifEmpty([])
+        // Fallback channels for optional tools (use empty list if tool was skipped).
+        // Sorted by name for hash determinism — ORF_QC takes multi-file lists,
+        // so unsorted .collect() order made its task hash change every session.
+        def sort_by_name = { files -> (files instanceof List ? files : [files]).sort { a, b -> a.name <=> b.name } }
+        ch_orf_qc_ribocode_safe    = ch_orf_qc_ribocode.ifEmpty([]).map(sort_by_name)
+        ch_orf_qc_psites_safe      = ch_orf_qc_psites.ifEmpty([]).map(sort_by_name)
+        ch_orf_qc_rw_psite_safe    = ch_orf_qc_rw_psite.ifEmpty([]).map(sort_by_name)
+        ch_orf_qc_rw_region_safe   = ch_orf_qc_rw_region.ifEmpty([]).map(sort_by_name)
+        ch_orf_qc_ribotricer_safe  = ch_orf_qc_ribotricer.ifEmpty([]).map(sort_by_name)
+        ch_orf_qc_ribotish_safe    = ch_orf_qc_ribotish.ifEmpty([]).map(sort_by_name)
+        ch_orf_qc_price_safe       = ch_orf_qc_price.ifEmpty([]).map(sort_by_name)
+        ch_orf_qc_orfquant_safe    = ch_orf_qc_orfquant.ifEmpty([]).map(sort_by_name)
         ch_orf_qc_ribo_offset_safe = ch_orf_qc_ribotish_offset.ifEmpty(
             ch_orf_qc_rw_psite.ifEmpty([])
-        )
+        ).map(sort_by_name)
 
         ORF_QC(
             ch_orf_qc_unified,
