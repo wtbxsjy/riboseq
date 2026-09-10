@@ -44,3 +44,12 @@ docs/snakemake-migration-plan.md
 
 # tutorial
 tutorial_outputs/Rplots.pdf
+
+# R 默认绘图输出（脚本在工作目录直接生成，非产物）
+Rplots.pdf
+
+# 本地运行残留
+pipeline_run.pid
+
+# 演示材料（自建 slides 项目，含 node_modules）
+slides/
