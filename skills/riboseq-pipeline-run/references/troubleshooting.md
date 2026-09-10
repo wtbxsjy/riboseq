@@ -128,3 +128,30 @@ cat /sys/fs/cgroup/memory.max    # sandbox 内存上限可能远小于宿主
 | `-resume` 从头重跑 | 检查是否误用 `bash run_pipeline.sh -resume`（参数被丢弃）；手动复制命令加 `-resume` |
 | 结果目录中间产物脏了 | 清 `result/orf_unification orf orf_classification expression_quant` 强制重跑下游 |
 | 全量重跑 | `rm -rf process/work process/.nextflow`（谨慎：丢全部缓存） |
+
+## 10. contig 命名不一致 → 某工具的 ORF 全零 / 序列全 N（PRICE 实例）
+
+**症状**：unify 完成后某个工具的 ORF 在 psite 表达矩阵里全为 0——PRJEB26593 实测
+PRICE 327,119 条（= 26.9% of 1,215,479）**全部**如此，metadata 里
+`total_psites > 0` 占 0.00%（其他工具 99.98%）；且这些 ORF 的 `sequence` 列全是 `N`
+（AMP 打分等下游不可用）。
+
+**根因**：该工具的输出 contig 名与参考 FASTA/BAM 不一致。PRICE（GEDI）用 Ensembl
+风格（`1` … `X`,`Y`,`MT`），其余 4 工具与参考都是 `chr` 前缀 → featureCounts 匹配不到
+contig、`extract_sequence()` 的 `genome_fasta[cand.chrom]` 取不到序列、与其他工具同名
+坐标的 ORF 也永远 exact-match 不上。反证：补上 `chr` 前缀后单样本 55.1% 的 PRICE ORF
+有 ≥1 P-site（其他工具 63.5%）——是命名问题不是没信号。
+
+**诊断**：`zcat result/orf_unification/unified_orfs.bed.gz | cut -f1 | sort -u`；
+或 `cut -f2,10,16 unified_orfs.metadata.tsv | awk -F'\t' 'NR>1{...}'` 按 tools 列统计
+`total_psites>0` 的比例。
+
+**处置**：2026-09-10 起 `scripts/unify_orf_predictions.py` 在解析后、合并/查表/取序列前
+用参考命名自动归一化（`_make_chrom_normalizer`，幂等，GL/KI 脚手架不受影响）。修好后
+必须重跑 UNIFY，**ORF ID 会整体重排**，下游 post_analysis 的 pass list 需按坐标重映射。
+
+**相关**：`QUANTIFY_ORFS` 用 featureCounts 唯一分配，在高度重叠的 unified ORF 注释下会
+把 ~88% 的 reads 判为 ambiguous（gotcha 30），使 TE/deltaTE 只覆盖极少数 ORF；ORF 级
+DE 需在同样参数上加 `-O`（见 riboseq-quant-te skill §5）。
+| 某工具 ORF 定量全 0 / 序列全 `N` | contig 命名与参考不一致 → §10（PRICE 缺 `chr` 前缀） |
+| TE/deltaTE 只覆盖极少数 ORF | featureCounts 唯一分配在重叠注释下丢 88% reads → §10 |

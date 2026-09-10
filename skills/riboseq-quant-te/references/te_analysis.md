@@ -91,6 +91,26 @@ ceiling(n_ribo × prefilter_min_frac))`，ribo 与 rna 两侧都达标才保留�
 5. **容器**：`containers/Singularity.r_te_analysis.def`（R 4.5.3 + DESeq2, apeglm,
    ComplexHeatmap）；构建 `apptainer build deseq2_deltate.sif
    containers/Singularity.r_te_analysis.def`
+6. **唯一分配计数在重叠 ORF 注释下失效**（2026-09-10 实测，CLAUDE.md gotcha 30）：
+   `QUANTIFY_ORFS` 的 featureCounts 默认唯一分配；unified ORF 注释极度重叠
+   （1,215,479 ORF → 20,612 簇，99.5% 有重叠伙伴）→ 88.3% reads 落入
+   `Unassigned_Ambiguity`，13,552 条 QC 通过 ORF 仅 1,664 条有计数。ORF 级 DE 必须
+   加 `-O`（`-F SAF -t exon -g GeneID -s 0 --minOverlap 1 -O`，其余与 TE 一致），
+   语义是"该 ORF 区域内的 reads 数"，samtools 区间计数已验证一致；覆盖率 99.7–100%。
+   绝对值放大 ≈27× 且同簇不独立；`--fraction` 敏感性 r=0.948（DESeq2 拒非整数矩阵）。
+7. **上游 PRICE contig 命名**：PRICE ORF 缺 `chr` 前缀 → counts/psites 恒 0，
+   DE 集合里完全没有这条支线（见 riboseq-orf-analysis skill 坑速查 #7）。
+
+## 手动 ORF 级 DE（复用 TE 定量逻辑）
+
+参考实现 `post_analysis/PRJEB26593/de_quant/run_orf_de.R`（PRJEB26593 感染时间序列）：
+
+1. featureCounts 按 TE 的注释/BAM/参数 + `-O` 计数（ribo 用 `*.sorf.filtered.bam`，
+   rna 用 `*.host.bam`），24 样本各出一个 `{sample}_counts.tsv`；
+2. 检验空间 = QC 通过集（如 Stage2 50,214），逐对比把样本子集到两组（3×ref + 3×target）；
+3. `DESeqDataSetFromMatrix` + `DESeq(sfType="poscounts")` + `results(contrast=c("group", t, ref))`；
+4. 预过滤沿用 TE 规则 `≥ max(te_prefilter_min_nonzero, ceil(frac × N))` 非零样本；
+5. 无 apeglm 时 `lfcShrink(type="normal")`（本地 R 4.5.2 无 apeglm；模板默认仍是 apeglm）。
 
 ## 手工单对比模板
 

@@ -114,6 +114,18 @@ sample_sheet.csv）→ `DESEQ2_DELTATE`。
 （grep `ribo|rp|fp` / `rna|mrna|total|lncrna`）；`sfType="poscounts"`；
 交互项系数即 TE。
 
+⚠️ **ORF 级定量的致命细节（2026-09-10 实测，CLAUDE.md gotcha 30）**：
+`QUANTIFY_ORFS` 的 featureCounts 是**唯一分配**，而 unified ORF 注释极度重叠
+（PRJEB26593：1,215,479 ORF → 20,612 个重叠簇，99.5% 的 ORF 至少与 1 条重叠）→
+**88.3% 的 reads 被判 `Unassigned_Ambiguity` 丢弃**（ERR2603016：assigned 259,683 /
+ambiguity 6,074,672），13,552 条 QC 通过的 ORF 里只有 1,664 条（12.3%）拿得到计数——
+"被定量到"由位点拥挤程度而非翻译与否决定。**做 ORF 级 DE 时必须在同样的注释/BAM/参数
+上加 `-O`**（一条 read 计入覆盖它的每个 ORF，等于"该 ORF 区域内的 reads 数"，已用
+samtools 区间计数验证一致），覆盖率恢复 99.7–100%。代价：绝对值放大（≈27×，不可与
+TE 原矩阵比）、同簇 ORF 计数共享 → DE 不独立（密集区慎用）。`-O --fraction` 可作敏感性
+（per-ORF log2FC r=0.948，4.2% ORF |ΔLFC|>0.5），但当前 DESeq2 拒绝非整数矩阵。
+另：上游 PRICE contig 命名坑会让整条 PRICE 支线零计数（见 riboseq-orf-analysis skill）。
+
 **关键参数**（nextflow.config L196-215）：
 `te_lfc_threshold 0.2630344`、`te_prefilter_min_nonzero 2`、`te_prefilter_min_frac 0.2`
 （预过滤防 `estimateSizeFactors: every gene contains at least one zero` 崩溃）、

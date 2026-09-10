@@ -53,6 +53,14 @@ is_cds_overlap, overlapping_genes
 - 旧坑（已修）：`.gtf.gz` 的 `endswith('.gtf')` 判断漏匹配；bash 先 gunzip 后
   Python 仍按 `.gz` 路径读
 
+**contig 命名归一化（2026-09-10 新增）**：PRICE 用 Ensembl 风格 contig 名
+（`1` … `X`,`Y`,`MT`），其余工具与参考 FASTA/BAM 用 `chr` 前缀。未归一化时 PRICE
+ORF 会全 `N` 序列、零 psite/counts、且无法与其他工具 exact-match 合并（`id_key`
+含 chrom）。`main()` 在所有文件解析完成后、合并/GTF 查表/取序列之前调用
+`_make_chrom_normalizer(gtf_index)`（基于 `GTFIndex.chrom_names` + `_chrom_aliases()`；
+幂等；GL/KI 脚手架名两侧一致故不动），并重建 `cand.id_key`（该键在 `__init__` 缓存
+了 chrom）。修复后需重跑 UNIFY，**ORF ID 会整体重排**。
+
 ## stats.txt 解读
 
 ```

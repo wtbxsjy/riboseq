@@ -179,6 +179,7 @@ bash skills/riboseq-orf-analysis/scripts/run_orf_in_container.sh \
 4. **PRICE/GEDI 参数**：v1.0.5 只认 `-reads/-prefix/-genomic`，`-genomic` 要 OML 绝对路径。
 5. **GENCODE 分类结果 lncRNA >90% / 只剩 2 类 biotype**：蛋白 FASTA header 版本后缀与 GTF protein_id 不匹配（`ENSP00000493376.2` vs `ENSP00000493376`）→ 2026-08-19 已修（commit 7281ecd，`_dual_key_index` 双 key 索引；FASTA 重复 key 崩溃同源）。无点号版本的物种（rice/maize）不受影响，重跑结果不变。诊断与细节 → `references/classifiers.md` §1。
 6. **unify 输入路径与后缀**：各工具按后缀推断 sample id（`infer_sample_id_from_prediction_path`），文件名不符合 `{sample}_xxx` 约定时 sample 归属错乱。
+7. **contig 命名不统一（PRICE 缺 `chr` 前缀）——整条 PRICE 支线被静默清零**（2026-09-10 实测 PRJEB26593）：PRICE（GEDI）的 `.orfs.tsv` / `_Detected_ORFs.gtf` 用 Ensembl 风格（`1`…`X`,`Y`,`MT`），其余 4 工具与参考 FASTA/BAM 都是 `chr` 前缀。后果：PRICE ORF 取序列得到全 `N`（`extract_sequence()` 直接 `fasta[cand.chrom]`）、featureCounts/psite 定量恒 0、与同名坐标的其他工具 ORF 永远合不上（`id_key` 含 chrom）——327,119/1,215,479 = **26.9% 的 ORF 被清零**（metadata `total_psites>0` 占 0.00% vs 其他工具 99.98%；补 `chr` 前缀后单样本 55.1% 有 ≥1 P-site）。**已修**（未提交）：`_make_chrom_normalizer(gtf_index)` 在解析完所有文件后、合并/查表/取序列前按参考命名归一化（幂等、基于 `_chrom_aliases()`，GL/KI 脚手架不动），并重建 `cand.id_key`。⚠️ 修复后必须重跑 UNIFY，且**所有 ORF ID 会整体重排**，post_analysis 集合需按坐标重映射；新增预测工具时先核对 contig 约定。
 
 ## 完成后
 
