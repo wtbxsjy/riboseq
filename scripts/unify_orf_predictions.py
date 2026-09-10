@@ -117,6 +117,33 @@ def _chrom_aliases(chrom: Optional[str]) -> List[str]:
     return result
 
 
+def _make_chrom_normalizer(gtf_index):
+    """Return a function mapping contig names onto the reference convention.
+
+    PRICE (GEDI) emits Ensembl-style names (``1``, ``2`` ... ``X``, ``Y``,
+    ``MT``) while the reference FASTA/BAM and the other four tools use
+    UCSC-style names (``chr1`` ... ``chrM``).  Left as-is, every PRICE ORF
+    fails FASTA/BAM lookups: all-N sequences, zero P-sites (so the ORF is
+    dropped by every downstream expression filter) and no exact-match
+    merging with the same ORF called by another tool.  Aliases cover the
+    chrM / MT / M ambiguity; unknown contigs (e.g. GL/KI scaffolds, which
+    are unprefixed in both conventions) are returned unchanged.
+    """
+    ref = set(getattr(gtf_index, 'chrom_names', None) or [])
+    if not ref:
+        return lambda chrom: chrom
+
+    def normalize(chrom):
+        if not chrom or chrom in ref:
+            return chrom
+        for alias in _chrom_aliases(chrom):
+            if alias in ref:
+                return alias
+        return chrom
+
+    return normalize
+
+
 def infer_sample_id_from_prediction_path(file_path: str, tool_suffix: str) -> str:
     """
     Recover the sample ID from an ORF-prediction filename without truncating
@@ -2640,7 +2667,25 @@ def main(argv=None):
             sample_stats[sid][key] = len(orfs)
 
     print(f"Total raw candidates: {len(all_candidates)}", file=sys.stderr)
-    
+
+    # Harmonise contig names before any merging/lookup: PRICE contributes
+    # Ensembl-style names (1, ..., MT) that never match the reference FASTA
+    # (chr1, ..., chrM) or the other tools' predictions.  Without this the
+    # PRICE ORFs get all-N sequences, zero P-sites and are silently dropped
+    # by every downstream filter (327,119 ORFs = 26.9% of the unified set).
+    chrom_normalizer = _make_chrom_normalizer(gtf_index)
+    n_chrom_renamed = 0
+    for cand in all_candidates:
+        new_chrom = chrom_normalizer(cand.chrom)
+        if new_chrom != cand.chrom:
+            cand.chrom = new_chrom
+            cand.id_key = (cand.chrom, cand.strand, cand.blocks)
+            n_chrom_renamed += 1
+    if n_chrom_renamed:
+        print(f"Contig-name harmonisation: renamed {n_chrom_renamed} candidate(s) "
+              f"to the reference convention", file=sys.stderr)
+
+
     # Print statistics before merging
     print("\n=== Input Statistics (raw, per tool and per sample) ===", file=sys.stderr)
     print("By Tool:", file=sys.stderr)
