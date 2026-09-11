@@ -81,10 +81,17 @@ Stage2 `p_site_gse_min: 9`、`p_site_pct_min: 0.5`、`p_site_pos_min: 2`、
 
 注意：`compute_psite_fast.py` 的 `p_site_pos` 恒为 0.00（只适合快速预检）；需要真实
 位置信息用 `compute_psite_purity.py`。2026-08-19 起 purity.py 的 overlap 查找已 numpy
-向量化（~20-50x，strand 过滤保留、语义与旧循环完全一致）——旧基准 rice 3.1h（394K
-ORF×23，向量化之前）已大幅过时；本机 rice（394K ORF）与 maize（660K ORF×97 样本）
-现有 psite_purity.tsv 均已是 purity.py 产出，run_all.sh 的 fast→purity 切换对它们
-重跑无行为变化。
+向量化（~20-50x）——旧基准 rice 3.1h（394K ORF×23，向量化之前）已大幅过时；本机 rice
+（394K ORF）与 maize（660K ORF×97 样本）现有 psite_purity.tsv 均已是 purity.py 产出，
+run_all.sh 的 fast→purity 切换对它们重跑无行为变化。
+⚠️ 同一次提交加的 **strand 过滤**是修复而非优化：**缺它的旧副本会把正链 bedgraph 的
+P-site 记到反链 ORF 上且不报错**（2026-09-11 在两个项目上踩过）。用前自检
+`grep -n "strand=" compute_psite_purity.py`。
+
+**另一条路径**：PRJEB26593 / GSE120762 / 人类 AMP 项目走的是**手动脚本链**（不经过
+Quarto），单步可控、可中途检查，判据与上表两级阈值相同，另加了"只对 Stage-1 子集算
+纯度"的加速（重计算降 10-20 倍，结果等价）与 FASTA 导出。命令、自检清单与三个坑见
+`references/post_analysis_workflow.md` 的「手动脚本链」一节。
 
 ## 4. 手动定量（pipeline 之外）
 

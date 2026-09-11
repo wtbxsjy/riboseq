@@ -55,9 +55,14 @@ ggribo:
      --riboseqc-dir $RIBOSEQC_DIR --output psite_purity.tsv --workers 8
    ```
    纯 Python 精确回溯（bisect + numpy），**无需 bedtools**；`--workers` 默认 8。
-   2026-08-19 起 `find_overlapping_orfs` 已 numpy 向量化（~20-50x，strand 过滤保留、
-   与旧循环语义完全一致）——旧基准 3.1h 已过时。本机 rice（394K ORF×23）与 maize
-   （660K ORF×97 样本）现有 psite_purity.tsv 均已是 purity.py 产出，重跑无行为变化。
+   2026-08-19 起 `find_overlapping_orfs` 已 numpy 向量化（~20-50x）——旧基准 3.1h 已过时。
+   本机 rice（394K ORF×23）与 maize（660K ORF×97 样本）现有 psite_purity.tsv 均已是
+   purity.py 产出，重跑无行为变化。
+   ⚠️ **同一次提交（`cd60f79`）还加入了 strand 过滤**（`find_overlapping_orfs(..., strand=)`）：
+   bedgraph 的 P-site 只匹配**同链** ORF。**更早的副本没有这个参数**，会把正链 bedgraph 的
+   P-site 同时记到反链 ORF 上，重叠密集区显著高估计数，而且**不报错**。
+   用之前先自检：`grep -n "strand=" compute_psite_purity.py` 应能看到调用点传 `strand_char`。
+   （2026-09-11 踩过：PRJEB26593 与 GSE120762 的新 post_analysis 误用了缺参数的旧副本。）
    旧 fast.py 版（bedtools map：`sort -k1,1 -k2,2n bg | bedtools map -a BED -b - -c 4
    -o sum -null 0`，strand-aware）**28 秒完成 341K ORF × 23 样本**，但 p_site_pos 恒
    0.00，仅适合快速预检。
@@ -98,6 +103,69 @@ RPM 单位，做分母无意义——曾因此踩坑后弃用）。
   运行，已过时；output/（旧单报告版）final = 6,188 行
 - 文件体量：psite_purity.tsv 209MB（121 列）、prelim_orfs.tsv 18.4MB、
   step2 日志记录了 341,026 / 207,413 两次不同规模的运行
+
+## 手动脚本链（PRJEB26593 / GSE120762 实际走的路径）
+
+2026-09-11 起仓库提供泛化的单步脚本，替代过去"每个项目拷一份改路径"的做法：
+
+```bash
+P=<project>; R=run/$P/result; O=post_analysis/$P
+
+# 1. CDS 排除 + Stage-1
+python3 scripts/post_analysis/stage1_expression_filter.py \
+  --orftype $R/orf_classification/orf_type/orftype_classification.tsv \
+  --gencode $R/orf_classification/gencode/gencode_results.orfs.out.gz \
+  --expression $R/orf_unification/unified_orfs_expression_summary.tsv \
+  --out-dir $O --prefix $P
+
+# 2. 抽 stage-1 子集 BED（**加速关键**）
+awk -F'\t' 'NR>1{print $1}' $O/${P}_stage1_passed.tsv | sort > $O/stage1_ids.txt
+zcat $R/orf_unification/unified_orfs.bed.gz \
+  | awk -F'\t' 'NR==FNR{k[$1];next} ($4 in k)' $O/stage1_ids.txt - > $O/stage1_orfs.bed
+
+# 3. P-site 纯度（用仓库版本！）
+python3 scripts/post_analysis/compute_psite_purity.py \
+  --bed $O/stage1_orfs.bed --riboseqc-dir $R/riboseqc \
+  --output $O/${P}_psite_purity.tsv --workers 12
+
+# 4. Stage-2 + 长度 + per-biotype top10%
+python3 scripts/post_analysis/stage2_psite_filter.py \
+  --purity $O/${P}_psite_purity.tsv --stage1 $O/${P}_stage1_passed.tsv \
+  --noncds $O/step1_nonCDS.tsv.gz \
+  --expression $R/orf_unification/unified_orfs_expression_summary.tsv \
+  --out-dir $O --prefix $P
+
+# 5. FASTA（每个集合三份：原始序列 + 严格 CDS 的 NA/AA）
+python3 scripts/post_analysis/extract_orfs_fasta.py \
+  --metadata $R/orf_unification/unified_orfs.metadata.tsv \
+  --ids $O/${P}_stage2_passed.tsv --out $O/${P}_stage2_orfs.fa
+#   CDS 版：extract_cds_fasta.py（按项目改路径）
+```
+
+**为什么 Stage-2 之前先抽子集**：purity 是唯一的重计算（PRJEB26593 全量 120 万 ORF = 9.5 h）。
+只扫 stage-1 子集可降到 15–55 分钟且**结果完全等价** —— stage2 只消费 stage1 的子集，
+子集外的纯度值无人读取。2026-09-11 实测：小鼠 48,803 ORF×4 样本 = 15 min；
+人类 149,764×12 = 53 min。
+
+### 落盘/拷贝脚本时的自检清单
+
+| 检查 | 命令 | 期望 |
+|---|---|---|
+| purity 有 strand 过滤 | `grep -n "strand=" compute_psite_purity.py` | 调用点传 `strand_char` |
+| CDS FASTA 长度自洽 | 看 stats 的 `n_len_mismatch_na_vs_aa` | **必须为 0** |
+| Stage-1 可复现 | 与旧 `{prefix}_stage1_passed.tsv` 比对 | 逐字节一致 |
+
+### FASTA 三种文件的区别（易混）
+
+| 文件 | 内容 | 表头 |
+|---|---|---|
+| `{p}_stage2_orfs.fa` | unify 元数据的**原始**剪接序列（含 1-2 nt 边界噪声） | `>{orf_id}::{chrom}:{start0}-{end}({strand})` |
+| `{p}_stage2_cds_na.fa` | 规范化到严格 CDS：去尾终止密码子、裁到 `3*len(AA)` | `>{orf_id} biotype={biotype_final}` |
+| `{p}_stage2_cds_aa.fa` | 翻译（去尾 `*`；**内部可有 `*`**，这些 ORF 本就不是无终止的） | 同上 |
+
+`len(NA) == 3*len(AA)` 是硬约束；`extract_cds_fasta.py` 的终止密码子剥离只有
+在 `len(s) % 3 == 0` 时才成立（CLAUDE.md gotcha 31）—— 否则会把跨在密码子网格外的
+末 3 字符误当密码子删掉。
 
 ## 四级评分框架（与二阶段过滤互补，~/riboseq/post_analysis/ 旧体系）
 
